@@ -14,11 +14,13 @@ import {
   allowedEvidenceTypes,
   evidenceDurationOptions,
   sampleAlerts,
+  sampleAuditLogs,
   sampleEvents,
   sampleEvidence,
   sampleFindings,
   sampleGaps,
   sampleHosts,
+  samplePipelineHealth,
   sampleReports,
   sampleSystem,
 } from './sample';
@@ -27,7 +29,10 @@ import type {
   EvidenceSession,
   Finding,
   Host,
+  InvestigationStatus,
   NormalizedEvent,
+  OperatorAuditLog,
+  PipelineSourceHealth,
   Report,
   ReportType,
   SystemStatus,
@@ -54,6 +59,8 @@ const db = {
   evidence: structuredClone(sampleEvidence),
   reports: structuredClone(sampleReports),
   system: structuredClone(sampleSystem),
+  auditLogs: structuredClone(sampleAuditLogs),
+  pipelineHealth: structuredClone(samplePipelineHealth),
 };
 
 let version = 0;
@@ -150,6 +157,9 @@ export const api = {
   report: (id: string) => respond<Report | null>(() => db.reports.find((r) => r.id === id) ?? null, null),
 
   system: () => respond<SystemStatus | null>(() => db.system, null),
+
+  auditLogs: () => respond<OperatorAuditLog[]>(() => [...db.auditLogs].sort(byTimeDesc((a) => a.ts)), []),
+  pipelineHealth: () => respond<PipelineSourceHealth[]>(() => db.pipelineHealth, []),
 };
 
 /* ---------------- mutations (sample implementations) ---------------- */
@@ -186,6 +196,41 @@ export const actions = {
     bump();
   },
 
+  async updateInvestigation(input: {
+    alertId: string;
+    status: InvestigationStatus;
+    note?: string;
+    author?: string;
+  }) {
+    await wait(300);
+    const alert = db.alerts.find((a) => a.id === input.alertId);
+    if (!alert) return;
+    const prevStatus = alert.investigationStatus;
+    alert.investigationStatus = input.status;
+    if (!alert.investigationNotes) alert.investigationNotes = [];
+    if (input.note && input.note.trim()) {
+      alert.investigationNotes.unshift({
+        id: `note-${Date.now()}`,
+        author: input.author || 'ops-admin',
+        ts: new Date().toISOString(),
+        note: input.note.trim(),
+        statusTransition: input.status,
+      });
+    }
+
+    db.auditLogs.unshift({
+      id: `aud-${Date.now()}`,
+      ts: new Date().toISOString(),
+      actor: input.author || 'ops-admin',
+      action: 'update_investigation',
+      targetType: 'alert',
+      targetId: alert.id,
+      summary: `Updated alert ${alert.id} status: ${prevStatus} → ${input.status}`,
+      details: { previousStatus: prevStatus, newStatus: input.status, note: input.note },
+    });
+    bump();
+  },
+
   async startEvidence(input: { hostId: string; reason: string; durationMin: number; dataTypes: string[]; linkedAlertId?: string }) {
     await wait(500);
     const now = Date.now();
@@ -203,6 +248,23 @@ export const actions = {
       linkedAlertId: input.linkedAlertId,
     };
     db.evidence.unshift(session);
+
+    db.auditLogs.unshift({
+      id: `aud-${Date.now()}`,
+      ts: new Date(now).toISOString(),
+      actor: 'ops-admin',
+      action: 'start_evidence',
+      targetType: 'evidence_session',
+      targetId: session.id,
+      summary: `Activated Emergency Evidence Mode on ${hostName(input.hostId)} (${input.durationMin}m)`,
+      details: {
+        durationMin: input.durationMin,
+        hostId: input.hostId,
+        reason: input.reason,
+        dataTypes: input.dataTypes,
+      },
+    });
+
     bump();
     return session;
   },
@@ -213,6 +275,17 @@ export const actions = {
     if (s && s.status === 'active') {
       s.status = 'stopped';
       s.endedAt = new Date().toISOString();
+
+      db.auditLogs.unshift({
+        id: `aud-${Date.now()}`,
+        ts: new Date().toISOString(),
+        actor: 'ops-admin',
+        action: 'stop_evidence',
+        targetType: 'evidence_session',
+        targetId: id,
+        summary: `Manually terminated Emergency Evidence Mode session ${id}`,
+      });
+
       bump();
     }
   },
@@ -244,6 +317,18 @@ export const actions = {
       requestedAt: new Date().toISOString(),
     };
     db.reports.unshift(report);
+
+    db.auditLogs.unshift({
+      id: `aud-${Date.now()}`,
+      ts: new Date().toISOString(),
+      actor: 'ops-admin',
+      action: 'request_report',
+      targetType: 'report',
+      targetId: report.id,
+      summary: `Requested ${input.type} security report for ${names.join(', ')}`,
+      details: { type: input.type, hostIds: input.hostIds },
+    });
+
     bump();
 
     // Simulate backend report compilation completing after 2.5s

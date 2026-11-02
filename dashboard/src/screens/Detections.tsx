@@ -5,13 +5,21 @@ import { AlertRow, FindingRow } from '../components/domain';
 import { EmptyState, QueryView } from '../components/states';
 import { Badge, Chips, Group, PageIntro, Segmented } from '../components/ui';
 import { api, hostName } from '../data/api';
-import type { FindingStatus, Severity } from '../data/types';
+import type { Confidence, FindingStatus, InvestigationStatus, Severity } from '../data/types';
 import { useQuery } from '../lib/hooks';
-import { findingStatusMeta, severityMeta, sourceLabel } from '../lib/status';
+import {
+  confidenceMeta,
+  findingStatusMeta,
+  investigationStatusMeta,
+  severityMeta,
+  sourceLabel,
+} from '../lib/status';
 import { useTimeFormat } from '../lib/time';
 
 type Tab = 'alerts' | 'checks';
 type SevFilter = 'all' | Severity;
+type ConfFilter = 'all' | Confidence;
+type InvFilter = 'all' | InvestigationStatus;
 type StatusFilter = 'all' | FindingStatus;
 
 export function DetectionsScreen() {
@@ -19,12 +27,17 @@ export function DetectionsScreen() {
   const tab = (params.get('tab') as Tab) || 'alerts';
   const host = params.get('host') || 'all';
   const sev = (params.get('sev') as SevFilter) || 'all';
+  const conf = (params.get('conf') as ConfFilter) || 'all';
+  const inv = (params.get('inv') as InvFilter) || 'all';
   const status = (params.get('status') as StatusFilter) || 'fail';
   const { when } = useTimeFormat();
 
   const set = (patch: Record<string, string>) => {
     const next = new URLSearchParams(params);
-    Object.entries(patch).forEach(([k, v]) => next.set(k, v));
+    Object.entries(patch).forEach(([k, v]) => {
+      if (v === 'all') next.delete(k);
+      else next.set(k, v);
+    });
     setParams(next, { replace: true });
   };
 
@@ -50,8 +63,8 @@ export function DetectionsScreen() {
     >
       <PageIntro>
         {tab === 'alerts'
-          ? 'Runtime Monitor alerts: deterministic rules matched on collected SSH and Nginx logs.'
-          : 'Security Checker results: read-only configuration checks run on each host.'}
+          ? 'Runtime Monitor alerts: deterministic rules matched on collected logs with separated Severity (impact) and Confidence (evidence certainty).'
+          : 'Security Checker results: read-only configuration audits run across the fleet.'}
       </PageIntro>
 
       <QueryView query={q}>
@@ -72,24 +85,57 @@ export function DetectionsScreen() {
 
           if (tab === 'alerts') {
             const list = alerts.filter(
-              (a) => (host === 'all' || a.hostId === host) && (sev === 'all' || a.severity === sev),
+              (a) =>
+                (host === 'all' || a.hostId === host) &&
+                (sev === 'all' || a.severity === sev) &&
+                (conf === 'all' || a.confidence === conf) &&
+                (inv === 'all' || a.investigationStatus === inv),
             );
             return (
               <>
-                <div className="filters">
-                  {hostSelect}
-                  <Chips<SevFilter>
-                    label="Severity"
-                    value={sev}
-                    onChange={(v) => set({ sev: v })}
-                    options={[
-                      { value: 'all', label: 'All' },
-                      { value: 'critical', label: 'Critical' },
-                      { value: 'high', label: 'High' },
-                      { value: 'medium', label: 'Medium' },
-                      { value: 'low', label: 'Low' },
-                    ]}
-                  />
+                <div className="filters filters--stacked">
+                  <div className="filters-row">
+                    {hostSelect}
+                    <Chips<SevFilter>
+                      label="Threat Impact (Severity)"
+                      value={sev}
+                      onChange={(v) => set({ sev: v })}
+                      options={[
+                        { value: 'all', label: 'All Severities' },
+                        { value: 'critical', label: 'Critical' },
+                        { value: 'high', label: 'High' },
+                        { value: 'medium', label: 'Medium' },
+                        { value: 'low', label: 'Low' },
+                      ]}
+                    />
+                  </div>
+
+                  <div className="filters-row">
+                    <Chips<ConfFilter>
+                      label="Evidence Certainty (Confidence)"
+                      value={conf}
+                      onChange={(v) => set({ conf: v })}
+                      options={[
+                        { value: 'all', label: 'All Confidence' },
+                        { value: 'confirmed', label: 'Confirmed (95%+)' },
+                        { value: 'high', label: 'High (80-94%)' },
+                        { value: 'suspected', label: 'Suspected (50-79%)' },
+                      ]}
+                    />
+
+                    <Chips<InvFilter>
+                      label="Investigation Status"
+                      value={inv}
+                      onChange={(v) => set({ inv: v })}
+                      options={[
+                        { value: 'all', label: 'All Statuses' },
+                        { value: 'new', label: 'New' },
+                        { value: 'investigating', label: 'Investigating' },
+                        { value: 'resolved', label: 'Resolved' },
+                        { value: 'false_positive', label: 'False Positive' },
+                      ]}
+                    />
+                  </div>
                 </div>
 
                 {list.length ? (
@@ -109,23 +155,37 @@ export function DetectionsScreen() {
                         <table className="desktop-table">
                           <thead>
                             <tr>
-                              <th>Rule ID & Title</th>
-                              <th>Severity</th>
+                              <th>Rule & Incident Title</th>
+                              <th>Severity (Impact)</th>
+                              <th>Confidence (Evidence)</th>
+                              <th>Investigation Status</th>
                               <th>Host</th>
                               <th>Source</th>
                               <th>Detected</th>
-                              <th>AI Status</th>
                               <th>Actions</th>
                             </tr>
                           </thead>
                           <tbody>
                             {list.map((a) => {
                               const sevMeta = severityMeta[a.severity];
+                              const confMeta = a.confidence ? confidenceMeta[a.confidence] : undefined;
+                              const invMeta = a.investigationStatus
+                                ? investigationStatusMeta[a.investigationStatus]
+                                : undefined;
+                              const isGrouped = a.grouping && a.grouping.count > 1;
+
                               return (
                                 <tr key={a.id}>
                                   <td>
                                     <Link to={`/alerts/${a.id}`} className="desktop-table__host-link">
-                                      <strong>{a.title}</strong>
+                                      <div className="table-title-line">
+                                        <strong>{a.title}</strong>
+                                        {isGrouped && (
+                                          <span className="group-count-pill">
+                                            {a.grouping!.count} occurrences
+                                          </span>
+                                        )}
+                                      </div>
                                       <span className="desktop-table__subtext mono">{a.ruleId} v{a.ruleVersion}</span>
                                     </Link>
                                   </td>
@@ -133,28 +193,23 @@ export function DetectionsScreen() {
                                     <Badge meta={sevMeta} />
                                   </td>
                                   <td>
+                                    {confMeta ? <Badge meta={confMeta} variant="soft" /> : <span className="muted">—</span>}
+                                  </td>
+                                  <td>
+                                    {invMeta ? <Badge meta={invMeta} /> : <span className="muted">—</span>}
+                                  </td>
+                                  <td>
                                     <span className="mono">{hostName(a.hostId)}</span>
                                   </td>
                                   <td>
-                                    <span className="tag">{sourceLabel[a.source]}</span>
+                                    <span className="tag">{sourceLabel[a.source] || a.source}</span>
                                   </td>
                                   <td>
                                     <span className="desktop-table__time">{when(a.detectedAt)}</span>
                                   </td>
                                   <td>
-                                    <span className={`status-indicator ${a.ai.state === 'ready' ? 'text-healthy' : 'muted'}`}>
-                                      {a.ai.state === 'ready'
-                                        ? 'Ready'
-                                        : a.ai.state === 'pending'
-                                          ? 'Pending…'
-                                          : a.ai.state === 'failed'
-                                            ? 'Failed'
-                                            : 'Not requested'}
-                                    </span>
-                                  </td>
-                                  <td>
                                     <Link to={`/alerts/${a.id}`} className="btn btn--secondary btn--sm">
-                                      <span>Details</span>
+                                      <span>Triage</span>
                                       <ChevronRight aria-hidden />
                                     </Link>
                                   </td>

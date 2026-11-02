@@ -5,6 +5,7 @@ import { Screen } from '../components/AppShell';
 import { Sheet } from '../components/Sheet';
 import { useToast } from '../components/Toast';
 import { EmptyState, QueryView, SkeletonBlock } from '../components/states';
+import { AuditLogList } from '../components/domain';
 import { Badge, Button, Chips, Group, KeyValues, Notice, Row, Section, PageIntro } from '../components/ui';
 import { actions, api, hostName } from '../data/api';
 import type { Alert, EvidenceSession, Host } from '../data/types';
@@ -20,13 +21,14 @@ export function EvidenceScreen() {
   const { dateTime } = useTimeFormat();
 
   const q = useQuery(async () => {
-    const [sessions, hosts, alerts, options] = await Promise.all([
+    const [sessions, hosts, alerts, options, auditLogs] = await Promise.all([
       api.evidence(),
       api.hosts(),
       api.alerts(),
       api.evidenceOptions(),
+      api.auditLogs(),
     ]);
-    return { sessions, hosts, alerts, options };
+    return { sessions, hosts, alerts, options, auditLogs };
   });
 
   const closeStart = () => {
@@ -43,7 +45,7 @@ export function EvidenceScreen() {
       </PageIntro>
 
       <QueryView query={q} loading={<SkeletonBlock height={220} />}>
-        {({ sessions, hosts, alerts, options }) => {
+        {({ sessions, hosts, alerts, options, auditLogs }) => {
           const active = sessions.filter((s) => s.status === 'active');
           const history = sessions.filter((s) => s.status !== 'active');
           return (
@@ -137,6 +139,11 @@ export function EvidenceScreen() {
                   ) : (
                     <EmptyState title="No previous sessions" />
                   )}
+                </Section>
+
+                {/* 6. Operator Action Audit Trail */}
+                <Section title={`Operator Action Audit Trail (${auditLogs.length})`}>
+                  <AuditLogList logs={auditLogs} />
                 </Section>
               </div>
             </div>

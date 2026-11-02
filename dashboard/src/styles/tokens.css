@@ -166,82 +166,83 @@
 }
 
 /* ================================================================
- * DARK — deep warm charcoal, amber liquid accents used sparingly
+ * DARK — crisp obsidian canvas, AEGIS jade brand, liquid amber accents
  * ================================================================ */
 [data-theme='dark'] {
   color-scheme: dark;
 
-  --color-bg: #13110f;
-  --color-surface: #1b1815;
-  --color-surface-sunken: #100e0c;
-  --color-surface-raised: #221e1a;
-  --color-border: #2f2a24;
-  --color-border-strong: #463d33;
-  --color-divider: #29241f;
+  --color-bg: #0b0f10;
+  --color-surface: #13191c;
+  --color-surface-sunken: #0c1012;
+  --color-surface-raised: #182024;
+  --color-border: #1f2a30;
+  --color-border-strong: #2c3c45;
+  --color-divider: #182227;
 
-  --color-text: #f1ece3;
-  --color-text-secondary: #bcb2a3;
-  --color-text-tertiary: #8d8375;
-  --color-text-inverse: #1a1209;
+  --color-text: #e8ecee;
+  --color-text-secondary: #9cb0b9;
+  --color-text-tertiary: #6b808a;
+  --color-text-inverse: #0b0f10;
 
-  --color-primary: #f0a03a;
-  --color-primary-hover: #f5b157;
-  --color-primary-pressed: #df8c26;
-  --color-on-primary: #1a1209;
-  --color-primary-soft: rgba(240, 160, 58, 0.13);
-  --color-primary-text: #f4ae52;
+  /* Primary: AEGIS Jade/Emerald brand representing the green owl */
+  --color-primary: #1fa768;
+  --color-primary-hover: #26c078;
+  --color-primary-pressed: #178652;
+  --color-on-primary: #071910;
+  --color-primary-soft: rgba(31, 167, 104, 0.14);
+  --color-primary-text: #26c078;
 
-  --color-accent: #f0a03a;
-  --color-accent-soft: rgba(240, 160, 58, 0.13);
+  /* Restrained liquid amber: used for alerts, emergency countdown & key highlights */
+  --color-accent: #f59e0b;
+  --color-accent-soft: rgba(245, 158, 11, 0.14);
 
-  /* Liquid amber: only on selected states, primary actions and
-     the Evidence Mode countdown. Never as a page background. */
-  --liquid-fill: linear-gradient(135deg, #f8bd55 0%, #ee8d2c 55%, #d9661d 100%);
-  --liquid-soft: radial-gradient(120% 140% at 0% 0%, rgba(248, 189, 85, 0.20) 0%, rgba(238, 141, 44, 0.10) 45%, rgba(217, 102, 29, 0.04) 100%);
-  --liquid-on: #1a1209;
+  /* Liquid amber gradient for Emergency Evidence progress & pulse */
+  --liquid-fill: linear-gradient(135deg, #fbbf24 0%, #f59e0b 55%, #d97706 100%);
+  --liquid-soft: radial-gradient(120% 140% at 0% 0%, rgba(251, 191, 36, 0.22) 0%, rgba(245, 158, 11, 0.12) 45%, rgba(217, 119, 6, 0.04) 100%);
+  --liquid-on: #120d04;
 
-  --status-healthy-fg: #74c493;
-  --status-healthy-bg: rgba(116, 196, 147, 0.11);
-  --status-healthy-border: rgba(116, 196, 147, 0.28);
+  --status-healthy-fg: #34d399;
+  --status-healthy-bg: rgba(52, 211, 153, 0.12);
+  --status-healthy-border: rgba(52, 211, 153, 0.30);
 
-  --status-info-fg: #8cb8e4;
-  --status-info-bg: rgba(140, 184, 228, 0.11);
-  --status-info-border: rgba(140, 184, 228, 0.28);
+  --status-info-fg: #60a5fa;
+  --status-info-bg: rgba(96, 165, 250, 0.12);
+  --status-info-border: rgba(96, 165, 250, 0.30);
 
-  --status-warning-fg: #e6c763;
-  --status-warning-bg: rgba(230, 199, 99, 0.11);
-  --status-warning-border: rgba(230, 199, 99, 0.28);
+  --status-warning-fg: #facc15;
+  --status-warning-bg: rgba(250, 204, 21, 0.12);
+  --status-warning-border: rgba(250, 204, 21, 0.30);
 
-  --status-high-fg: #f3955a;
-  --status-high-bg: rgba(243, 149, 90, 0.12);
-  --status-high-border: rgba(243, 149, 90, 0.30);
+  --status-high-fg: #fa8c47;
+  --status-high-bg: rgba(250, 140, 71, 0.13);
+  --status-high-border: rgba(250, 140, 71, 0.32);
 
-  --status-critical-fg: #f4837a;
-  --status-critical-bg: rgba(244, 131, 122, 0.12);
-  --status-critical-border: rgba(244, 131, 122, 0.32);
+  --status-critical-fg: #ff6b6b;
+  --status-critical-bg: rgba(255, 107, 107, 0.13);
+  --status-critical-border: rgba(255, 107, 107, 0.34);
 
-  --status-disabled-fg: #6f665b;
-  --status-disabled-bg: rgba(111, 102, 91, 0.12);
-  --status-disabled-border: rgba(111, 102, 91, 0.30);
+  --status-disabled-fg: #62727b;
+  --status-disabled-bg: rgba(98, 114, 123, 0.12);
+  --status-disabled-border: rgba(98, 114, 123, 0.30);
 
-  --status-unknown-fg: #a59b8d;
-  --status-unknown-bg: rgba(165, 155, 141, 0.10);
-  --status-unknown-border: rgba(165, 155, 141, 0.28);
+  --status-unknown-fg: #94a3b8;
+  --status-unknown-bg: rgba(148, 163, 184, 0.11);
+  --status-unknown-border: rgba(148, 163, 184, 0.28);
 
-  --gap-stripe-a: #1d1a16;
-  --gap-stripe-b: #26221d;
+  --gap-stripe-a: #12181b;
+  --gap-stripe-b: #192226;
 
-  --state-hover: rgba(241, 236, 227, 0.04);
-  --state-pressed: rgba(241, 236, 227, 0.08);
-  --focus-ring-color: #f4ae52;
+  --state-hover: rgba(232, 236, 238, 0.04);
+  --state-pressed: rgba(232, 236, 238, 0.08);
+  --focus-ring-color: #26c078;
 
   --elevation-0: none;
-  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --elevation-2: 0 -1px 0 rgba(255, 240, 220, 0.03), 0 -8px 24px rgba(0, 0, 0, 0.35);
-  --elevation-3: 0 16px 48px rgba(0, 0, 0, 0.6);
-  --scrim: rgba(0, 0, 0, 0.6);
+  --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --elevation-2: 0 -1px 0 rgba(255, 255, 255, 0.03), 0 -8px 24px rgba(0, 0, 0, 0.45);
+  --elevation-3: 0 16px 48px rgba(0, 0, 0, 0.7);
+  --scrim: rgba(0, 0, 0, 0.65);
 
   --logo-tile-bg: #fbf6f3;
-  --logo-tile-border: rgba(255, 240, 220, 0.08);
+  --logo-tile-border: rgba(255, 255, 255, 0.08);
 }
 

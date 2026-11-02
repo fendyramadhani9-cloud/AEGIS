@@ -20,12 +20,20 @@ import {
   TriangleAlert,
   CircleAlert,
   Unplug,
+  ShieldCheck,
+  CheckCircle2,
+  AlertTriangle,
+  HelpCircle,
+  AlertCircle,
+  CheckCheck,
   type LucideIcon,
 } from 'lucide-react';
 import type {
   AgentStatus,
+  Confidence,
   EvidenceStatus,
   FindingStatus,
+  InvestigationStatus,
   ReportStatus,
   Severity,
   SourceStatus,
@@ -86,10 +94,46 @@ export const evidenceStatusMeta: Record<EvidenceStatus, StatusMeta> = {
   stopped: { label: 'Stopped', tone: 'disabled', icon: CircleMinus },
 };
 
+export const confidenceMeta: Record<Confidence, StatusMeta> = {
+  confirmed: {
+    label: 'Confirmed (95%+)',
+    tone: 'healthy',
+    icon: ShieldCheck,
+    hint: 'Direct deterministic match backed by cryptographic or full syscall evidence',
+  },
+  high: {
+    label: 'High (80–94%)',
+    tone: 'high',
+    icon: CheckCircle2,
+    hint: 'Strong correlation of multiple coherent event indicators',
+  },
+  suspected: {
+    label: 'Suspected (50–79%)',
+    tone: 'warning',
+    icon: AlertTriangle,
+    hint: 'Heuristic or volumetric anomaly matching rule thresholds',
+  },
+  low: {
+    label: 'Low (<50%)',
+    tone: 'info',
+    icon: HelpCircle,
+    hint: 'Partial telemetry or single unconfirmed anomalous signal',
+  },
+};
+
+export const investigationStatusMeta: Record<InvestigationStatus, StatusMeta> = {
+  new: { label: 'New', tone: 'high', icon: AlertCircle, hint: 'Unreviewed alert requiring triage' },
+  investigating: { label: 'Investigating', tone: 'warning', icon: Clock, hint: 'Active triage under operator review' },
+  resolved: { label: 'Resolved', tone: 'healthy', icon: CheckCheck, hint: 'Confirmed incident mitigated and closed' },
+  false_positive: { label: 'False Positive', tone: 'disabled', icon: Ban, hint: 'Authorized test or benign administrative action' },
+};
+
 export const sourceLabel: Record<string, string> = {
-  'ssh-auth': 'SSH auth',
-  'nginx-access': 'Nginx access',
-  'nginx-error': 'Nginx error',
-  agent: 'Agent',
+  'ssh-auth': 'SSH auth (/var/log/auth.log)',
+  'nginx-access': 'Nginx access log',
+  'nginx-error': 'Nginx error log',
+  auditd: 'Linux Auditd (/var/log/audit/audit.log)',
+  syslog: 'System syslog (/var/log/syslog)',
+  agent: 'AEGIS Agent Core',
 };
 

@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { CircleAlert, FileText, Info, ListTree, Radio, ShieldCheck } from 'lucide-react';
 import { Screen } from '../components/AppShell';
-import { AlertRow, EvidenceBanner, FindingRow, GapRow } from '../components/domain';
+import { AlertRow, EvidenceBanner, FindingRow, GapRow, PipelineHealthWidget } from '../components/domain';
 import { EmptyState, QueryView, SkeletonBlock, SkeletonList } from '../components/states';
 import { Badge, Group, LinkButton, Notice, Row, Section, SectionLink } from '../components/ui';
 import { api, hostName } from '../data/api';
@@ -15,7 +15,7 @@ const DAY = 24 * 3600_000;
 export function OverviewScreen() {
   const { when, date } = useTimeFormat();
   const q = useQuery(async () => {
-    const [hosts, alerts, findings, gaps, evidence, reports, system] = await Promise.all([
+    const [hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth] = await Promise.all([
       api.hosts(),
       api.alerts(),
       api.findings(),
@@ -23,8 +23,9 @@ export function OverviewScreen() {
       api.evidence(),
       api.reports(),
       api.system(),
+      api.pipelineHealth(),
     ]);
-    return { hosts, alerts, findings, gaps, evidence, reports, system };
+    return { hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth };
   });
 
   return (
@@ -39,7 +40,7 @@ export function OverviewScreen() {
           </>
         }
       >
-        {({ hosts, alerts, findings, gaps, evidence, reports, system }) => {
+        {({ hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth }) => {
           if (hosts.length === 0)
             return (
               <EmptyState brand title="No hosts registered yet">
@@ -158,6 +159,11 @@ export function OverviewScreen() {
                 </div>
 
                 <div className="desktop-grid-2__side">
+                  {/* --- Pipeline Health --- */}
+                  <Section title="Pipeline Health & Telemetry Streams">
+                    <PipelineHealthWidget health={pipelineHealth} />
+                  </Section>
+
                   {/* --- Data coverage --- */}
                   <Section title={`Data coverage · open gaps (${gaps.length})`}>
                     {gaps.length ? (

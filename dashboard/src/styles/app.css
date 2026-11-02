@@ -2572,3 +2572,537 @@ body {
     gap: 5px;
   }
 }
+
+/* ================================================================
+   4. NEW SECURITY & INVESTIGATION WORKFLOW COMPONENTS
+   ================================================================ */
+
+.row-sub-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.table-title-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.group-count-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent);
+  border: var(--border-width) solid var(--color-accent);
+}
+
+.filters--stacked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.filters-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* 1. Evidence Provenance Card */
+.provenance-card {
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.provenance-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.provenance-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-primary-text);
+}
+
+.provenance-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+@media (min-width: 600px) {
+  .provenance-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.provenance-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.provenance-item--full {
+  grid-column: 1 / -1;
+}
+
+.provenance-label {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-overline);
+}
+
+.provenance-value {
+  color: var(--color-text);
+  word-break: break-all;
+}
+
+.provenance-hash {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.provenance-note {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  border-top: var(--border-width) solid var(--color-divider);
+  padding-top: var(--space-2);
+  margin: 0;
+}
+
+/* 2. Transparent Rule Logic Card */
+.rule-logic-card {
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.rule-logic-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.rule-logic-title-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.rule-logic-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-accent);
+}
+
+.rule-logic-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  margin: 0;
+}
+
+.mitre-badge {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  background-color: var(--color-surface-sunken);
+  border: var(--border-width) solid var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+.rule-logic-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.rule-condition-box,
+.rule-observed-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rule-condition-label {
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-overline);
+  color: var(--color-text-tertiary);
+  font-weight: var(--weight-medium);
+}
+
+.rule-code {
+  display: block;
+  background-color: var(--color-surface-sunken);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-primary-text);
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.rule-observed-text {
+  margin: 0;
+  color: var(--color-text);
+}
+
+.rule-rationale {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+/* 3. Deduplication & Alert Grouping Card */
+.grouping-card {
+  background-color: var(--color-surface-sunken);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.grouping-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.grouping-title-group {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.grouping-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-accent);
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.grouping-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.grouping-subtext {
+  margin: 2px 0 0;
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+}
+
+.grouping-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  border-top: var(--border-width) solid var(--color-divider);
+  padding-top: var(--space-2);
+}
+
+.grouping-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.grouping-meta-item span {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+}
+
+.grouping-raw-list {
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.grouping-raw-header {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  display: block;
+  margin-bottom: var(--space-1);
+}
+
+.grouping-raw-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* 4. Manual Investigation Workflow Card */
+.investigation-workflow-card {
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.investigation-workflow-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.investigation-workflow-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.workflow-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-primary-text);
+}
+
+.investigation-workflow-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background-color: var(--color-surface-sunken);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+}
+
+.investigation-status-row,
+.investigation-note-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.select-input {
+  width: 100%;
+  height: var(--touch-min);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  border: var(--border-width) solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
+.input-textarea {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: var(--border-width) solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  resize: vertical;
+}
+
+.investigation-form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.investigation-history {
+  border-top: var(--border-width) solid var(--color-divider);
+  padding-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.investigation-history-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.investigation-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.investigation-note-item {
+  background-color: var(--color-surface-sunken);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+}
+
+.investigation-note-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  margin-bottom: 2px;
+}
+
+.note-author {
+  font-weight: var(--weight-medium);
+  color: var(--color-primary-text);
+}
+
+.note-transition {
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+
+.note-text {
+  margin: 0;
+  color: var(--color-text);
+}
+
+/* 5. Pipeline Health Widget */
+.pipeline-health-widget {
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.pipeline-health-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.pipeline-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-primary-text);
+}
+
+.pipeline-sources-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+
+.pipeline-source-card {
+  background-color: var(--color-surface-sunken);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-xs);
+}
+
+.pipeline-source-card.status-lagging {
+  border-color: var(--status-warning-border);
+  background-color: var(--status-warning-bg);
+}
+
+.pipeline-source-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pipeline-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+}
+
+.pipeline-dot.is-ok {
+  background-color: var(--status-healthy-fg);
+}
+
+.pipeline-dot.is-warn {
+  background-color: var(--status-warning-fg);
+}
+
+.pipeline-dot.is-error {
+  background-color: var(--status-critical-fg);
+}
+
+.pipeline-source-path {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+.pipeline-source-stats {
+  display: flex;
+  gap: var(--space-3);
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.pipeline-gap-warning {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-2xs);
+  color: var(--status-warning-fg);
+  font-weight: var(--weight-medium);
+  margin-top: 2px;
+}
+
+.pipeline-honesty-note {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  border-top: var(--border-width) solid var(--color-divider);
+  padding-top: var(--space-2);
+}

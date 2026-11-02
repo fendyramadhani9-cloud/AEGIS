@@ -2,12 +2,18 @@ import { Link, useParams } from 'react-router-dom';
 import { CircleHelp, FileText, ListTree, Lock, Radio } from 'lucide-react';
 import { Screen } from '../components/AppShell';
 import { AiPanel } from '../components/AiPanel';
-import { GapBlock } from '../components/domain';
+import {
+  AlertGroupingCard,
+  GapBlock,
+  InvestigationWorkflowCard,
+  ProvenanceCard,
+  RuleLogicCard,
+} from '../components/domain';
 import { EmptyState, QueryView, SkeletonBlock } from '../components/states';
 import { Badge, Group, KeyValues, LinkButton, LogLine, Section, Tag } from '../components/ui';
 import { actions, api } from '../data/api';
 import { useQuery } from '../lib/hooks';
-import { severityMeta, sourceLabel } from '../lib/status';
+import { confidenceMeta, investigationStatusMeta, severityMeta, sourceLabel } from '../lib/status';
 import { useTimeFormat } from '../lib/time';
 
 const WINDOW = 60 * 60_000;
@@ -42,13 +48,18 @@ export function AlertDetailScreen() {
           if (!data) return <EmptyState icon={CircleHelp} title="Alert not found" />;
           const { alert, events, nearGaps, host, activeEvidence } = data;
           const sev = severityMeta[alert.severity];
+          const conf = alert.confidence ? confidenceMeta[alert.confidence] : undefined;
+          const inv = alert.investigationStatus ? investigationStatusMeta[alert.investigationStatus] : undefined;
+
           return (
             <div className="desktop-grid-2">
-              {/* Left Column: Alert Hero & Supporting Evidence */}
+              {/* Left Column: Alert Hero, Grouping, Provenance, Rule Logic & Supporting Evidence */}
               <div className="desktop-grid-2__main">
                 <section className={`detail-hero tone-${sev.tone}`}>
                   <div className="detail-hero__badges">
                     <Badge meta={sev} />
+                    {conf && <Badge meta={conf} variant="soft" />}
+                    {inv && <Badge meta={inv} />}
                     <span className="kind-label">Runtime Monitor alert</span>
                   </div>
                   <h2 className="detail-hero__title">{alert.title}</h2>
@@ -62,6 +73,18 @@ export function AlertDetailScreen() {
                     <span>{when(alert.detectedAt)}</span>
                   </p>
                 </section>
+
+                {/* 3. Deduplication & Alert Grouping Card */}
+                {alert.grouping && <AlertGroupingCard grouping={alert.grouping} />}
+
+                {/* 4. Manual Investigation Status Workflow */}
+                <InvestigationWorkflowCard alert={alert} onUpdated={() => q.retry()} />
+
+                {/* 1. Evidence Provenance */}
+                {alert.provenance && <ProvenanceCard provenance={alert.provenance} />}
+
+                {/* 7. Transparent Rule Logic */}
+                {alert.ruleLogic && <RuleLogicCard ruleLogic={alert.ruleLogic} />}
 
                 <Section title="Why this alert fired">
                   <Group>
