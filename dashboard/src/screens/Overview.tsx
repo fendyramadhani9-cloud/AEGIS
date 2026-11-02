@@ -1,0 +1,241 @@
+import { Link } from 'react-router-dom';
+import { CircleAlert, FileText, Info, ListTree, Radio, ShieldCheck } from 'lucide-react';
+import { Screen } from '../components/AppShell';
+import { AlertRow, EvidenceBanner, FindingRow, GapRow } from '../components/domain';
+import { EmptyState, QueryView, SkeletonBlock, SkeletonList } from '../components/states';
+import { Badge, Group, LinkButton, Notice, Row, Section, SectionLink } from '../components/ui';
+import { api, hostName } from '../data/api';
+import type { AgentStatus } from '../data/types';
+import { useQuery } from '../lib/hooks';
+import { agentStatusMeta, evidenceStatusMeta, reportStatusMeta } from '../lib/status';
+import { useTimeFormat } from '../lib/time';
+
+const DAY = 24 * 3600_000;
+
+export function OverviewScreen() {
+  const { when, date } = useTimeFormat();
+  const q = useQuery(async () => {
+    const [hosts, alerts, findings, gaps, evidence, reports, system] = await Promise.all([
+      api.hosts(),
+      api.alerts(),
+      api.findings(),
+      api.gaps({ openOnly: true }),
+      api.evidence(),
+      api.reports(),
+      api.system(),
+    ]);
+    return { hosts, alerts, findings, gaps, evidence, reports, system };
+  });
+
+  return (
+    <Screen title="Overview">
+      <QueryView
+        query={q}
+        loading={
+          <>
+            <SkeletonBlock height={88} />
+            <SkeletonList rows={3} />
+            <SkeletonList rows={2} />
+          </>
+        }
+      >
+        {({ hosts, alerts, findings, gaps, evidence, reports, system }) => {
+          if (hosts.length === 0)
+            return (
+              <EmptyState brand title="No hosts registered yet">
+                Install the AEGIS agent on an Ubuntu Server host and configure it with this backend’s endpoint. The host
+                appears here after its first report.
+              </EmptyState>
+            );
+
+          const counts = hosts.reduce(
+            (acc, h) => ({ ...acc, [h.agentStatus]: acc[h.agentStatus] + 1 }),
+            { online: 0, delayed: 0, offline: 0, unknown: 0 } as Record<AgentStatus, number>,
+          );
+          const latest = hosts
+            .filter((h) => h.lastDataAt)
+            .sort((a, b) => b.lastDataAt!.localeCompare(a.lastDataAt!))[0];
+          const recentAlerts = alerts.filter((a) => Date.now() - new Date(a.detectedAt).getTime() < DAY);
+          const failed = findings.filter((f) => f.status === 'fail');
+          const notChecked = findings.filter((f) => f.status === 'not_checked').length;
+          const active = evidence.filter((e) => e.status === 'active');
+          const latestReport = reports[0];
+
+          return (
+            <>
+              {/* --- Agent status strip --- */}
+              <section className="section fleet-section" aria-label="Agent status">
+                <div className="fleet">
+                  {(['online', 'delayed', 'offline', 'unknown'] as AgentStatus[]).map((s) => {
+                    const m = agentStatusMeta[s];
+                    const Icon = m.icon;
+                    return (
+                      <Link
+                        key={s}
+                        to={`/hosts?status=${s}`}
+                        className={`fleet__cell tone-${m.tone} ${counts[s] === 0 ? 'is-zero' : ''}`}
+                      >
+                        <span className="fleet__count">{counts[s]}</span>
+                        <span className="fleet__label">
+                          <Icon aria-hidden />
+                          {m.label}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+                <p className="fleet__foot">
+                  {latest ? (
+                    <>
+                      Last data received <strong>{when(latest.lastDataAt)}</strong> from{' '}
+                      <span className="mono">{latest.hostname}</span> · {hosts.length} hosts
+                    </>
+                  ) : (
+                    'No data received from any host yet'
+                  )}
+                </p>
+              </section>
+
+              {active.map((s) => (
+                <EvidenceBanner key={s.id} session={s} />
+              ))}
+
+              {system && system.aiProvider !== 'ok' && (
+                <Notice tone="info" icon={Info} title="AI explanations may be delayed">
+                  {system.aiProviderNote ?? 'The AI provider is not responding normally.'} Rules and monitoring keep
+                  running without AI.
+                </Notice>
+              )}
+
+              {/* Responsive 2-column layout for Desktop / Tablet */}
+              <div className="desktop-grid-2">
+                <div className="desktop-grid-2__main">
+                  {/* --- Alerts --- */}
+                  <Section
+                    title={`RM alerts · last 24 h (${recentAlerts.length})`}
+                    action={<SectionLink to="/detections">All detections</SectionLink>}
+                  >
+                    {recentAlerts.length ? (
+                      <Group>
+                        {recentAlerts.slice(0, 4).map((a) => (
+                          <AlertRow key={a.id} alert={a} />
+                        ))}
+                      </Group>
+                    ) : (
+                      <Group>
+                        <Row
+                          leading={<ShieldCheck className="muted-icon" aria-hidden />}
+                          title="No alerts in the last 24 hours"
+                          subtitle="Only patterns covered by active rules, on collected sources, can raise alerts."
+                        />
+                      </Group>
+                    )}
+                  </Section>
+
+                  {/* --- SC findings --- */}
+                  <Section
+                    title={`Failed SC checks (${failed.length})`}
+                    action={<SectionLink to="/detections?tab=checks">All checks</SectionLink>}
+                  >
+                    {failed.length ? (
+                      <Group>
+                        {failed.slice(0, 4).map((f) => (
+                          <FindingRow key={f.id} finding={f} />
+                        ))}
+                      </Group>
+                    ) : (
+                      <Group>
+                        <Row title="No failed checks" subtitle="Based on the last completed Security Checker runs." />
+                      </Group>
+                    )}
+                    {notChecked > 0 && (
+                      <p className="section__note">
+                        <CircleAlert aria-hidden /> {notChecked} check{notChecked > 1 ? 's' : ''} could not run — result
+                        unknown.
+                      </p>
+                    )}
+                  </Section>
+                </div>
+
+                <div className="desktop-grid-2__side">
+                  {/* --- Data coverage --- */}
+                  <Section title={`Data coverage · open gaps (${gaps.length})`}>
+                    {gaps.length ? (
+                      <Group>
+                        {gaps.map((g) => (
+                          <GapRow key={g.id} gap={g} />
+                        ))}
+                      </Group>
+                    ) : (
+                      <Group>
+                        <Row title="No open telemetry gaps" subtitle="All configured sources are being read." />
+                      </Group>
+                    )}
+                  </Section>
+
+                  {/* --- Investigate / report entry points --- */}
+                  <Section title="Investigate & Reports">
+                    <div className="split-actions">
+                      <LinkButton to="/timeline" icon={ListTree} block>
+                        Timeline
+                      </LinkButton>
+                      <LinkButton to="/reports" icon={FileText} block>
+                        Reports
+                      </LinkButton>
+                    </div>
+                    <Group>
+                      <Row
+                        to="/evidence"
+                        leading={<Radio className={active.length ? 'brand-icon' : 'muted-icon'} aria-hidden />}
+                        title="Emergency Evidence Mode"
+                        subtitle={
+                          active.length ? (
+                            <Badge meta={evidenceStatusMeta.active} size="sm" variant="plain" />
+                          ) : (
+                            <span>Not active</span>
+                          )
+                        }
+                        meta={
+                          active.length
+                            ? `On ${active.map((s) => hostName(s.hostId)).join(', ')}`
+                            : 'Time-limited extra collection for an investigation'
+                        }
+                      />
+                      {latestReport && (
+                        <Row
+                          to={`/reports/${latestReport.id}`}
+                          title={latestReport.title}
+                          subtitle={
+                            <Badge
+                              meta={reportStatusMeta[latestReport.status]}
+                              size="sm"
+                              variant="plain"
+                              spin={latestReport.status === 'pending'}
+                            />
+                          }
+                          meta={
+                            latestReport.type === 'daily'
+                              ? `Period ${date(latestReport.periodStart)}`
+                              : `Hosts: ${latestReport.hostIds.map(hostName).join(', ')}`
+                          }
+                        />
+                      )}
+                    </Group>
+                  </Section>
+
+                  <p className="honesty">
+                    <Info aria-hidden />
+                    <span>
+                      No alert does not mean a host is secure. AEGIS reports what its checks and rules can observe on
+                      collected sources. It does not block traffic or change hosts.
+                    </span>
+                  </p>
+                </div>
+              </div>
+            </>
+          );
+        }}
+      </QueryView>
+    </Screen>
+  );
+}

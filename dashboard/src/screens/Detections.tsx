@@ -1,0 +1,280 @@
+import { Link, useSearchParams } from 'react-router-dom';
+import { ChevronRight, SearchX, ShieldCheck } from 'lucide-react';
+import { Screen } from '../components/AppShell';
+import { AlertRow, FindingRow } from '../components/domain';
+import { EmptyState, QueryView } from '../components/states';
+import { Badge, Chips, Group, PageIntro, Segmented } from '../components/ui';
+import { api, hostName } from '../data/api';
+import type { FindingStatus, Severity } from '../data/types';
+import { useQuery } from '../lib/hooks';
+import { findingStatusMeta, severityMeta, sourceLabel } from '../lib/status';
+import { useTimeFormat } from '../lib/time';
+
+type Tab = 'alerts' | 'checks';
+type SevFilter = 'all' | Severity;
+type StatusFilter = 'all' | FindingStatus;
+
+export function DetectionsScreen() {
+  const [params, setParams] = useSearchParams();
+  const tab = (params.get('tab') as Tab) || 'alerts';
+  const host = params.get('host') || 'all';
+  const sev = (params.get('sev') as SevFilter) || 'all';
+  const status = (params.get('status') as StatusFilter) || 'fail';
+  const { when } = useTimeFormat();
+
+  const set = (patch: Record<string, string>) => {
+    const next = new URLSearchParams(params);
+    Object.entries(patch).forEach(([k, v]) => next.set(k, v));
+    setParams(next, { replace: true });
+  };
+
+  const q = useQuery(async () => {
+    const [alerts, findings, hosts] = await Promise.all([api.alerts(), api.findings(), api.hosts()]);
+    return { alerts, findings, hosts };
+  });
+
+  return (
+    <Screen
+      title="Detections"
+      subheader={
+        <Segmented<Tab>
+          label="Detection type"
+          value={tab}
+          onChange={(v) => set({ tab: v })}
+          options={[
+            { value: 'alerts', label: 'RM alerts', count: q.data?.alerts.length },
+            { value: 'checks', label: 'SC checks', count: q.data?.findings.filter((f) => f.status === 'fail').length },
+          ]}
+        />
+      }
+    >
+      <PageIntro>
+        {tab === 'alerts'
+          ? 'Runtime Monitor alerts: deterministic rules matched on collected SSH and Nginx logs.'
+          : 'Security Checker results: read-only configuration checks run on each host.'}
+      </PageIntro>
+
+      <QueryView query={q}>
+        {({ alerts, findings, hosts }) => {
+          const hostSelect = (
+            <label className="select">
+              <span className="sr-only">Host</span>
+              <select value={host} onChange={(e) => set({ host: e.target.value })}>
+                <option value="all">All hosts</option>
+                {hosts.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.hostname}
+                  </option>
+                ))}
+              </select>
+            </label>
+          );
+
+          if (tab === 'alerts') {
+            const list = alerts.filter(
+              (a) => (host === 'all' || a.hostId === host) && (sev === 'all' || a.severity === sev),
+            );
+            return (
+              <>
+                <div className="filters">
+                  {hostSelect}
+                  <Chips<SevFilter>
+                    label="Severity"
+                    value={sev}
+                    onChange={(v) => set({ sev: v })}
+                    options={[
+                      { value: 'all', label: 'All' },
+                      { value: 'critical', label: 'Critical' },
+                      { value: 'high', label: 'High' },
+                      { value: 'medium', label: 'Medium' },
+                      { value: 'low', label: 'Low' },
+                    ]}
+                  />
+                </div>
+
+                {list.length ? (
+                  <>
+                    {/* Mobile View */}
+                    <div className="mobile-only-view">
+                      <Group>
+                        {list.map((a) => (
+                          <AlertRow key={a.id} alert={a} />
+                        ))}
+                      </Group>
+                    </div>
+
+                    {/* Desktop View */}
+                    <div className="desktop-only-view">
+                      <div className="desktop-table-container">
+                        <table className="desktop-table">
+                          <thead>
+                            <tr>
+                              <th>Rule ID & Title</th>
+                              <th>Severity</th>
+                              <th>Host</th>
+                              <th>Source</th>
+                              <th>Detected</th>
+                              <th>AI Status</th>
+                              <th>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {list.map((a) => {
+                              const sevMeta = severityMeta[a.severity];
+                              return (
+                                <tr key={a.id}>
+                                  <td>
+                                    <Link to={`/alerts/${a.id}`} className="desktop-table__host-link">
+                                      <strong>{a.title}</strong>
+                                      <span className="desktop-table__subtext mono">{a.ruleId} v{a.ruleVersion}</span>
+                                    </Link>
+                                  </td>
+                                  <td>
+                                    <Badge meta={sevMeta} />
+                                  </td>
+                                  <td>
+                                    <span className="mono">{hostName(a.hostId)}</span>
+                                  </td>
+                                  <td>
+                                    <span className="tag">{sourceLabel[a.source]}</span>
+                                  </td>
+                                  <td>
+                                    <span className="desktop-table__time">{when(a.detectedAt)}</span>
+                                  </td>
+                                  <td>
+                                    <span className={`status-indicator ${a.ai.state === 'ready' ? 'text-healthy' : 'muted'}`}>
+                                      {a.ai.state === 'ready'
+                                        ? 'Ready'
+                                        : a.ai.state === 'pending'
+                                          ? 'Pending…'
+                                          : a.ai.state === 'failed'
+                                            ? 'Failed'
+                                            : 'Not requested'}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <Link to={`/alerts/${a.id}`} className="btn btn--secondary btn--sm">
+                                      <span>Details</span>
+                                      <ChevronRight aria-hidden />
+                                    </Link>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                ) : alerts.length ? (
+                  <EmptyState icon={SearchX} title="No alerts match these filters" />
+                ) : (
+                  <EmptyState icon={ShieldCheck} title="No RM alerts">
+                    No active rule has matched on collected data. This does not mean hosts are secure — only that the
+                    supported patterns were not seen.
+                  </EmptyState>
+                )}
+              </>
+            );
+          }
+
+          const list = findings.filter(
+            (f) => (host === 'all' || f.hostId === host) && (status === 'all' || f.status === status),
+          );
+          return (
+            <>
+              <div className="filters">
+                {hostSelect}
+                <Chips<StatusFilter>
+                  label="Check result"
+                  value={status}
+                  onChange={(v) => set({ status: v })}
+                  options={[
+                    { value: 'fail', label: 'Failed' },
+                    { value: 'not_checked', label: 'Not checked' },
+                    { value: 'pass', label: 'Passed' },
+                    { value: 'all', label: 'All' },
+                  ]}
+                />
+              </div>
+
+              {list.length ? (
+                <>
+                  {/* Mobile View */}
+                  <div className="mobile-only-view">
+                    <Group>
+                      {list.map((f) => (
+                        <FindingRow key={f.id} finding={f} />
+                      ))}
+                    </Group>
+                  </div>
+
+                  {/* Desktop View */}
+                  <div className="desktop-only-view">
+                    <div className="desktop-table-container">
+                      <table className="desktop-table">
+                        <thead>
+                          <tr>
+                            <th>Check ID & Name</th>
+                            <th>Status</th>
+                            <th>Host</th>
+                            <th>Observed Summary</th>
+                            <th>Last Checked</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {list.map((f) => {
+                            const statusMeta =
+                              f.status === 'fail'
+                                ? { ...severityMeta[f.severity], label: `Failed · ${severityMeta[f.severity].label}` }
+                                : findingStatusMeta[f.status];
+
+                            return (
+                              <tr key={f.id}>
+                                <td>
+                                  <Link to={`/findings/${f.id}`} className="desktop-table__host-link">
+                                    <strong>{f.title}</strong>
+                                    <span className="desktop-table__subtext mono">{f.checkId}</span>
+                                  </Link>
+                                </td>
+                                <td>
+                                  <Badge meta={statusMeta} />
+                                </td>
+                                <td>
+                                  <span className="mono">{hostName(f.hostId)}</span>
+                                </td>
+                                <td>
+                                  <span className="desktop-table__indicators clamp-2 mono">
+                                    {f.indicators.length > 0 ? f.indicators[0] : 'None recorded'}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className="desktop-table__time">{when(f.checkedAt)}</span>
+                                </td>
+                                <td>
+                                  <Link to={`/findings/${f.id}`} className="btn btn--secondary btn--sm">
+                                    <span>Details</span>
+                                    <ChevronRight aria-hidden />
+                                  </Link>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              ) : findings.length ? (
+                <EmptyState icon={SearchX} title="No checks match these filters" />
+              ) : (
+                <EmptyState icon={ShieldCheck} title="No Security Checker results yet" />
+              )}
+            </>
+          );
+        }}
+      </QueryView>
+    </Screen>
+  );
+}

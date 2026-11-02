@@ -1,0 +1,247 @@
+/*
+ * AEGIS design tokens
+ * ------------------------------------------------------------------
+ * Layout, spacing, type and component behaviour are theme-agnostic.
+ * Only the colour/elevation tokens inside [data-theme] blocks change.
+ *
+ * Brand source: AEGIS logo — forest green #0A4332, amber #DE8121,
+ * warm ivory background #FBF6F3.
+ */
+
+:root {
+  /* ---------- Typography ---------- */
+  --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  --text-2xs: 11px; /* overlines, chip labels      */
+  --text-xs: 12px;  /* meta, timestamps, IDs       */
+  --text-sm: 13px;  /* secondary row text          */
+  --text-md: 15px;  /* body, row titles            */
+  --text-lg: 17px;  /* section / sheet titles      */
+  --text-xl: 20px;  /* screen titles               */
+  --text-2xl: 24px; /* rare: detail headline       */
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.45;
+  --leading-relaxed: 1.6;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --tracking-overline: 0.06em;
+
+  /* ---------- Spacing (4pt grid) ---------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  --screen-gutter: var(--space-4);
+
+  /* ---------- Radius ---------- */
+  --radius-xs: 4px;  /* chips, code */
+  --radius-sm: 6px;  /* badges, inputs */
+  --radius-md: 10px; /* list groups, buttons */
+  --radius-lg: 14px; /* sheets */
+  --radius-pill: 999px;
+
+  /* ---------- Borders ---------- */
+  --border-width: 1px;
+  --border-width-strong: 1.5px;
+
+  /* ---------- Icon sizes ---------- */
+  --icon-xs: 14px;
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  --icon-lg: 24px;
+
+  /* ---------- Touch & layout ---------- */
+  --touch-min: 44px;
+  --header-height: 56px;
+  --nav-height: 64px;
+  --app-max-width: 480px;
+
+  /* ---------- Motion ---------- */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+
+  /* ---------- Interaction ---------- */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --disabled-opacity: 0.45;
+}
+
+/* ================================================================
+ * LIGHT — warm ivory, forest green primary, restrained amber accent
+ * ================================================================ */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --color-bg: #f7f2e9;            /* warm ivory canvas            */
+  --color-surface: #fdfaf4;       /* list groups, sheets          */
+  --color-surface-sunken: #f0eadf;/* code, log lines, inputs      */
+  --color-surface-raised: #fffdf8;/* bottom nav, sheets           */
+  --color-border: #e4dacb;
+  --color-border-strong: #cdbfa9;
+  --color-divider: #ece4d7;
+
+  /* Text */
+  --color-text: #1f1d1a;
+  --color-text-secondary: #5a5449;
+  --color-text-tertiary: #7d7568;
+  --color-text-inverse: #fdfaf4;
+
+  /* Brand */
+  --color-primary: #0a4332;
+  --color-primary-hover: #0e5640;
+  --color-primary-pressed: #073326;
+  --color-on-primary: #fdfaf4;
+  --color-primary-soft: #e0ebe3;
+  --color-primary-text: #0a4332;  /* links, selected labels */
+
+  --color-accent: #c26a12;        /* amber, darkened for text contrast on ivory */
+  --color-accent-soft: #f7e6cf;
+
+  /* "Liquid" accent: solid in light mode, gradient in dark mode */
+  --liquid-fill: var(--color-primary);
+  --liquid-soft: var(--color-primary-soft);
+  --liquid-on: var(--color-on-primary);
+
+  /* Semantic status — fg (text/icon), bg (tint), border */
+  --status-healthy-fg: #1d6a44;
+  --status-healthy-bg: #e1eee3;
+  --status-healthy-border: #b9d5c0;
+
+  --status-info-fg: #2b5b88;
+  --status-info-bg: #e3ebf3;
+  --status-info-border: #bccfe2;
+
+  --status-warning-fg: #855600;
+  --status-warning-bg: #f7eacb;
+  --status-warning-border: #e5cd8f;
+
+  --status-high-fg: #ad4c0e;
+  --status-high-bg: #f8e0cc;
+  --status-high-border: #ecbd97;
+
+  --status-critical-fg: #b0261b;
+  --status-critical-bg: #f8dfda;
+  --status-critical-border: #eab4ac;
+
+  --status-disabled-fg: #958d80;
+  --status-disabled-bg: #ede7dc;
+  --status-disabled-border: #dcd3c4;
+
+  --status-unknown-fg: #645d52;
+  --status-unknown-bg: #ebe5da;
+  --status-unknown-border: #cfc5b5;
+
+  /* Telemetry gap hatch */
+  --gap-stripe-a: #efe7da;
+  --gap-stripe-b: #e6dccc;
+
+  /* Interaction overlays */
+  --state-hover: rgba(31, 29, 26, 0.04);
+  --state-pressed: rgba(31, 29, 26, 0.08);
+  --focus-ring-color: #0a4332;
+
+  /* Elevation — kept minimal; borders do most of the work */
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgba(60, 45, 20, 0.06);
+  --elevation-2: 0 -1px 0 rgba(60, 45, 20, 0.04), 0 -6px 20px rgba(60, 45, 20, 0.06);
+  --elevation-3: 0 12px 40px rgba(40, 30, 15, 0.18);
+  --scrim: rgba(31, 25, 18, 0.38);
+
+  /* Logo tile — the logo always sits on its native ivory */
+  --logo-tile-bg: #fbf6f3;
+  --logo-tile-border: #e4dacb;
+}
+
+/* ================================================================
+ * DARK — deep warm charcoal, amber liquid accents used sparingly
+ * ================================================================ */
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-bg: #13110f;
+  --color-surface: #1b1815;
+  --color-surface-sunken: #100e0c;
+  --color-surface-raised: #221e1a;
+  --color-border: #2f2a24;
+  --color-border-strong: #463d33;
+  --color-divider: #29241f;
+
+  --color-text: #f1ece3;
+  --color-text-secondary: #bcb2a3;
+  --color-text-tertiary: #8d8375;
+  --color-text-inverse: #1a1209;
+
+  --color-primary: #f0a03a;
+  --color-primary-hover: #f5b157;
+  --color-primary-pressed: #df8c26;
+  --color-on-primary: #1a1209;
+  --color-primary-soft: rgba(240, 160, 58, 0.13);
+  --color-primary-text: #f4ae52;
+
+  --color-accent: #f0a03a;
+  --color-accent-soft: rgba(240, 160, 58, 0.13);
+
+  /* Liquid amber: only on selected states, primary actions and
+     the Evidence Mode countdown. Never as a page background. */
+  --liquid-fill: linear-gradient(135deg, #f8bd55 0%, #ee8d2c 55%, #d9661d 100%);
+  --liquid-soft: radial-gradient(120% 140% at 0% 0%, rgba(248, 189, 85, 0.20) 0%, rgba(238, 141, 44, 0.10) 45%, rgba(217, 102, 29, 0.04) 100%);
+  --liquid-on: #1a1209;
+
+  --status-healthy-fg: #74c493;
+  --status-healthy-bg: rgba(116, 196, 147, 0.11);
+  --status-healthy-border: rgba(116, 196, 147, 0.28);
+
+  --status-info-fg: #8cb8e4;
+  --status-info-bg: rgba(140, 184, 228, 0.11);
+  --status-info-border: rgba(140, 184, 228, 0.28);
+
+  --status-warning-fg: #e6c763;
+  --status-warning-bg: rgba(230, 199, 99, 0.11);
+  --status-warning-border: rgba(230, 199, 99, 0.28);
+
+  --status-high-fg: #f3955a;
+  --status-high-bg: rgba(243, 149, 90, 0.12);
+  --status-high-border: rgba(243, 149, 90, 0.30);
+
+  --status-critical-fg: #f4837a;
+  --status-critical-bg: rgba(244, 131, 122, 0.12);
+  --status-critical-border: rgba(244, 131, 122, 0.32);
+
+  --status-disabled-fg: #6f665b;
+  --status-disabled-bg: rgba(111, 102, 91, 0.12);
+  --status-disabled-border: rgba(111, 102, 91, 0.30);
+
+  --status-unknown-fg: #a59b8d;
+  --status-unknown-bg: rgba(165, 155, 141, 0.10);
+  --status-unknown-border: rgba(165, 155, 141, 0.28);
+
+  --gap-stripe-a: #1d1a16;
+  --gap-stripe-b: #26221d;
+
+  --state-hover: rgba(241, 236, 227, 0.04);
+  --state-pressed: rgba(241, 236, 227, 0.08);
+  --focus-ring-color: #f4ae52;
+
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elevation-2: 0 -1px 0 rgba(255, 240, 220, 0.03), 0 -8px 24px rgba(0, 0, 0, 0.35);
+  --elevation-3: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --scrim: rgba(0, 0, 0, 0.6);
+
+  --logo-tile-bg: #fbf6f3;
+  --logo-tile-border: rgba(255, 240, 220, 0.08);
+}
+
