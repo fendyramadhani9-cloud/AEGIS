@@ -1,0 +1,12 @@
+{
+  "name": "aegis",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AEGIS Linux Security Monitoring & Incident Investigation",
+  "scripts": {
+    "dev": "npm --prefix dashboard run dev",
+    "build": "npm --prefix dashboard run build",
+    "preview": "npm --prefix dashboard run preview",
+    "typecheck": "npm --prefix dashboard run typecheck"
+  }
+}
