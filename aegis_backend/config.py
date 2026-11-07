@@ -26,7 +26,7 @@ class Settings:
     def __init__(self):
         self.aegis_env: str = os.getenv("AEGIS_ENV", "development").lower()
         self.api_host: str = os.getenv("API_HOST", "127.0.0.1")
-        self.api_port: int = int(os.getenv("API_PORT", "8000"))
+        self.api_port: int = int(os.getenv("API_PORT", "1709"))
 
         # Agent Authentication Token (for non-SSH telemetry ingestion)
         self.agent_ingest_token: str = os.getenv("AGENT_INGEST_TOKEN", "aegis-agent-dev-secret-token")
@@ -62,7 +62,7 @@ class Settings:
         # Configurable CORS Origins
         raw_origins = os.getenv(
             "AEGIS_CORS_ORIGINS",
-            "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000",
+            "http://localhost:1708,http://127.0.0.1:1708,http://localhost:1709,http://127.0.0.1:1709,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000",
         )
         self.cors_origins: list[str] = [o.strip() for o in raw_origins.split(",") if o.strip()]
 

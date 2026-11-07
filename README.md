@@ -62,9 +62,9 @@ cp .env.example .env
 ```bash
 docker compose up -d --build
 ```
-- **Dashboard Web UI:** `http://localhost:5173`
-- **FastAPI Backend & Swagger Docs:** `http://localhost:8000/docs`
-- **Health Check:** `http://localhost:8000/api/health`
+- **Dashboard Web UI & Gateway Utama (Port `1708`):** `http://localhost:1708`
+- **Swagger API Docs (via Gateway `1708`):** `http://localhost:1708/docs`
+- **Direct FastAPI Backend (Port `1709`):** `http://localhost:1709/api/health`
 
 *(Opsional)* Jika dijalankan langsung di server Linux yang ingin dipantau sekaligus oleh container collector:
 ```bash
@@ -80,18 +80,19 @@ docker stats aegis-backend aegis-dashboard
 
 ## 4. Cara Menjalankan Secara Lokal (Tanpa Docker)
 
-### A. Menjalankan FastAPI Backend
+### A. Menjalankan FastAPI Backend (Port `1709`)
 ```powershell
 python -m pip install -r requirements.txt
-python -m uvicorn aegis_backend.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn aegis_backend.main:app --host 127.0.0.1 --port 1709 --reload
 ```
 
-### B. Menjalankan Frontend Dashboard (Mode Development)
+### B. Menjalankan Frontend Dashboard (Port `1708`)
 ```powershell
 cd dashboard
 npm install
 npm run dev
 ```
+Buka dashboard di: `http://localhost:1708`
 
 ### C. Menjalankan Linux Telemetry Collector (Pada Server Ubuntu Target)
 ```bash

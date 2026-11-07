@@ -2,6 +2,7 @@
 # ============================================================================
 # AEGIS Backend Gateway & AI Investigation Engine — Ultra-Low RAM Dockerfile
 # Base: python:3.12-slim (~55-75 MB RAM idle, ~95 MB active with 1 worker)
+# Listens on Dedicated Port 1709 (Proxied via Dashboard Port 1708)
 # ============================================================================
 
 FROM python:3.12-slim AS runtime
@@ -12,7 +13,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     API_HOST=0.0.0.0 \
-    API_PORT=8000 \
+    API_PORT=1709 \
     AEGIS_STATE_FILE=/app/data/.aegis_operational_state.json
 
 WORKDIR /app
@@ -36,9 +37,9 @@ COPY --chown=aegis:aegis main.py ./main.py
 
 USER aegis
 
-EXPOSE 8000
+EXPOSE 1709
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:1709/api/health', timeout=3)" || exit 1
 
-CMD ["python", "-m", "uvicorn", "aegis_backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]
+CMD ["python", "-m", "uvicorn", "aegis_backend.main:app", "--host", "0.0.0.0", "--port", "1709", "--workers", "1", "--no-access-log"]

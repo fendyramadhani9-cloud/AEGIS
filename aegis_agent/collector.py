@@ -45,7 +45,7 @@ class AegisTelemetryCollector:
 
     def __init__(self):
         self.running = True
-        self.api_url = os.getenv("AEGIS_API_URL", "http://127.0.0.1/api").rstrip("/")
+        self.api_url = os.getenv("AEGIS_API_URL", "http://127.0.0.1:1708/api").rstrip("/")
         self.agent_token = os.getenv("AGENT_INGEST_TOKEN", "aegis-agent-dev-secret-token")
         self.host_id = os.getenv("AEGIS_HOST_ID", "host-fenn-ubuntu")
         self.hostname = os.getenv("AEGIS_HOSTNAME", socket.gethostname())

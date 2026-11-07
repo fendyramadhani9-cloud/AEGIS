@@ -9,11 +9,11 @@ services:
       - .env
     environment:
       - API_HOST=0.0.0.0
-      - API_PORT=8000
+      - API_PORT=1709
       - AEGIS_STATE_FILE=/app/data/.aegis_operational_state.json
-      - AEGIS_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080
+      - AEGIS_CORS_ORIGINS=http://localhost:1708,http://127.0.0.1:1708,http://localhost:1709,http://127.0.0.1:1709,http://localhost:5173
     ports:
-      - "8000:8000"
+      - "1709:1709"
     volumes:
       - aegis_state:/app/data
     mem_limit: 192m
@@ -30,7 +30,7 @@ services:
       aegis-backend:
         condition: service_healthy
     ports:
-      - "5173:80"
+      - "1708:1708"
     mem_limit: 64m
     mem_reservation: 16m
     cpus: 0.25
@@ -47,12 +47,12 @@ services:
     env_file:
       - .env
     environment:
-      - AEGIS_API_URL=http://aegis-backend:8000/api
+      - AEGIS_API_URL=http://aegis-dashboard:1708/api
       - AEGIS_CURSOR_FILE=/app/data/.collector_cursor
       - AEGIS_LOG_FILES=/host_logs/nginx/access.log,/host_logs/apache2/access.log,/host_logs/audit/audit.log
     command: ["python", "aegis_agent/collector.py"]
     depends_on:
-      aegis-backend:
+      aegis-dashboard:
         condition: service_healthy
     volumes:
       - aegis_state:/app/data
