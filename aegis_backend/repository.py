@@ -78,7 +78,18 @@ class BaseAegisRepository(ABC):
                 is_safe, _ = TelemetrySanitizer.inspect_line(v)
                 cleaned[k] = v if is_safe else "[REDACTED]"
             elif isinstance(v, dict):
-                cleaned[k] = BaseAegisRepository._sanitize_details(v) if hasattr(BaseAegisRepository, '_sanitize_details') else v
+                cleaned[k] = BaseAegisRepository._sanitize_details(v)
+            elif isinstance(v, list):
+                cleaned_list = []
+                for item in v:
+                    if isinstance(item, dict):
+                        cleaned_list.append(BaseAegisRepository._sanitize_details(item))
+                    elif isinstance(item, str):
+                        is_safe, _ = TelemetrySanitizer.inspect_line(item)
+                        cleaned_list.append(item if is_safe else "[REDACTED]")
+                    else:
+                        cleaned_list.append(item)
+                cleaned[k] = cleaned_list
             else:
                 cleaned[k] = v
         return cleaned
@@ -207,7 +218,18 @@ class SupabaseRepository(BaseAegisRepository):
                 is_safe, _ = TelemetrySanitizer.inspect_line(v)
                 cleaned[k] = v if is_safe else "[REDACTED]"
             elif isinstance(v, dict):
-                cleaned[k] = BaseAegisRepository._sanitize_details(v) if hasattr(BaseAegisRepository, '_sanitize_details') else v
+                cleaned[k] = BaseAegisRepository._sanitize_details(v)
+            elif isinstance(v, list):
+                cleaned_list = []
+                for item in v:
+                    if isinstance(item, dict):
+                        cleaned_list.append(BaseAegisRepository._sanitize_details(item))
+                    elif isinstance(item, str):
+                        is_safe, _ = TelemetrySanitizer.inspect_line(item)
+                        cleaned_list.append(item if is_safe else "[REDACTED]")
+                    else:
+                        cleaned_list.append(item)
+                cleaned[k] = cleaned_list
             else:
                 cleaned[k] = v
         return cleaned
@@ -519,7 +541,18 @@ class MockAegisRepository(BaseAegisRepository):
                 is_safe, _ = TelemetrySanitizer.inspect_line(v)
                 cleaned[k] = v if is_safe else "[REDACTED]"
             elif isinstance(v, dict):
-                cleaned[k] = BaseAegisRepository._sanitize_details(v) if hasattr(BaseAegisRepository, '_sanitize_details') else v
+                cleaned[k] = BaseAegisRepository._sanitize_details(v)
+            elif isinstance(v, list):
+                cleaned_list = []
+                for item in v:
+                    if isinstance(item, dict):
+                        cleaned_list.append(BaseAegisRepository._sanitize_details(item))
+                    elif isinstance(item, str):
+                        is_safe, _ = TelemetrySanitizer.inspect_line(item)
+                        cleaned_list.append(item if is_safe else "[REDACTED]")
+                    else:
+                        cleaned_list.append(item)
+                cleaned[k] = cleaned_list
             else:
                 cleaned[k] = v
         return cleaned

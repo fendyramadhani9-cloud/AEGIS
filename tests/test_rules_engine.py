@@ -407,3 +407,182 @@ def test_out_of_order_events_handled_correctly(engine):
     assert len(alerts) == 1
     assert alerts[0]["rule_id"] == "RULE-AUTH-003"
 
+
+# =====================================================================
+# 5. BENIGN ACTIVITY & NEGATIVE EDGE CASES (RULE-NORMAL-01)
+# =====================================================================
+
+def test_rule_normal_01_benign_activities_trigger_zero_alerts(engine):
+    """
+    Standard operational activities must NOT fire any alert.
+    Covers:
+    - Normal sudo status inspection (systemctl status)
+    - Routine package manager query (apt update)
+    - Single regular SSH login with publickey
+    - Normal PAM session open and close
+    """
+    base_time = datetime(2026, 11, 7, 12, 0, 0, tzinfo=timezone.utc)
+    benign_events = [
+        {
+            "id": "EVT-BENIGN-01",
+            "host_id": "host-fenn",
+            "source_id": "ssh-auth",
+            "event_type": "auth_success",
+            "event_timestamp": (base_time + timedelta(seconds=1)).isoformat(),
+            "source_ip": "192.168.1.100",
+            "user_name": "ubuntu",
+            "details": {"auth_method": "publickey"},
+        },
+        {
+            "id": "EVT-BENIGN-02",
+            "host_id": "host-fenn",
+            "source_id": "ssh-auth",
+            "event_type": "session_opened",
+            "event_timestamp": (base_time + timedelta(seconds=2)).isoformat(),
+            "user_name": "ubuntu",
+            "details": {"service": "pam_unix"},
+        },
+        {
+            "id": "EVT-BENIGN-03",
+            "host_id": "host-fenn",
+            "source_id": "ssh-auth",
+            "event_type": "sudo_execution",
+            "event_timestamp": (base_time + timedelta(seconds=10)).isoformat(),
+            "user_name": "ubuntu",
+            "details": {
+                "command": "/usr/bin/systemctl status aegis-backend.service",
+                "target_user": "root",
+            },
+        },
+        {
+            "id": "EVT-BENIGN-04",
+            "host_id": "host-fenn",
+            "source_id": "ssh-auth",
+            "event_type": "sudo_execution",
+            "event_timestamp": (base_time + timedelta(seconds=25)).isoformat(),
+            "user_name": "ubuntu",
+            "details": {
+                "command": "/usr/bin/apt-get update",
+                "target_user": "root",
+            },
+        },
+        {
+            "id": "EVT-BENIGN-05",
+            "host_id": "host-fenn",
+            "source_id": "ssh-auth",
+            "event_type": "session_closed",
+            "event_timestamp": (base_time + timedelta(seconds=60)).isoformat(),
+            "user_name": "ubuntu",
+            "details": {"service": "pam_unix"},
+        },
+    ]
+
+    alerts, evidence = engine.evaluate_events(benign_events)
+    assert len(alerts) == 0, f"False positive alert triggered on benign logs: {alerts}"
+    assert len(evidence) == 0
+
+
+def test_cross_host_isolation_prevents_alert_conflation(engine):
+    """
+    2 SSH failures on host-alpha and 2 SSH failures on host-beta must NOT
+    aggregate to 4 and trigger an alert (threshold is >= 3 per host).
+    """
+    base_time = datetime(2026, 11, 7, 14, 0, 0, tzinfo=timezone.utc)
+    events = [
+        # Host Alpha (2 failures)
+        {
+            "id": "EVT-ALPHA-1",
+            "host_id": "host-alpha",
+            "source_id": "ssh-auth",
+            "event_type": "auth_failure",
+            "event_timestamp": (base_time + timedelta(seconds=10)).isoformat(),
+            "source_ip": "198.51.100.99",
+            "user_name": "root",
+        },
+        {
+            "id": "EVT-ALPHA-2",
+            "host_id": "host-alpha",
+            "source_id": "ssh-auth",
+            "event_type": "auth_failure",
+            "event_timestamp": (base_time + timedelta(seconds=20)).isoformat(),
+            "source_ip": "198.51.100.99",
+            "user_name": "root",
+        },
+        # Host Beta (2 failures)
+        {
+            "id": "EVT-BETA-1",
+            "host_id": "host-beta",
+            "source_id": "ssh-auth",
+            "event_type": "auth_failure",
+            "event_timestamp": (base_time + timedelta(seconds=15)).isoformat(),
+            "source_ip": "198.51.100.99",
+            "user_name": "root",
+        },
+        {
+            "id": "EVT-BETA-2",
+            "host_id": "host-beta",
+            "source_id": "ssh-auth",
+            "event_type": "auth_failure",
+            "event_timestamp": (base_time + timedelta(seconds=25)).isoformat(),
+            "source_ip": "198.51.100.99",
+            "user_name": "root",
+        },
+    ]
+
+    alerts, evidence = engine.evaluate_events(events)
+    assert len(alerts) == 0, f"Cross-host events were incorrectly combined: {alerts}"
+    assert len(evidence) == 0
+
+
+def test_auth_003_cross_host_mismatch_rejected(engine):
+    """
+    Failure on host-alpha followed by success on host-beta must NOT trigger RULE-AUTH-003.
+    """
+    base_time = datetime(2026, 11, 7, 15, 0, 0, tzinfo=timezone.utc)
+    events = [
+        {
+            "id": "EVT-FAIL-ALPHA",
+            "host_id": "host-alpha",
+            "source_id": "ssh-auth",
+            "event_type": "auth_failure",
+            "event_timestamp": base_time.isoformat(),
+            "source_ip": "198.51.100.50",
+            "user_name": "admin",
+        },
+        {
+            "id": "EVT-SUCC-BETA",
+            "host_id": "host-beta",
+            "source_id": "ssh-auth",
+            "event_type": "auth_success",
+            "event_timestamp": (base_time + timedelta(seconds=30)).isoformat(),
+            "source_ip": "198.51.100.50",
+            "user_name": "admin",
+        },
+    ]
+
+    alerts, evidence = engine.evaluate_events(events)
+    assert len(alerts) == 0, f"Cross-host Auth-003 alert was incorrectly triggered: {alerts}"
+
+
+def test_expired_time_window_ssh_brute_rejected(engine):
+    """
+    3 failures spaced 10 minutes apart (> 5 min window) must NOT trigger RULE-SSH-BRUTE.
+    """
+    base_time = datetime(2026, 11, 7, 10, 0, 0, tzinfo=timezone.utc)
+    events = [
+        {
+            "id": f"EVT-SLOW-{i}",
+            "host_id": "host-fenn",
+            "source_id": "ssh-auth",
+            "event_type": "auth_failure",
+            "event_timestamp": (base_time + timedelta(minutes=i * 10)).isoformat(),
+            "source_ip": "198.51.100.88",
+            "user_name": "root",
+        }
+        for i in range(3)
+    ]
+
+    alerts, evidence = engine.evaluate_events(events)
+    assert len(alerts) == 0, f"Expired window triggered false positive: {alerts}"
+
+
