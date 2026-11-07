@@ -123,6 +123,7 @@ export function SettingsScreen() {
                 </div>
                 <div className="theme-toggle-group" role="radiogroup" aria-label="Preview state">
                   {[
+                    { id: 'live', label: 'Live' },
                     { id: 'sample', label: 'Sample' },
                     { id: 'loading', label: 'Loading' },
                     { id: 'empty', label: 'Empty' },

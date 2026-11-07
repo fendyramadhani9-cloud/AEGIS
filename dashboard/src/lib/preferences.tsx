@@ -11,12 +11,13 @@ export interface Preferences {
   previewState: PreviewState;
 }
 
-const DEFAULTS: Preferences = { theme: 'system', timeZone: 'local', relativeTimes: true, previewState: 'sample' };
+const DEFAULTS: Preferences = { theme: 'system', timeZone: 'local', relativeTimes: true, previewState: 'live' };
 const KEY = 'aegis.prefs';
 
 function load(): Preferences {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}'), previewState: 'sample' };
+    const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    return { ...DEFAULTS, ...saved, previewState: saved.previewState || 'live' };
   } catch {
     return DEFAULTS;
   }
@@ -50,10 +51,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   }, [resolvedTheme]);
 
   useEffect(() => {
-    // previewState is a design-review tool and is intentionally not persisted.
-    const { previewState: _omit, ...persisted } = prefs;
-    void _omit;
-    localStorage.setItem(KEY, JSON.stringify(persisted));
+    localStorage.setItem(KEY, JSON.stringify(prefs));
     setPreviewState(prefs.previewState);
   }, [prefs]);
 
@@ -69,4 +67,3 @@ export function usePrefs() {
   if (!ctx) throw new Error('usePrefs must be used inside PreferencesProvider');
   return ctx;
 }
-

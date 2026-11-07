@@ -1,0 +1,88 @@
+{
+  "evaluation_run": "AEGIS-HARNESS-v0.6",
+  "dataset_version": "1.0",
+  "metrics": {
+    "total_scenarios_evaluated": 8,
+    "passed_scenarios": 8,
+    "failed_scenarios": 0,
+    "schema_compliance_rate": 1.0,
+    "evidence_citation_validity": 1.0,
+    "severity_preservation_rate": 1.0,
+    "unsupported_claim_rate": 0.0,
+    "status_recognition_accuracy": 1.0
+  },
+  "detailed_results": [
+    {
+      "scenario_id": "RM-AUTH-001",
+      "passed": true,
+      "agent_type": "runtime_monitor",
+      "errors": [],
+      "metrics_snapshot": {
+        "actual_status": "partial"
+      }
+    },
+    {
+      "scenario_id": "RM-AUTH-002",
+      "passed": true,
+      "agent_type": "runtime_monitor",
+      "errors": [],
+      "metrics_snapshot": {
+        "actual_status": "completed"
+      }
+    },
+    {
+      "scenario_id": "RM-AUTH-003",
+      "passed": true,
+      "agent_type": "runtime_monitor",
+      "errors": [],
+      "metrics_snapshot": {
+        "actual_status": "completed"
+      }
+    },
+    {
+      "scenario_id": "RM-AUTH-004",
+      "passed": true,
+      "agent_type": "runtime_monitor",
+      "errors": [],
+      "metrics_snapshot": {
+        "actual_status": "insufficient_data"
+      }
+    },
+    {
+      "scenario_id": "RM-LINUX-ADAPTER-001",
+      "passed": true,
+      "agent_type": "runtime_monitor",
+      "errors": [],
+      "metrics_snapshot": {
+        "actual_status": "completed"
+      }
+    },
+    {
+      "scenario_id": "SC-POSTURE-001",
+      "passed": true,
+      "agent_type": "security_checker",
+      "errors": [],
+      "metrics_snapshot": {
+        "actual_status": "completed"
+      }
+    },
+    {
+      "scenario_id": "SC-POSTURE-002",
+      "passed": true,
+      "agent_type": "security_checker",
+      "errors": [],
+      "metrics_snapshot": {
+        "actual_status": "insufficient_data"
+      }
+    },
+    {
+      "scenario_id": "RPT-SYNTH-001",
+      "passed": true,
+      "agent_type": "reporting_agent",
+      "errors": [],
+      "metrics_snapshot": {
+        "total_alerts": 1
+      }
+    }
+  ]
+}
