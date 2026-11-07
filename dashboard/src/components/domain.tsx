@@ -408,7 +408,7 @@ export function InvestigationWorkflowCard({
   const [noteText, setNoteText] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const currentMeta = investigationStatusMeta[status];
+  const currentMeta = investigationStatusMeta[status] ?? investigationStatusMeta.new;
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -450,6 +450,8 @@ export function InvestigationWorkflowCard({
               <option value="investigating">Investigating (In Progress)</option>
               <option value="resolved">Resolved (Mitigated / Confirmed)</option>
               <option value="false_positive">False Positive (Authorized Activity)</option>
+              <option value="reopened">Reopened (Recurrence Detected)</option>
+              <option value="unverified">Unverified (Telemetry Gap / Pending)</option>
             </select>
           </div>
         </div>
@@ -660,8 +662,8 @@ export function HandoffCard({ alertId }: { alertId: string }) {
                 fontSize: '0.75rem',
                 padding: '0.75rem',
                 borderRadius: '8px',
-                background: 'var(--bg-elevated)',
-                border: '1px solid var(--border-subtle)',
+                background: 'var(--color-surface-sunken)',
+                border: '1px solid var(--color-border-subtle)',
                 overflowX: 'auto',
                 maxHeight: '340px',
                 whiteSpace: 'pre-wrap',
@@ -691,7 +693,7 @@ export function HandoffCard({ alertId }: { alertId: string }) {
                 <strong>Read-Only Investigation Commands</strong>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.25rem' }}>
                   {handoff.investigationSteps.map((cmd, i) => (
-                    <code key={i} className="mono" style={{ padding: '0.25rem 0.5rem', background: 'var(--bg-elevated)', borderRadius: '4px' }}>
+                    <code key={i} className="mono" style={{ padding: '0.25rem 0.5rem', background: 'var(--color-surface-sunken)', borderRadius: '4px' }}>
                       {cmd}
                     </code>
                   ))}
@@ -890,7 +892,7 @@ export function IncidentReplayCard({ replay }: { replay: IncidentReplay }) {
               gap: '0.65rem',
               padding: '0.5rem 0.65rem',
               borderRadius: '6px',
-              background: 'var(--bg-elevated)',
+              background: 'var(--color-surface-sunken)',
               borderLeft:
                 s.phase === 'detection'
                   ? '3px solid var(--status-critical-fg)'
@@ -946,12 +948,12 @@ export function KillChainCard({ context }: { context: AlertContext }) {
               style={{
                 padding: '0.55rem 0.65rem',
                 borderRadius: '6px',
-                background: 'var(--bg-elevated)',
+                background: 'var(--color-surface-sunken)',
                 border: isCurrent
                   ? '1px solid var(--status-critical-fg)'
                   : isObserved
                     ? '1px solid var(--status-warning-fg)'
-                    : '1px solid var(--border-subtle)',
+                    : '1px solid var(--color-border-subtle)',
                 opacity: st.status === 'not_observed' ? 0.68 : 1,
                 fontSize: '0.78rem',
               }}
@@ -969,7 +971,7 @@ export function KillChainCard({ context }: { context: AlertContext }) {
                       ? 'var(--status-critical-fg)'
                       : isObserved
                         ? 'var(--status-warning-fg)'
-                        : 'var(--text-muted)',
+                        : 'var(--color-text-tertiary)',
                   }}
                 >
                   {isCurrent ? 'TRIGGER' : isObserved ? 'OBSERVED' : 'CLEAR'}

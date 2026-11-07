@@ -4,6 +4,7 @@ Parses raw telemetry lines (Auth, Process/Auditd, Network/ss) into standardized
 LogEventInput models conforming to AEGIS data contracts.
 """
 
+import hashlib
 import re
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
@@ -68,11 +69,12 @@ class LinuxTelemetryParser:
         if parsed:
             return parsed
 
-        parsed = self._parse_ssh_key_tamper_log(line, event_id_prefix)
-        if parsed:
-            return parsed
-
         return None
+
+    @staticmethod
+    def _line_sig(line: str) -> str:
+        """Deterministic 8-char hex signature for a raw log line (safe across processes)."""
+        return hashlib.sha256(line.encode("utf-8", errors="ignore")).hexdigest()[:8]
 
     def _parse_syslog_timestamp(self, ts_str: str) -> Optional[str]:
         """Converts 'Nov  1 10:00:01' or ISO-8601 into standard ISO-8601 UTC."""
@@ -87,6 +89,7 @@ class LinuxTelemetryParser:
             return None
 
     def _parse_sshd_log(self, line: str, prefix: str) -> Optional[LogEventInput]:
+        sig = self._line_sig(line)
         # Pattern 1: Failed password (matches standard syslog and flexible timestamp formats)
         fail_match = re.search(
             r"^(?:(\S+\s+\d+\s+\d{2}:\d{2}:\d{2})\s+)?(\S+)\s+sshd\[(\d+)\]:\s+Failed password for (?:invalid user )?(\S+) from (\S+) port (\d+)",
@@ -96,7 +99,7 @@ class LinuxTelemetryParser:
             ts_raw, host, pid, user, src_ip, port = fail_match.groups()
             ts_iso = self._parse_syslog_timestamp(ts_raw) if ts_raw else None
             return LogEventInput(
-                event_id=f"{prefix}-AUTH-FAIL-{pid}",
+                event_id=f"{prefix}-AUTH-FAIL-{pid}-{sig}",
                 timestamp=ts_iso,
                 event_type="auth_failure",
                 source_ip=src_ip,
@@ -119,7 +122,7 @@ class LinuxTelemetryParser:
             ts_raw, host, pid, auth_method, user, src_ip, port = accept_match.groups()
             ts_iso = self._parse_syslog_timestamp(ts_raw) if ts_raw else None
             return LogEventInput(
-                event_id=f"{prefix}-AUTH-SUCCESS-{pid}",
+                event_id=f"{prefix}-AUTH-SUCCESS-{pid}-{sig}",
                 timestamp=ts_iso,
                 event_type="auth_success",
                 source_ip=src_ip,
@@ -143,7 +146,7 @@ class LinuxTelemetryParser:
             clean_user = re.sub(r"\(.*?\)", "", user)
             ts_iso = self._parse_syslog_timestamp(ts_raw) if ts_raw else None
             return LogEventInput(
-                event_id=f"{prefix}-PAM-{action.upper()}-{pid}",
+                event_id=f"{prefix}-PAM-{action.upper()}-{pid}-{sig}",
                 timestamp=ts_iso,
                 event_type=f"session_{action}",
                 user=clean_user,
@@ -158,6 +161,7 @@ class LinuxTelemetryParser:
         return None
 
     def _parse_sudo_log(self, line: str, prefix: str) -> Optional[LogEventInput]:
+        sig = self._line_sig(line)
         # Pattern 1: Sudo command execution
         # E.g.: Nov 07 15:03:24 fenn sudo[12413]:   ubuntu : PWD=/home/ubuntu ; USER=root ; COMMAND=/usr/bin/journalctl
         sudo_exec_match = re.search(
@@ -167,7 +171,7 @@ class LinuxTelemetryParser:
         if sudo_exec_match:
             ts_raw, host, pid, calling_user, target_user, cmd = sudo_exec_match.groups()
             ts_iso = self._parse_syslog_timestamp(ts_raw) if ts_raw else None
-            pid_str = pid if pid else str(abs(hash(line)) % 100000)
+            pid_str = f"{pid}-{sig}" if pid else sig
             return LogEventInput(
                 event_id=f"{prefix}-SUDO-EXEC-{pid_str}",
                 timestamp=ts_iso,
@@ -190,7 +194,7 @@ class LinuxTelemetryParser:
         if auth_fail_match:
             ts_raw, host, pid, user = auth_fail_match.groups()
             ts_iso = self._parse_syslog_timestamp(ts_raw) if ts_raw else None
-            pid_str = pid if pid else str(abs(hash(line)) % 100000)
+            pid_str = f"{pid}-{sig}" if pid else sig
             return LogEventInput(
                 event_id=f"{prefix}-SUDO-FAIL-{pid_str}",
                 timestamp=ts_iso,
@@ -213,7 +217,7 @@ class LinuxTelemetryParser:
             ts_raw, host, pid, action, user = pam_match.groups()
             clean_user = re.sub(r"\(.*?\)", "", user)
             ts_iso = self._parse_syslog_timestamp(ts_raw) if ts_raw else None
-            pid_str = pid if pid else str(abs(hash(line)) % 100000)
+            pid_str = f"{pid}-{sig}" if pid else sig
             return LogEventInput(
                 event_id=f"{prefix}-SUDO-PAM-{action.upper()}-{pid_str}",
                 timestamp=ts_iso,
@@ -296,7 +300,7 @@ class LinuxTelemetryParser:
             remote_port = int(remote_addr.rsplit(":", 1)[1]) if ":" in remote_addr and remote_addr.rsplit(":", 1)[1].isdigit() else None
 
             return LogEventInput(
-                event_id=f"{prefix}-NET-{state}-{abs(hash(line)) % 100000}",
+                event_id=f"{prefix}-NET-{state}-{self._line_sig(line)}",
                 event_type="network_connection",
                 source_ip=remote_ip,
                 details={
@@ -314,6 +318,7 @@ class LinuxTelemetryParser:
         Source 2: User & Group Account Management (useradd, usermod, gpasswd, passwd).
         Detects backdoor account creation, UID 0 assignment, and privilege group additions.
         """
+        sig = self._line_sig(line)
         # Pattern 1: useradd new user
         useradd_match = re.search(
             r"^(?:(\S+\s+\d+\s+\d{2}:\d{2}:\d{2})\s+)?(\S+)\s+useradd(?:\[(\d+)\])?:\s+new user:\s+name=([^,\s]+)(?:,\s*UID=(\d+))?",
@@ -322,7 +327,7 @@ class LinuxTelemetryParser:
         if useradd_match:
             ts_raw, host, pid, new_user, uid_str = useradd_match.groups()
             ts_iso = self._parse_syslog_timestamp(ts_raw) if ts_raw else None
-            pid_id = pid or str(abs(hash(line)) % 100000)
+            pid_id = f"{pid}-{sig}" if pid else sig
             uid_val = str(uid_str) if uid_str is not None else None
             return LogEventInput(
                 event_id=f"{prefix}-ACCT-NEW-{pid_id}",
@@ -346,7 +351,7 @@ class LinuxTelemetryParser:
         if grp_match:
             ts_raw, host, pid, target_user, group_name = grp_match.groups()
             ts_iso = self._parse_syslog_timestamp(ts_raw) if ts_raw else None
-            pid_id = pid or str(abs(hash(line)) % 100000)
+            pid_id = f"{pid}-{sig}" if pid else sig
             return LogEventInput(
                 event_id=f"{prefix}-ACCT-GRP-{pid_id}",
                 timestamp=ts_iso,
@@ -369,7 +374,7 @@ class LinuxTelemetryParser:
         if pw_match:
             ts_raw, host, pid, target_user = pw_match.groups()
             ts_iso = self._parse_syslog_timestamp(ts_raw) if ts_raw else None
-            pid_id = pid or str(abs(hash(line)) % 100000)
+            pid_id = f"{pid}-{sig}" if pid else sig
             return LogEventInput(
                 event_id=f"{prefix}-ACCT-PASSWD-{pid_id}",
                 timestamp=ts_iso,
@@ -402,7 +407,7 @@ class LinuxTelemetryParser:
             src_ip = src_m.group(1) if src_m else None
             dst_port = int(dpt_m.group(1)) if dpt_m else None
             return LogEventInput(
-                event_id=f"{prefix}-FW-BLOCK-{abs(hash(line)) % 100000}",
+                event_id=f"{prefix}-FW-BLOCK-{self._line_sig(line)}",
                 timestamp=ts_iso,
                 event_type="firewall_block",
                 source_ip=src_ip,
@@ -477,7 +482,7 @@ class LinuxTelemetryParser:
             ts_raw, host, unit_name = deact_match.groups()
             ts_iso = self._parse_syslog_timestamp(ts_raw) if ts_raw else None
             return LogEventInput(
-                event_id=f"{prefix}-SYSD-STOP-{abs(hash(line)) % 100000}",
+                event_id=f"{prefix}-SYSD-STOP-{self._line_sig(line)}",
                 timestamp=ts_iso,
                 event_type="service_stopped",
                 details={
@@ -498,7 +503,7 @@ class LinuxTelemetryParser:
             ts_iso = self._parse_syslog_timestamp(ts_raw) if ts_raw else None
             clean_unit = unit_name.lower().replace(".service", "")
             return LogEventInput(
-                event_id=f"{prefix}-SYSD-STOP-{abs(hash(line)) % 100000}",
+                event_id=f"{prefix}-SYSD-STOP-{self._line_sig(line)}",
                 timestamp=ts_iso,
                 event_type="service_stopped",
                 details={
@@ -556,7 +561,7 @@ class LinuxTelemetryParser:
 
             evt_type = "web_attack_probe" if attack_category else "web_http_error"
             return LogEventInput(
-                event_id=f"{prefix}-WEB-{status_code}-{abs(hash(line)) % 100000}",
+                event_id=f"{prefix}-WEB-{status_code}-{self._line_sig(line)}",
                 timestamp=ts_iso,
                 event_type=evt_type,
                 source_ip=src_ip,
@@ -599,7 +604,7 @@ class LinuxTelemetryParser:
                     else "/etc/sudoers"
                 )
                 return LogEventInput(
-                    event_id=f"{prefix}-FIM-TAMPER-{abs(hash(line)) % 100000}",
+                    event_id=f"{prefix}-FIM-TAMPER-{self._line_sig(line)}",
                     timestamp=ts_iso,
                     event_type="critical_file_modified",
                     user=calling_user,
@@ -649,7 +654,7 @@ class LinuxTelemetryParser:
         for pat in anti_forensics_patterns:
             if pat in lower_line:
                 return LogEventInput(
-                    event_id=f"{prefix}-APT-ANTIFORENSICS-{abs(hash(line)) % 100000}",
+                    event_id=f"{prefix}-APT-ANTIFORENSICS-{self._line_sig(line)}",
                     timestamp=ts_iso,
                     event_type="anti_forensics_execution",
                     user=calling_user,
@@ -689,7 +694,7 @@ class LinuxTelemetryParser:
             dst_ip = ip_m.group(1) if ip_m else None
             exfil_stage = "network_transfer" if is_network_exfil else "archive_staging"
             return LogEventInput(
-                event_id=f"{prefix}-APT-EXFIL-{abs(hash(line)) % 100000}",
+                event_id=f"{prefix}-APT-EXFIL-{self._line_sig(line)}",
                 timestamp=ts_iso,
                 event_type="data_exfiltration_attempt",
                 source_ip=dst_ip,
@@ -717,7 +722,7 @@ class LinuxTelemetryParser:
             ko_m = re.search(r"(\S+\.ko)", cmd_str)
             sub_type = "promiscuous_sniffing" if is_promisc else "kernel_module_load"
             return LogEventInput(
-                event_id=f"{prefix}-APT-ROOTKIT-{abs(hash(line)) % 100000}",
+                event_id=f"{prefix}-APT-ROOTKIT-{self._line_sig(line)}",
                 timestamp=ts_iso,
                 event_type="rootkit_or_sniff_activity",
                 user="kernel" if is_promisc else calling_user,
@@ -737,10 +742,17 @@ class LinuxTelemetryParser:
         return None
 
     def parse_batch(self, lines: List[str], prefix: str = "EVT-LINUX") -> List[LogEventInput]:
-        """Parses an entire list of raw log lines, ignoring unparseable/corrupted entries."""
+        """Parses an entire list of raw log lines, ignoring unparseable/corrupted entries.
+        Disambiguates rapid sub-second identical lines within a single batch deterministically."""
         results = []
+        seen_ids: Dict[str, int] = {}
         for line in lines:
             parsed = self.parse_line(line, prefix)
             if parsed:
+                base_id = parsed.event_id
+                count = seen_ids.get(base_id, 0) + 1
+                seen_ids[base_id] = count
+                if count > 1:
+                    parsed.event_id = f"{base_id}-{count}"
                 results.append(parsed)
         return results

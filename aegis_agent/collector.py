@@ -13,13 +13,14 @@ Key Architecture & Guarantees:
 
 import os
 import sys
+import json
 import time
 import signal
 import socket
 import logging
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import requests
 from dotenv import load_dotenv
 
@@ -59,6 +60,14 @@ class AegisTelemetryCollector:
         # Cursor file for persistent journal tracking
         default_cursor = Path(__file__).resolve().parent.parent / ".collector_cursor"
         self.cursor_file = Path(os.getenv("AEGIS_CURSOR_FILE", str(default_cursor)))
+        self.offsets_file = Path(
+            os.getenv("AEGIS_OFFSETS_FILE", str(self.cursor_file.with_suffix(".offsets.json")))
+        )
+        default_log_files = "/var/log/nginx/access.log,/var/log/apache2/access.log,/var/log/audit/audit.log"
+        raw_log_files = os.getenv("AEGIS_LOG_FILES", default_log_files)
+        self.log_files: List[Path] = [
+            Path(p.strip()) for p in raw_log_files.split(",") if p.strip()
+        ]
 
         self.last_heartbeat_time = 0.0
         self.last_posture_time = 0.0
@@ -169,6 +178,78 @@ class AegisTelemetryCollector:
         except Exception as e:
             logger.error(f"Error querying journalctl: {e}")
             return [], None
+
+    def get_stored_file_offsets(self) -> Dict[str, Dict[str, int]]:
+        """Retrieves committed byte offsets and inodes for tailed log files."""
+        if self.offsets_file.exists():
+            try:
+                data = json.loads(self.offsets_file.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+            except Exception as e:
+                logger.error(f"Error reading file offsets {self.offsets_file}: {e}")
+        return {}
+
+    def commit_file_offsets(self, offsets: Dict[str, Dict[str, int]]):
+        """Atomically commits log file byte offsets to disk (two-phase commit)."""
+        if not offsets:
+            return
+        try:
+            tmp_file = self.offsets_file.with_suffix(".tmp")
+            tmp_file.write_text(json.dumps(offsets, indent=2), encoding="utf-8")
+            try:
+                os.chmod(tmp_file, 0o600)
+            except Exception:
+                pass
+            tmp_file.replace(self.offsets_file)
+            try:
+                os.chmod(self.offsets_file, 0o600)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.error(f"Failed to commit file offsets to {self.offsets_file}: {e}")
+
+    def read_new_file_lines(self, max_lines_per_file: int = 200) -> Tuple[List[str], Dict[str, Dict[str, int]]]:
+        """
+        Incrementally tails configured flat log files (e.g., /var/log/nginx/access.log,
+        /var/log/audit/audit.log) using inode + byte offset tracking.
+        Does NOT commit new offsets to disk until backend delivery succeeds.
+        """
+        stored = self.get_stored_file_offsets()
+        pending: Dict[str, Dict[str, int]] = dict(stored)
+        collected: List[str] = []
+
+        for file_path in self.log_files:
+            key = str(file_path)
+            if not file_path.exists() or not file_path.is_file():
+                continue
+            try:
+                stat = file_path.stat()
+                inode = int(getattr(stat, "st_ino", 0))
+                size = int(stat.st_size)
+                prev = stored.get(key)
+                offset = 0
+                if prev and prev.get("inode") == inode and int(prev.get("offset", 0)) <= size:
+                    offset = int(prev.get("offset", 0))
+
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    f.seek(offset)
+                    lines_read = 0
+                    while lines_read < max_lines_per_file:
+                        line = f.readline()
+                        if not line:
+                            break
+                        stripped = line.strip()
+                        if stripped:
+                            collected.append(stripped)
+                        lines_read += 1
+                    new_offset = f.tell()
+
+                pending[key] = {"inode": inode, "offset": new_offset}
+            except Exception as e:
+                logger.debug(f"Skipping unreadable log file {file_path}: {e}")
+
+        return collected, pending
 
     def sanitize_lines(self, raw_lines: List[str]) -> Tuple[List[str], int]:
         """Pre-transmission sanitization. Quarantines lines containing passwords, keys, or secrets."""
@@ -286,21 +367,30 @@ class AegisTelemetryCollector:
 
         while self.running:
             try:
-                # 1. Read new lines incrementally (Phase 1)
+                # 1. Read new lines incrementally from journalctl & flat log files (Phase 1)
                 raw_lines, pending_cursor = self.read_new_journal_lines()
-                if raw_lines:
-                    safe_lines, quarantined = self.sanitize_lines(raw_lines)
+                file_lines, pending_offsets = self.read_new_file_lines()
+                combined_lines = raw_lines + file_lines
+
+                if combined_lines:
+                    safe_lines, quarantined = self.sanitize_lines(combined_lines)
                     if safe_lines:
                         # Phase 2: Transmit to AEGIS backend
                         transmitted = self.send_telemetry(safe_lines)
-                        if transmitted and pending_cursor:
-                            # Commit cursor only on verified HTTP 200 delivery
+                        if transmitted:
+                            # Commit cursor and file offsets only on verified HTTP 200 delivery
+                            if pending_cursor:
+                                self.commit_cursor(pending_cursor)
+                            if pending_offsets:
+                                self.commit_file_offsets(pending_offsets)
+                        else:
+                            logger.warning("Delivery failed. Cursor and file offsets not committed to allow retry next cycle.")
+                    elif quarantined > 0:
+                        # Entire batch quarantined; advance cursor/offsets to avoid infinite loop on bad lines
+                        if pending_cursor:
                             self.commit_cursor(pending_cursor)
-                        elif not transmitted:
-                            logger.warning("Delivery failed. Cursor not committed to allow retry next cycle.")
-                    elif quarantined > 0 and pending_cursor:
-                        # Entire batch quarantined; advance cursor to avoid infinite loop on bad lines
-                        self.commit_cursor(pending_cursor)
+                        if pending_offsets:
+                            self.commit_file_offsets(pending_offsets)
 
                 # 2. Check if heartbeat or posture scan is due
                 now = time.time()

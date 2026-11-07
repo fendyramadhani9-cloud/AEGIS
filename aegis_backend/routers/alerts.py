@@ -4,6 +4,7 @@ Provides read-only access to Rules Engine alerts without modifying severity.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime, timezone
 from typing import Optional
 from aegis_backend.schemas import (
     AlertItem,
@@ -29,6 +30,7 @@ from aegis_backend.incident_service import (
     build_incident_replay,
     build_alert_context,
     build_signed_evidence_bundle,
+    detect_collection_gaps,
 )
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts"])
@@ -150,11 +152,13 @@ def get_alert_evidence(
 )
 def analyze_alert(
     alert_id: str,
+    force: bool = Query(default=False, description="Bypass per-alert cooldown cache"),
+    cooldown_sec: int = Query(default=10, ge=0, le=300, description="Cooldown window in seconds"),
     repo: BaseAegisRepository = Depends(get_repository),
 ):
     """
     Runs AI-assisted Runtime Monitor (RM) analysis on a deterministic alert and its supporting evidence.
-    Severity remains strictly immutable.
+    Severity remains strictly immutable. Includes per-alert cooldown to prevent accidental quota exhaustion.
     """
     try:
         alert = repo.get_alert_by_id(alert_id)
@@ -163,6 +167,15 @@ def analyze_alert(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Alert with ID '{alert_id}' not found.",
             )
+        if not force and cooldown_sec > 0:
+            cached = op_store.ai_analyses.get(alert_id)
+            if cached and cached.state == "ready" and cached.generated_at:
+                try:
+                    gen_dt = datetime.fromisoformat(cached.generated_at.replace("Z", "+00:00"))
+                    if (datetime.now(timezone.utc) - gen_dt).total_seconds() < cooldown_sec:
+                        return cached
+                except Exception:
+                    pass
         evidence_items = repo.get_alert_evidence(alert_id) or []
         return run_alert_ai_analysis(alert, evidence_items, repo=repo)
     except HTTPException:
@@ -195,9 +208,11 @@ def get_alert_handoff(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Alert with ID '{alert_id}' not found.",
             )
-        host = repo.get_host_by_id(alert.get("host_id", ""))
+        host_id = alert.get("host_id", "")
+        host = repo.get_host_by_id(host_id)
         evidence_items = repo.get_alert_evidence(alert_id) or []
-        return generate_handoff_document(alert, host, evidence_items, gaps=[])
+        gaps = detect_collection_gaps([host] if host else [], host_id=host_id)
+        return generate_handoff_document(alert, host, evidence_items, gaps=gaps)
     except HTTPException:
         raise
     except Exception as e:
@@ -232,11 +247,12 @@ def verify_alert(
         host_id = alert.get("host_id", "")
         host = repo.get_host_by_id(host_id)
         recent_alerts, _ = repo.list_alerts(limit=100, offset=0, host_id=host_id)
+        open_gaps = detect_collection_gaps([host] if host else [], host_id=host_id, open_only=True)
         return verify_alert_recovery(
             alert=alert,
             host=host,
             recent_alerts=recent_alerts,
-            open_gaps=[],
+            open_gaps=open_gaps,
             observation_window_min=window_min,
         )
     except HTTPException:

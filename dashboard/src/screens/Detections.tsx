@@ -121,7 +121,9 @@ export function DetectionsScreen() {
                   a.title.toLowerCase().includes(qLower) ||
                   a.ruleId.toLowerCase().includes(qLower) ||
                   a.reason.toLowerCase().includes(qLower) ||
-                  a.id.toLowerCase().includes(qLower)),
+                  a.id.toLowerCase().includes(qLower) ||
+                  (a.ruleLogic?.mitreAttackId && a.ruleLogic.mitreAttackId.toLowerCase().includes(qLower)) ||
+                  (a.ruleLogic?.mitreAttackName && a.ruleLogic.mitreAttackName.toLowerCase().includes(qLower))),
             );
             return (
               <>

@@ -55,12 +55,27 @@ def list_hosts(
 ):
     """Retrieves paginated list of monitored Linux hosts."""
     try:
-        data, total = repo.list_hosts(limit=limit, offset=offset, status=agent_status)
-        items = []
-        for h in data:
-            h_dict = dict(h)
-            h_dict["agent_status"] = derive_agent_status(h_dict.get("last_data_at"), h_dict.get("agent_status", "online"))
-            items.append(HostItem.model_validate(h_dict))
+        if agent_status:
+            raw_hosts, _ = repo.list_hosts(limit=1000, offset=0, status=None)
+            derived_all = []
+            for h in raw_hosts:
+                h_dict = dict(h)
+                h_dict["agent_status"] = derive_agent_status(
+                    h_dict.get("last_data_at"), h_dict.get("agent_status", "online")
+                )
+                if h_dict["agent_status"] == agent_status:
+                    derived_all.append(HostItem.model_validate(h_dict))
+            total = len(derived_all)
+            items = derived_all[offset : offset + limit]
+        else:
+            data, total = repo.list_hosts(limit=limit, offset=offset, status=None)
+            items = []
+            for h in data:
+                h_dict = dict(h)
+                h_dict["agent_status"] = derive_agent_status(
+                    h_dict.get("last_data_at"), h_dict.get("agent_status", "online")
+                )
+                items.append(HostItem.model_validate(h_dict))
         return PaginatedHostsResponse(
             items=items,
             total=total,

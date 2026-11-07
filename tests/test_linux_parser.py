@@ -226,4 +226,31 @@ def test_parse_defense_apt_anti_forensics_exfil_and_rootkit(parser):
     assert ev_rk.details["interface"] == "eth0"
 
 
+def test_bug_001_sshd_same_pid_multiple_attempts_unique_and_idempotent(parser):
+    """
+    Regression test for BUG-001:
+    Multiple failed SSH password attempts within the same sshd[pid] child process
+    (single TCP connection with MaxAuthTries=6) must produce distinct event_ids
+    so database deduplication does not drop them, while retrying the same batch
+    produces identical event_ids for idempotency.
+    """
+    raw_lines = [
+        "Nov 07 16:20:01 fenn sshd[4412]: Failed password for admin from 203.0.113.50 port 51234 ssh2",
+        "Nov 07 16:20:02 fenn sshd[4412]: Failed password for admin from 203.0.113.50 port 51234 ssh2",
+        "Nov 07 16:20:03 fenn sshd[4412]: Failed password for admin from 203.0.113.50 port 51234 ssh2",
+        "Nov 07 16:20:03 fenn sshd[4412]: Failed password for admin from 203.0.113.50 port 51234 ssh2",
+        "Nov 07 16:20:04 fenn sshd[4412]: Failed password for admin from 203.0.113.50 port 51234 ssh2",
+    ]
+    batch_1 = parser.parse_batch(raw_lines, prefix="EVT-HOST1")
+    assert len(batch_1) == 5
+    event_ids_1 = [ev.event_id for ev in batch_1]
+    assert len(set(event_ids_1)) == 5, f"Expected 5 unique event_ids, got: {event_ids_1}"
+
+    # Retry idempotency: parsing the same batch again must yield the exact same event_ids
+    batch_2 = parser.parse_batch(raw_lines, prefix="EVT-HOST1")
+    event_ids_2 = [ev.event_id for ev in batch_2]
+    assert event_ids_1 == event_ids_2
+
+
+
 

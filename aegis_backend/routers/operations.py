@@ -19,10 +19,12 @@ from aegis_backend.incident_service import (
     run_finding_sc_ai_analysis,
     run_reporting_ai_summary,
     generate_report_pdf_bytes,
+    detect_collection_gaps,
 )
 from aegis_agent.security_checker import ReadOnlySecurityChecker
 from aegis_backend.schemas import (
     FindingItem,
+    TelemetryGapItem,
     AiAnalysisResponse,
     EvidenceSessionItem,
     StartEvidenceRequest,
@@ -354,6 +356,20 @@ def stop_evidence_session(session_id: str):
 
 
 @router.get(
+    "/collection-gaps",
+    response_model=List[TelemetryGapItem],
+    summary="List Active or Historical Telemetry Collection Gaps",
+)
+def list_collection_gaps(
+    host_id: Optional[str] = Query(default=None),
+    open_only: bool = Query(default=False),
+    repo: BaseAegisRepository = Depends(get_repository),
+):
+    hosts, _ = repo.list_hosts(limit=100, offset=0)
+    return detect_collection_gaps(hosts, host_id=host_id, open_only=open_only)
+
+
+@router.get(
     "/reports",
     response_model=List[ReportItem],
     summary="List Generated Security Reports",
@@ -372,17 +388,43 @@ def create_report(
     repo: BaseAegisRepository = Depends(get_repository),
 ):
     now_iso = datetime.now(timezone.utc).isoformat()
-    alerts, alert_total = repo.list_alerts(limit=100, offset=0)
-    host_alerts = [a for a in alerts if a.get("host_id") in req.host_ids]
+    alerts, _ = repo.list_alerts(limit=100, offset=0)
+    scoped_alerts = [a for a in alerts if not req.host_ids or a.get("host_id") in req.host_ids]
+
+    # Filter by period_start / period_end when valid ISO timestamps are supplied
+    if req.period_start or req.period_end:
+        try:
+            p_start = datetime.fromisoformat(req.period_start.replace("Z", "+00:00")) if req.period_start else None
+            p_end = datetime.fromisoformat(req.period_end.replace("Z", "+00:00")) if req.period_end else None
+            period_filtered = []
+            for a in scoped_alerts:
+                det_str = a.get("detected_at")
+                if not det_str:
+                    period_filtered.append(a)
+                    continue
+                det_dt = datetime.fromisoformat(str(det_str).replace("Z", "+00:00"))
+                if p_start and det_dt < p_start:
+                    continue
+                if p_end and det_dt > p_end:
+                    continue
+                period_filtered.append(a)
+            # Only apply period filter if period_start <= period_end; if alerts match or if explicit window is queried
+            if period_filtered or not req.host_ids:
+                scoped_alerts = period_filtered
+        except Exception:
+            pass
+
     hosts, _ = repo.list_hosts(limit=100, offset=0)
-    findings = _build_default_findings_for_hosts([h for h in hosts if h.get("id") in req.host_ids])
+    scoped_hosts = [h for h in hosts if not req.host_ids or h.get("id") in req.host_ids]
+    findings = _build_default_findings_for_hosts(scoped_hosts)
+    gaps = detect_collection_gaps(scoped_hosts)
 
     report_id = f"r-{len(op_store.reports) + 1:04d}"
     exec_summary, key_slot = run_reporting_ai_summary(
         report_id=report_id,
         report_type=req.type,
         host_ids=req.host_ids,
-        alerts=host_alerts if host_alerts else alerts,
+        alerts=scoped_alerts,
         findings=findings,
         period_start=req.period_start,
         period_end=req.period_end,
@@ -400,9 +442,9 @@ def create_report(
         completed_at=now_iso,
         pages=4 if req.type == "daily" else 6,
         size_kb=284 if req.type == "daily" else 468,
-        alert_count=len(host_alerts) if host_alerts else alert_total,
+        alert_count=len(scoped_alerts),
         finding_count=len(findings),
-        gap_count=0,
+        gap_count=len(gaps),
         ai_executive_summary=exec_summary,
         ai_key_slot=key_slot,
     )

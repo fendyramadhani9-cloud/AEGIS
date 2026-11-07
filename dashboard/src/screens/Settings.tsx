@@ -222,7 +222,10 @@ export function SettingsScreen() {
                   ['Version', <Tag>v1.0 MVP</Tag>],
                   ['Agent Mode', 'Read-only (No auto-remediation, no blocking)'],
                   ['Supported Host OS', 'Ubuntu Server (22.04 / 24.04 LTS)'],
-                  ['Initial Sources', 'SSH auth log (/var/log/auth.log), Nginx access/error logs'],
+                  [
+                    'Monitored Sources',
+                    'SSH auth (/var/log/auth.log), sudo/PAM, Linux auditd (/var/log/audit/audit.log), Nginx/Apache web logs, systemd & kernel journal',
+                  ],
                 ]}
               />
             </Group>

@@ -131,7 +131,17 @@ export function HostsScreen() {
                                       className={`source-pill source-pill--${srcMeta.tone}`}
                                       title={`${s.id}: ${srcMeta.label}`}
                                     >
-                                      {s.id === 'ssh-auth' ? 'SSH' : s.id === 'nginx-access' ? 'Access' : 'Error'}
+                                      {s.id === 'ssh-auth'
+                                        ? 'SSH'
+                                        : s.id === 'nginx-access'
+                                          ? 'Nginx'
+                                          : s.id === 'nginx-error'
+                                            ? 'Nginx Err'
+                                            : s.id === 'auditd'
+                                              ? 'auditd'
+                                              : s.id === 'syslog'
+                                                ? 'syslog'
+                                                : s.id}
                                     </span>
                                   );
                                 })}

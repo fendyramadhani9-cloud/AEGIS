@@ -133,3 +133,57 @@ def test_two_phase_commit_commits_only_on_delivery_success(mock_hb, mock_send, m
 
     # Cursor successfully committed
     assert collector.get_stored_cursor() == new_pending_cursor
+
+
+def test_bug_003_incremental_file_tailing_nginx_and_auditd_two_phase_commit(tmp_path):
+    """
+    Regression test for BUG-003:
+    Collector incrementally reads new lines from flat log files (e.g. nginx access.log
+    and audit.log) and only advances byte offsets after delivery succeeds.
+    """
+    nginx_log = tmp_path / "access.log"
+    audit_log = tmp_path / "audit.log"
+    cursor_file = tmp_path / ".test_cursor"
+
+    nginx_log.write_text(
+        '198.51.100.88 - - [07/Nov/2026:16:06:05 +0000] "GET /../../etc/passwd HTTP/1.1" 404 196 "-" "sqlmap/1.7"\n',
+        encoding="utf-8",
+    )
+    audit_log.write_text(
+        'type=EXECVE msg=audit(1762002180.123:4501): argc=2 a0="shred" a1="/var/log/auth.log"\n',
+        encoding="utf-8",
+    )
+
+    with patch.dict(
+        "os.environ",
+        {
+            "AEGIS_CURSOR_FILE": str(cursor_file),
+            "AEGIS_LOG_FILES": f"{nginx_log},{audit_log}",
+        },
+    ):
+        agent = AegisTelemetryCollector()
+        lines_1, pending_offsets_1 = agent.read_new_file_lines()
+        assert len(lines_1) == 2
+        assert any("/../../etc/passwd" in l for l in lines_1)
+        assert any("shred" in l for l in lines_1)
+
+        # Before committing offsets (e.g., if network fails), re-reading returns the same 2 lines
+        lines_retry, _ = agent.read_new_file_lines()
+        assert lines_retry == lines_1
+
+        # Commit offsets after delivery succeeds
+        agent.commit_file_offsets(pending_offsets_1)
+
+        # Now reading again with no new lines appended returns empty list
+        lines_after, _ = agent.read_new_file_lines()
+        assert lines_after == []
+
+        # Append 1 new line to nginx_log -> only the new line is read
+        with open(nginx_log, "a", encoding="utf-8") as f:
+            f.write('198.51.100.88 - - [07/Nov/2026:16:06:09 +0000] "GET /.env HTTP/1.1" 403 150 "-" "curl/8.0"\n')
+
+        lines_incremental, pending_offsets_2 = agent.read_new_file_lines()
+        assert len(lines_incremental) == 1
+        assert "/.env" in lines_incremental[0]
+        agent.commit_file_offsets(pending_offsets_2)
+

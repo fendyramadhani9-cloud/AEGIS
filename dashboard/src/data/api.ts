@@ -314,6 +314,38 @@ const RULE_META_MAP: Record<string, { mitreId: string; mitreName: string; condit
   },
 };
 
+function inferSourceFromRuleOrBackend(ruleId?: string, rawSource?: string): SourceId {
+  if (
+    rawSource === 'nginx-access' ||
+    rawSource === 'nginx-error' ||
+    rawSource === 'auditd' ||
+    rawSource === 'syslog' ||
+    rawSource === 'ssh-auth'
+  ) {
+    return rawSource;
+  }
+  if (rawSource === 'nginx') return 'nginx-access';
+  if (rawSource === 'sudo') return 'auditd';
+  if (rawSource === 'systemd' || rawSource === 'ufw' || rawSource === 'kernel' || rawSource === 'cron') return 'syslog';
+  const r = (ruleId || '').toUpperCase();
+  if (r.includes('WEB')) return 'nginx-access';
+  if (
+    r.includes('SUDO') ||
+    r.includes('BACKDOOR') ||
+    r.includes('ANTIFORENSICS') ||
+    r.includes('ANTI-FORENSICS') ||
+    r.includes('EXFIL') ||
+    r.includes('ROOTKIT') ||
+    r.includes('KERNEL')
+  ) {
+    return 'auditd';
+  }
+  if (r.includes('CRON') || r.includes('DEFENSE-EVASION') || r.includes('SYSTEM-DISRUPTION') || r.includes('PORT-SCAN')) {
+    return 'syslog';
+  }
+  return 'ssh-auth';
+}
+
 function mapBackendAlert(a: BackendAlertItem, allAlerts?: BackendAlertItem[]): Alert {
   const cachedAi = liveAiCache.get(a.id);
   const cachedInv = liveInvestigationCache.get(a.id);
@@ -330,6 +362,14 @@ function mapBackendAlert(a: BackendAlertItem, allAlerts?: BackendAlertItem[]): A
   // Compute deduplication / grouping across alerts sharing same rule & host
   const sameRuleAlerts = (allAlerts || [a]).filter((x) => x.host_id === a.host_id && x.rule_id === a.rule_id);
   const sortedTimes = sameRuleAlerts.map((x) => x.detected_at).sort();
+  const inferredSource = inferSourceFromRuleOrBackend(a.rule_id);
+  const sourceLabelMap: Record<SourceId, string> = {
+    'ssh-auth': 'SSH Authentication Journal',
+    'auditd': 'Sudo, Auditd & Privilege Telemetry',
+    'nginx-access': 'Nginx Web Access Log',
+    'nginx-error': 'Nginx Web Error Log',
+    'syslog': 'Systemd & Kernel Security Journal',
+  };
 
   return {
     kind: 'alert',
@@ -342,9 +382,14 @@ function mapBackendAlert(a: BackendAlertItem, allAlerts?: BackendAlertItem[]): A
     investigationStatus: cachedInv?.status ?? ('new' as InvestigationStatus),
     investigationNotes: cachedInv?.notes ?? [],
     provenance: {
-      source: a.rule_id?.includes('SUDO') ? 'auditd' : 'ssh-auth',
-      sourceLabel: a.rule_id?.includes('SUDO') ? 'Sudo & Privilege Escalation Log' : 'SSH Authentication Journal',
-      logFilePath: '/var/log/auth.log (systemd-journald)',
+      source: inferredSource,
+      sourceLabel: sourceLabelMap[inferredSource],
+      logFilePath:
+        inferredSource === 'nginx-access'
+          ? '/var/log/nginx/access.log'
+          : inferredSource === 'auditd'
+          ? '/var/log/audit/audit.log (systemd-journald)'
+          : '/var/log/auth.log (systemd-journald)',
       collector: 'AEGIS Telemetry Collector v0.1 (Two-Phase Commit)',
       ingestedAt: a.created_at || a.detected_at,
       parser: 'LinuxTelemetryParser (Regex + Sanitizer)',
@@ -372,7 +417,7 @@ function mapBackendAlert(a: BackendAlertItem, allAlerts?: BackendAlertItem[]): A
       rationale: meta.rationale,
     },
     hostId: a.host_id,
-    source: (a.rule_id?.includes('SUDO') ? 'auditd' : 'ssh-auth') as SourceId,
+    source: inferredSource,
     detectedAt: a.detected_at,
     reason: a.reason,
     supportingEventIds: [],
@@ -614,7 +659,7 @@ export const api = {
         id: ev.event_id,
         ts: ev.event_timestamp || ev.created_at || new Date().toISOString(),
         hostId: ev.host_id || '',
-        source: (ev.source_id === 'nginx-access' || ev.source_id === 'nginx-error' ? ev.source_id : 'ssh-auth') as SourceId,
+        source: inferSourceFromRuleOrBackend(undefined, ev.source_id || undefined),
         type: ev.event_type || 'auth',
         message: ev.message,
       }));
@@ -642,17 +687,46 @@ export const api = {
           .sort(byTimeDesc((g) => g.start)),
       );
     }
-    return [];
+
+    try {
+      const params = new URLSearchParams();
+      if (opts.hostId) params.set('host_id', opts.hostId);
+      if (opts.openOnly) params.set('open_only', 'true');
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const raw = await requestBackend<
+        Array<{
+          id: string;
+          host_id: string;
+          source: string;
+          start: string;
+          end?: string | null;
+          reason: string;
+        }>
+      >(`/api/collection-gaps${qs}`);
+      return raw
+        .map((g) => ({
+          id: g.id,
+          hostId: g.host_id,
+          source: (g.source === 'agent' ? 'agent' : inferSourceFromRuleOrBackend(undefined, g.source)) as SourceId | 'agent',
+          start: g.start,
+          end: g.end ?? null,
+          reason: g.reason,
+        }))
+        .sort(byTimeDesc((g) => g.start));
+    } catch {
+      return [];
+    }
   },
 
   timeline: async (opts: { hostId?: string; sinceHours?: number } = {}): Promise<TimelineItem[]> => {
     if (previewState === 'loading') return new Promise(() => {});
     if (previewState === 'error') throw new ApiError('Simulated error state');
     if (previewState === 'empty') return [];
+    const since = Date.now() - (opts.sinceHours ?? 24) * 3600_000;
+    const inScope = (hostId: string, ts: string) =>
+      (!opts.hostId || hostId === opts.hostId) && new Date(ts).getTime() >= since;
+
     if (previewState === 'sample') {
-      const since = Date.now() - (opts.sinceHours ?? 24) * 3600_000;
-      const inScope = (hostId: string, ts: string) =>
-        (!opts.hostId || hostId === opts.hostId) && new Date(ts).getTime() >= since;
       const items: TimelineItem[] = [
         ...db.events.filter((e) => inScope(e.hostId, e.ts)).map((e) => ({ kind: 'event' as const, ts: e.ts, event: e })),
         ...db.alerts.filter((a) => inScope(a.hostId, a.detectedAt)).map((a) => ({ kind: 'alert' as const, ts: a.detectedAt, alert: a })),
@@ -664,15 +738,26 @@ export const api = {
       return items.sort((a, b) => b.ts.localeCompare(a.ts) || rank[a.kind] - rank[b.kind]);
     }
 
-    // Live mode: build unified chronological timeline from live alerts and their supporting evidence
-    const alerts = await api.alerts(opts.hostId);
-    const items: TimelineItem[] = alerts.map((a) => ({ kind: 'alert' as const, ts: a.detectedAt, alert: a }));
-    const topAlerts = alerts.slice(0, 6);
+    // Live mode: build unified chronological timeline from live alerts, gaps, and supporting evidence
+    const [alerts, gaps] = await Promise.all([
+      api.alerts(opts.hostId),
+      api.gaps({ hostId: opts.hostId }),
+    ]);
+    const filteredAlerts = alerts.filter((a) => inScope(a.hostId, a.detectedAt));
+    // If all live alerts are historical (older than sinceHours window), still allow searching when sinceHours >= 168
+    const activeAlerts = filteredAlerts.length > 0 || (opts.sinceHours ?? 24) < 168 ? filteredAlerts : alerts;
+    const items: TimelineItem[] = activeAlerts.map((a) => ({ kind: 'alert' as const, ts: a.detectedAt, alert: a }));
+    for (const g of gaps) {
+      if ((!opts.hostId || g.hostId === opts.hostId) && new Date(g.end ?? Date.now()).getTime() >= since) {
+        items.push({ kind: 'gap' as const, ts: g.start, gap: g });
+      }
+    }
+    const topAlerts = activeAlerts.slice(0, 12);
     const evBatches = await Promise.all(topAlerts.map((a) => api.alertEvidence(a.id).catch(() => [])));
     const seenEventIds = new Set<string>();
     for (const batch of evBatches) {
       for (const ev of batch) {
-        if (!seenEventIds.has(ev.id)) {
+        if (!seenEventIds.has(ev.id) && (inScope(ev.hostId, ev.ts) || activeAlerts === alerts)) {
           seenEventIds.add(ev.id);
           items.push({ kind: 'event' as const, ts: ev.ts, event: ev });
         }
@@ -1714,6 +1799,26 @@ export const actions = {
   },
 
   async retryReport(id: string) {
+    if (previewState !== 'sample') {
+      try {
+        const existing = await api.report(id);
+        await requestBackend('/api/reports', {
+          method: 'POST',
+          body: JSON.stringify({
+            type: existing?.type || 'daily',
+            host_ids: existing?.hostIds?.length ? existing.hostIds : ['host-fenn-ubuntu'],
+            period_start: existing?.periodStart || new Date(Date.now() - 86400_000).toISOString(),
+            period_end: existing?.periodEnd || new Date().toISOString(),
+            actor: 'ops-admin',
+          }),
+        });
+      } catch {
+        // Fallback if backend unreachable
+      }
+      bump();
+      return;
+    }
+
     const r = db.reports.find((x) => x.id === id);
     if (!r) return;
     r.status = 'pending';

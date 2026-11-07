@@ -5,6 +5,7 @@ import {
   ChevronRight,
   FileText,
   FlaskConical,
+  History,
   LayoutGrid,
   ListTree,
   Moon,
@@ -27,6 +28,7 @@ const NAV_DESKTOP = [
   { to: '/timeline', label: 'Timeline', icon: ListTree },
   { to: '/evidence', label: 'Evidence Mode', icon: Radio },
   { to: '/reports', label: 'Reports', icon: FileText, match: ['/reports'] },
+  { to: '/audit', label: 'Audit Log', icon: History, match: ['/audit'] },
 ];
 
 const NAV_MOBILE = [

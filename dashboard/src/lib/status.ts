@@ -126,6 +126,12 @@ export const investigationStatusMeta: Record<InvestigationStatus, StatusMeta> = 
   investigating: { label: 'Investigating', tone: 'warning', icon: Clock, hint: 'Active triage under operator review' },
   resolved: { label: 'Resolved', tone: 'healthy', icon: CheckCheck, hint: 'Confirmed incident mitigated and closed' },
   false_positive: { label: 'False Positive', tone: 'disabled', icon: Ban, hint: 'Authorized test or benign administrative action' },
+  reopened: { label: 'Reopened', tone: 'critical', icon: OctagonAlert, hint: 'Triggering condition recurred after resolution' },
+  unverified: { label: 'Unverified', tone: 'warning', icon: CircleDashed, hint: 'Telemetry gap or observation window incomplete' },
+  triaged: { label: 'Triaged', tone: 'info', icon: CircleDot, hint: 'Initial operator triage complete' },
+  contained: { label: 'Contained', tone: 'info', icon: ShieldCheck, hint: 'Threat activity isolated pending full verification' },
+  escalated: { label: 'Escalated', tone: 'critical', icon: TriangleAlert, hint: 'Escalated to senior incident response' },
+  closed: { label: 'Closed', tone: 'healthy', icon: CircleCheck, hint: 'Investigation formally archived' },
 };
 
 export const sourceLabel: Record<string, string> = {

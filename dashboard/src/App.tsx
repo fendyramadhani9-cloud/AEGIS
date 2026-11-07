@@ -13,6 +13,7 @@ import { TimelineScreen } from './screens/Timeline';
 import { EvidenceScreen } from './screens/Evidence';
 import { ReportsScreen } from './screens/Reports';
 import { ReportDetailScreen } from './screens/ReportDetail';
+import { AuditLogScreen } from './screens/AuditLog';
 import { SettingsScreen } from './screens/Settings';
 
 export function App() {
@@ -32,6 +33,7 @@ export function App() {
               <Route path="evidence" element={<EvidenceScreen />} />
               <Route path="reports" element={<ReportsScreen />} />
               <Route path="reports/:id" element={<ReportDetailScreen />} />
+              <Route path="audit" element={<AuditLogScreen />} />
               <Route path="settings" element={<SettingsScreen />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

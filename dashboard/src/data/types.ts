@@ -15,7 +15,17 @@ export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 export type Confidence = 'confirmed' | 'high' | 'suspected' | 'low';
 
 /** Operator-driven investigation lifecycle (Feature 4). Manual record-keeping, never auto-remediation. */
-export type InvestigationStatus = 'new' | 'investigating' | 'resolved' | 'false_positive';
+export type InvestigationStatus =
+  | 'new'
+  | 'investigating'
+  | 'resolved'
+  | 'false_positive'
+  | 'reopened'
+  | 'unverified'
+  | 'triaged'
+  | 'contained'
+  | 'escalated'
+  | 'closed';
 
 export interface InvestigationNote {
   id: string;

@@ -12,10 +12,12 @@ Enforces core AEGIS security & product constraints:
 
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 import hashlib
 import io
 import json
 import logging
+import os
 
 from aegis_backend.config import settings
 from aegis_backend.repository import BaseAegisRepository
@@ -397,10 +399,13 @@ class OperationalStateStore:
     """
     Maintains operational workflow states (AI analyses, investigation status/notes,
     recovery verifications, emergency evidence sessions, operator audit logs, and reports)
-    so live dashboard actions work seamlessly alongside Supabase.
+    with atomic disk persistence so state survives service restarts.
     """
 
-    def __init__(self):
+    def __init__(self, state_file: Optional[Path] = None):
+        default_path = Path(__file__).resolve().parent.parent / ".aegis_operational_state.json"
+        env_path = os.getenv("AEGIS_STATE_FILE")
+        self.state_file: Path = state_file or (Path(env_path) if env_path else default_path)
         self.ai_analyses: Dict[str, AiAnalysisResponse] = {}
         self.investigations: Dict[str, Dict[str, Any]] = {}
         self.verifications: Dict[str, RecoveryVerificationResponse] = {}
@@ -419,6 +424,56 @@ class OperationalStateStore:
             )
         ]
         self.reports: List[ReportItem] = []
+        self.load_snapshot()
+
+    def save_snapshot(self) -> None:
+        """Atomically persists operational state to disk."""
+        try:
+            payload = {
+                "investigations": self.investigations,
+                "evidence_sessions": [s.model_dump() for s in self.evidence_sessions],
+                "reports": [r.model_dump() for r in self.reports],
+                "audit_logs": [a.model_dump() for a in self.audit_logs[:500]],
+                "ai_analyses": {k: v.model_dump() for k, v in self.ai_analyses.items()},
+                "verifications": {k: v.model_dump() for k, v in self.verifications.items()},
+                "host_findings": {
+                    hid: [f.model_dump() for f in flist] for hid, flist in self.host_findings.items()
+                },
+            }
+            tmp_file = self.state_file.with_suffix(".tmp")
+            tmp_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            tmp_file.replace(self.state_file)
+        except Exception as e:
+            logger.debug(f"Failed to persist operational state snapshot: {e}")
+
+    def load_snapshot(self) -> None:
+        """Restores persisted operational state from disk if present."""
+        if not self.state_file.exists():
+            return
+        try:
+            data = json.loads(self.state_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return
+            if isinstance(data.get("investigations"), dict):
+                self.investigations = data["investigations"]
+            if isinstance(data.get("evidence_sessions"), list):
+                self.evidence_sessions = [EvidenceSessionItem(**s) for s in data["evidence_sessions"]]
+            if isinstance(data.get("reports"), list):
+                self.reports = [ReportItem(**r) for r in data["reports"]]
+            if isinstance(data.get("audit_logs"), list) and data["audit_logs"]:
+                self.audit_logs = [AuditLogItem(**a) for a in data["audit_logs"]]
+            if isinstance(data.get("ai_analyses"), dict):
+                self.ai_analyses = {k: AiAnalysisResponse(**v) for k, v in data["ai_analyses"].items()}
+            if isinstance(data.get("verifications"), dict):
+                self.verifications = {k: RecoveryVerificationResponse(**v) for k, v in data["verifications"].items()}
+            if isinstance(data.get("host_findings"), dict):
+                self.host_findings = {
+                    hid: [FindingItem(**f) for f in flist]
+                    for hid, flist in data["host_findings"].items()
+                    if isinstance(flist, list)
+                }
+        except Exception as e:
+            logger.debug(f"Skipping operational state snapshot load: {e}")
 
     def record_audit(
         self,
@@ -440,6 +495,7 @@ class OperationalStateStore:
             details=details or {},
         )
         self.audit_logs.insert(0, item)
+        self.save_snapshot()
         return item
 
     def get_investigation(self, alert_id: str) -> InvestigationStateResponse:
@@ -1674,4 +1730,58 @@ def generate_report_pdf_bytes(
             b"trailer << /Size 5 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
         )
         return pdf
+
+
+def detect_collection_gaps(
+    hosts: List[Dict[str, Any]],
+    host_id: Optional[str] = None,
+    open_only: bool = False,
+) -> List[TelemetryGapItem]:
+    """
+    Deterministically detects telemetry collection gaps based on host agent status
+    and heartbeat staleness (> 5 minutes since last_data_at).
+    """
+    now = datetime.now(timezone.utc)
+    gaps: List[TelemetryGapItem] = []
+
+    for h in hosts:
+        hid = h.get("id") or h.get("host_id")
+        if not hid:
+            continue
+        if host_id and hid != host_id:
+            continue
+
+        status_str = str(h.get("agent_status") or "unknown").lower()
+        last_data_at = h.get("last_data_at")
+        is_stale = False
+        if last_data_at:
+            try:
+                last_dt = datetime.fromisoformat(str(last_data_at).replace("Z", "+00:00"))
+                if (now - last_dt).total_seconds() > 300:
+                    is_stale = True
+            except Exception:
+                pass
+        elif status_str in ("offline", "delayed", "degraded", "unknown"):
+            is_stale = True
+
+        if status_str in ("offline", "delayed", "degraded") or is_stale:
+            gap_start = str(last_data_at) if last_data_at else (now - timedelta(minutes=15)).isoformat()
+            gaps.append(
+                TelemetryGapItem(
+                    id=f"gap-{hid}-agent",
+                    host_id=hid,
+                    source="agent",
+                    start=gap_start,
+                    end=None,
+                    reason=(
+                        f"Host '{h.get('hostname', hid)}' agent is '{status_str}' or telemetry stream is stale "
+                        f"(last heartbeat: {last_data_at or 'never'})."
+                    ),
+                )
+            )
+
+    if open_only:
+        gaps = [g for g in gaps if g.end is None]
+    return gaps
+
 

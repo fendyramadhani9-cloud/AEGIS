@@ -150,7 +150,7 @@ export function HostDetailScreen() {
                   ) : (
                     <EmptyState icon={ShieldCheck} title="No RM alerts for this host">
                       {host.agentStatus === 'online'
-                        ? 'No active rule has matched on the collected SSH and Nginx logs.'
+                        ? 'No active rule has matched on the collected SSH, sudo, auditd, Nginx, and systemd logs.'
                         : 'No alerts in the data received so far. Data from this host is incomplete.'}
                     </EmptyState>
                   ))}

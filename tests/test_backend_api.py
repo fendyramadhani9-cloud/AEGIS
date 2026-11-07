@@ -557,4 +557,146 @@ def test_kill_chain_context_signed_evidence_bundle_and_pdf_report():
     assert pdf_res.content.startswith(b"%PDF-")
 
 
+def test_bug_002_collection_gaps_endpoint_and_handoff_integration():
+    """
+    Regression test for BUG-002:
+    Verifies GET /api/collection-gaps returns open gaps for offline/stale hosts
+    and that handoff & recovery verification include real gap records rather than hardcoded [].
+    """
+    repo = MockAegisRepository()
+    repo.hosts.append(
+        {
+            "id": "host-gap-node",
+            "hostname": "gap-node-01",
+            "os": "Ubuntu 24.04",
+            "agent_version": "0.1.0",
+            "agent_status": "offline",
+            "last_data_at": "2026-11-01T00:00:00+00:00",
+        }
+    )
+    repo.alerts.append(
+        {
+            "id": "ALT-GAP-01",
+            "host_id": "host-gap-node",
+            "rule_id": "RULE-SSH-BRUTE",
+            "rule_version": "1.0",
+            "title": "SSH Brute Force on Offline Node",
+            "severity": "high",
+            "detected_at": "2026-11-01T00:01:00+00:00",
+            "reason": "5 failed SSH attempts",
+        }
+    )
+    set_repository(repo)
+
+    gaps_res = client.get("/api/collection-gaps?host_id=host-gap-node&open_only=true")
+    assert gaps_res.status_code == 200
+    gaps_list = gaps_res.json()
+    assert len(gaps_list) >= 1
+    assert gaps_list[0]["host_id"] == "host-gap-node"
+
+    handoff_res = client.get("/api/alerts/ALT-GAP-01/handoff")
+    assert handoff_res.status_code == 200
+    handoff_data = handoff_res.json()
+    assert any("Telemetry gap" in m for m in handoff_data["missing_telemetry"])
+
+
+def test_bug_005_hosts_dynamic_agent_status_filtering():
+    """
+    Regression test for BUG-005:
+    A host whose stored DB status is 'online' but whose last_data_at is stale (> 30 min ago)
+    must be returned when filtering GET /api/hosts?agent_status=offline and excluded from online.
+    """
+    repo = MockAegisRepository()
+    repo.hosts = [
+        {
+            "id": "host-stale-online-db",
+            "hostname": "stale-host",
+            "os": "Ubuntu 24.04",
+            "agent_version": "0.1.0",
+            "agent_status": "online",  # stale DB column
+            "last_data_at": "2020-01-01T00:00:00+00:00",  # > 30 min old -> dynamically offline
+        }
+    ]
+    set_repository(repo)
+
+    res_offline = client.get("/api/hosts?agent_status=offline")
+    assert res_offline.status_code == 200
+    items_off = res_offline.json()["items"]
+    assert any(h["id"] == "host-stale-online-db" and h["agent_status"] == "offline" for h in items_off)
+
+    res_online = client.get("/api/hosts?agent_status=online")
+    assert res_online.status_code == 200
+    items_on = res_online.json()["items"]
+    assert not any(h["id"] == "host-stale-online-db" for h in items_on)
+
+
+def test_bug_009_report_clean_host_zero_alerts_no_cross_host_leak():
+    """
+    Regression test for BUG-009:
+    Generating a report for a clean host with 0 alerts must produce alert_count == 0
+    rather than falling back to all alerts from other hosts.
+    """
+    rpt_res = client.post(
+        "/api/reports",
+        json={
+            "type": "daily",
+            "host_ids": ["host-clean-zero-alerts"],
+            "period_start": "2026-11-06T00:00:00Z",
+            "period_end": "2026-11-08T00:00:00Z",
+        },
+    )
+    assert rpt_res.status_code == 200
+    rpt_data = rpt_res.json()
+    assert rpt_data["alert_count"] == 0
+
+
+def test_bug_010_operational_state_store_disk_persistence(tmp_path):
+    """
+    Regression test for BUG-010:
+    OperationalStateStore persists investigations and audit logs to disk and restores
+    them cleanly on service restart.
+    """
+    from aegis_backend.incident_service import OperationalStateStore
+
+    state_path = tmp_path / "op_state.json"
+    store_1 = OperationalStateStore(state_file=state_path)
+    store_1.update_investigation(
+        alert_id="ALT-PERSIST-01",
+        status="reopened",
+        note="Recurrence confirmed after reboot",
+        author="qa-auditor",
+    )
+    assert state_path.exists()
+
+    # Simulate backend process restart by instantiating a new store pointing to the same file
+    store_2 = OperationalStateStore(state_file=state_path)
+    inv = store_2.get_investigation("ALT-PERSIST-01")
+    assert inv.status == "reopened"
+    assert len(inv.notes) == 1
+    assert inv.notes[0].note == "Recurrence confirmed after reboot"
+
+
+def test_bug_015_and_016_security_headers_and_ai_cooldown():
+    """
+    Regression test for BUG-015 (HTTP Security Headers including CSP) and
+    BUG-016 (per-alert AI analysis cooldown cache).
+    """
+    res = client.get("/api/health")
+    assert res.status_code == 200
+    assert res.headers.get("X-Content-Type-Options") == "nosniff"
+    assert res.headers.get("X-Frame-Options") == "DENY"
+    assert "default-src 'self'" in res.headers.get("Content-Security-Policy", "")
+
+    # First AI analysis call populates cache
+    a1 = client.post("/api/alerts/ALT-001/analyze?cooldown_sec=60")
+    assert a1.status_code == 200
+    ts1 = a1.json()["generated_at"]
+
+    # Immediate second call within cooldown returns cached generated_at
+    a2 = client.post("/api/alerts/ALT-001/analyze?cooldown_sec=60")
+    assert a2.status_code == 200
+    assert a2.json()["generated_at"] == ts1
+
+
+
 

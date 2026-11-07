@@ -4,6 +4,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+.aegis_operational_state.json*
+.collector_cursor*
 outputs/
 *.log
 

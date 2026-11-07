@@ -88,6 +88,9 @@
   --color-bg: #f7f2e9;            /* warm ivory canvas            */
   --color-surface: #fdfaf4;       /* list groups, sheets          */
   --color-surface-sunken: #f0eadf;/* code, log lines, inputs      */
+  --bg-elevated: var(--color-surface-sunken);
+  --border-subtle: var(--color-border-subtle);
+  --text-muted: var(--color-text-tertiary);
   --color-surface-raised: #fffdf8;/* bottom nav, sheets           */
   --color-border: #e4dacb;
   --color-border-strong: #cdbfa9;

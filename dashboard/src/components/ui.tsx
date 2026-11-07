@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, type LucideIcon } from 'lucide-react';
+import { ChevronRight, CircleHelp, type LucideIcon } from 'lucide-react';
 import type { StatusMeta, Tone } from '../lib/status';
 
 /* ------------------------------------------------------------------ */
@@ -12,16 +12,21 @@ export function Badge({
   variant = 'soft',
   spin,
 }: {
-  meta: StatusMeta;
+  meta?: StatusMeta;
   size?: 'sm' | 'md';
   variant?: 'soft' | 'plain';
   spin?: boolean;
 }) {
-  const Icon = meta.icon;
+  const safeMeta: StatusMeta = meta ?? {
+    label: 'Unknown',
+    tone: 'unknown',
+    icon: CircleHelp,
+  };
+  const Icon = safeMeta.icon;
   return (
-    <span className={`badge badge--${meta.tone} badge--${size} badge--${variant}`} title={meta.hint}>
+    <span className={`badge badge--${safeMeta.tone} badge--${size} badge--${variant}`} title={safeMeta.hint}>
       <Icon aria-hidden className={spin ? 'spin' : undefined} />
-      <span>{meta.label}</span>
+      <span>{safeMeta.label}</span>
     </span>
   );
 }
