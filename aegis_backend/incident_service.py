@@ -225,6 +225,8 @@ class OperationalStateStore:
         status: str,
         note: Optional[str] = None,
         author: str = "ops-admin",
+        alert: Optional[Dict[str, Any]] = None,
+        repo: Optional[BaseAegisRepository] = None,
     ) -> InvestigationStateResponse:
         now_iso = datetime.now(timezone.utc).isoformat()
         existing = self.investigations.get(
@@ -246,6 +248,37 @@ class OperationalStateStore:
             existing["notes"].insert(0, note_item.model_dump())
 
         self.investigations[alert_id] = existing
+
+        # Sync incident lifecycle status to Supabase 'incidents' table if connected
+        if repo and hasattr(repo, "client") and alert:
+            try:
+                db_status_map = {
+                    "new": "open",
+                    "detected": "open",
+                    "investigating": "investigating",
+                    "handoff_ready": "investigating",
+                    "remediation_in_progress": "investigating",
+                    "verification": "investigating",
+                    "resolved": "resolved",
+                    "false_positive": "false_positive",
+                    "reopened": "investigating",
+                    "unverified": "investigating",
+                }
+                getattr(repo, "client").table("incidents").upsert(
+                    {
+                        "id": f"INC-{alert_id}",
+                        "alert_id": alert_id,
+                        "host_id": alert.get("host_id"),
+                        "title": alert.get("title", "Security Incident"),
+                        "severity": alert.get("severity", "medium"),
+                        "status": db_status_map.get(status, "open"),
+                        "assigned_to": author,
+                    },
+                    on_conflict="id",
+                ).execute()
+            except Exception as e:
+                logger.warning(f"Failed to sync incident status to Supabase for {alert_id}: {e}")
+
         self.record_audit(
             actor=author,
             action="update_investigation",
@@ -263,6 +296,7 @@ op_store = OperationalStateStore()
 def run_alert_ai_analysis(
     alert: Dict[str, Any],
     evidence_items: List[Dict[str, Any]],
+    repo: Optional[BaseAegisRepository] = None,
 ) -> AiAnalysisResponse:
     """
     Executes AI-assisted RM analysis on a deterministic alert and its supporting evidence.
@@ -396,6 +430,40 @@ def run_alert_ai_analysis(
         )
 
     op_store.ai_analyses[alert_id] = analysis
+
+    # Persist incident and AI investigation run to Supabase if connected
+    if repo and hasattr(repo, "client"):
+        try:
+            client = getattr(repo, "client")
+            inc_id = f"INC-{alert_id}"
+            client.table("incidents").upsert(
+                {
+                    "id": inc_id,
+                    "alert_id": alert_id,
+                    "host_id": host_id,
+                    "title": alert.get("title", "Security Incident"),
+                    "severity": severity_str,
+                    "status": "investigating",
+                },
+                on_conflict="id",
+            ).execute()
+            client.table("investigations").upsert(
+                {
+                    "incident_id": inc_id,
+                    "run_number": 1,
+                    "severity": severity_str,
+                    "analysis_status": "completed",
+                    "incident_summary": analysis.summary or "",
+                    "attack_narrative": analysis.summary or "",
+                    "caveats": [analysis.uncertainty] if analysis.uncertainty else [],
+                    "ai_provider_model": settings.llm_model if settings.llm_provider == "gemini" else "mock",
+                    "completed_at": analysis.generated_at,
+                },
+                on_conflict="incident_id,run_number",
+            ).execute()
+        except Exception as e:
+            logger.warning(f"Failed to persist AI investigation run to Supabase for {alert_id}: {e}")
+
     op_store.record_audit(
         actor="ops-admin",
         action="request_analysis",

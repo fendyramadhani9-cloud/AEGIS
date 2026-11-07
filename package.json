@@ -5,8 +5,10 @@
   "description": "AEGIS Linux Security Monitoring & Incident Investigation",
   "scripts": {
     "dev": "npm --prefix dashboard run dev",
+    "backend": "python -m uvicorn aegis_backend.main:app --host 127.0.0.1 --port 8000 --reload",
     "build": "npm --prefix dashboard run build",
     "preview": "npm --prefix dashboard run preview",
-    "typecheck": "npm --prefix dashboard run typecheck"
+    "typecheck": "npm --prefix dashboard run typecheck",
+    "test:be": "pytest --ignore=tests/test_postgres_migration.py -q"
   }
 }

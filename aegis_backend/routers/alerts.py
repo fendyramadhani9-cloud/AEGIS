@@ -160,7 +160,7 @@ def analyze_alert(
                 detail=f"Alert with ID '{alert_id}' not found.",
             )
         evidence_items = repo.get_alert_evidence(alert_id) or []
-        return run_alert_ai_analysis(alert, evidence_items)
+        return run_alert_ai_analysis(alert, evidence_items, repo=repo)
     except HTTPException:
         raise
     except Exception as e:
@@ -319,5 +319,7 @@ def update_alert_investigation(
         status=req.status,
         note=req.note,
         author=req.author,
+        alert=alert,
+        repo=repo,
     )
 
