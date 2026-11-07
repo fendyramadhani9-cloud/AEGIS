@@ -3,7 +3,7 @@ import { CircleAlert, FileText, Info, ListTree, Radio, ShieldCheck } from 'lucid
 import { Screen } from '../components/AppShell';
 import { AlertRow, EvidenceBanner, FindingRow, GapRow, PipelineHealthWidget } from '../components/domain';
 import { EmptyState, QueryView, SkeletonBlock, SkeletonList } from '../components/states';
-import { Badge, Group, LinkButton, Notice, Row, Section, SectionLink } from '../components/ui';
+import { Badge, Group, LinkButton, Notice, Row, Section, SectionLink, Tag } from '../components/ui';
 import { api, hostName } from '../data/api';
 import type { AgentStatus } from '../data/types';
 import { useQuery } from '../lib/hooks';
@@ -62,6 +62,37 @@ export function OverviewScreen() {
           const active = evidence.filter((e) => e.status === 'active');
           const latestReport = reports[0];
 
+          const critHighAlerts = alerts.filter(
+            (a) =>
+              (a.severity === 'critical' || a.severity === 'high') &&
+              a.investigationStatus !== 'resolved' &&
+              a.investigationStatus !== 'false_positive',
+          );
+          const cisFindings = findings.filter((f) => f.checkId.startsWith('CIS-'));
+          const stigFindings = findings.filter((f) => f.checkId.startsWith('STIG-'));
+          const cisPass = cisFindings.filter((f) => f.status === 'pass').length;
+          const stigPass = stigFindings.filter((f) => f.status === 'pass').length;
+          const totalPass = findings.filter((f) => f.status === 'pass').length;
+
+          const siagaLevel =
+            critHighAlerts.length > 0 || counts.offline > 0
+              ? {
+                  code: 'SIAGA I · KRITIS',
+                  color: 'var(--status-critical-fg)',
+                  desc: `${critHighAlerts.length} active Critical/High incident(s) require immediate operator investigation.`,
+                }
+              : failed.length > 0 || recentAlerts.length > 0
+                ? {
+                    code: 'SIAGA II · WASPADA',
+                    color: 'var(--status-warning-fg)',
+                    desc: `${failed.length} non-compliant CIS/DISA-STIG posture control(s) detected across monitored nodes.`,
+                  }
+                : {
+                    code: 'SIAGA III · TERKENDALI',
+                    color: 'var(--status-healthy-fg)',
+                    desc: 'All monitored nodes online with zero active incidents and compliant security baseline.',
+                  };
+
           return (
             <>
               {/* --- Agent status strip --- */}
@@ -95,6 +126,49 @@ export function OverviewScreen() {
                     'No data received from any host yet'
                   )}
                 </p>
+              </section>
+
+              {/* --- Defense Cyber Readiness / Tingkat Siaga Siber Card --- */}
+              <section className="section" aria-label="Defense Cyber Readiness Posture">
+                <div className="provenance-card">
+                  <div className="provenance-header">
+                    <div className="provenance-title">
+                      <ShieldCheck className="provenance-icon" aria-hidden />
+                      <span>Status Kesiapan Siber (Defense Cyber Readiness · CIS & DISA STIG)</span>
+                    </div>
+                    <Tag>
+                      <strong style={{ color: siagaLevel.color }}>{siagaLevel.code}</strong>
+                    </Tag>
+                  </div>
+                  <p className="ai-panel__note" style={{ marginTop: '0.4rem', marginBottom: '0.75rem' }}>
+                    {siagaLevel.desc}
+                  </p>
+                  <div className="provenance-grid">
+                    <div className="provenance-item">
+                      <span className="provenance-label">CIS Ubuntu Benchmark</span>
+                      <span className="provenance-value mono">
+                        {cisPass}/{cisFindings.length || 8} Controls Compliant
+                      </span>
+                    </div>
+                    <div className="provenance-item">
+                      <span className="provenance-label">DISA STIG Military Baseline</span>
+                      <span className="provenance-value mono">
+                        {stigPass}/{stigFindings.length || 4} Controls Compliant
+                      </span>
+                    </div>
+                    <div className="provenance-item">
+                      <span className="provenance-label">Overall Posture Score</span>
+                      <span className="provenance-value mono">
+                        {totalPass}/{findings.length} Passing (
+                        {Math.round((totalPass / Math.max(1, findings.length)) * 100)}%)
+                      </span>
+                    </div>
+                    <div className="provenance-item">
+                      <span className="provenance-label">AI Orchestration</span>
+                      <span className="provenance-value mono">3-Key Active (AEGIS1 · AEGIS2 · AEGIS3)</span>
+                    </div>
+                  </div>
+                </div>
               </section>
 
               {active.map((s) => (

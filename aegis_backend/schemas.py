@@ -151,6 +151,20 @@ class HeartbeatResponse(BaseModel):
     message: str = "Heartbeat registered successfully."
 
 
+class PostureIngestRequest(BaseModel):
+    host_id: str = Field(..., min_length=2, max_length=64, pattern=r"^[a-zA-Z0-9._-]+$")
+    hostname: str = Field(default="ubuntu", min_length=1, max_length=255)
+    findings: List[Dict[str, Any]] = Field(..., min_length=1, max_length=50)
+
+
+class PostureIngestResponse(BaseModel):
+    status: str = "ok"
+    host_id: str
+    updated_controls: int
+    timestamp: str
+    message: str = "Security Checker posture findings updated."
+
+
 class TelemetryIngestResponse(BaseModel):
     status: str  # "ok", "partial", "rejected"
     host_id: str

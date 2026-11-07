@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ChevronRight, SearchX, ShieldCheck } from 'lucide-react';
+import { ChevronRight, Search, SearchX, ShieldCheck } from 'lucide-react';
 import { Screen } from '../components/AppShell';
 import { AlertRow, FindingRow } from '../components/domain';
 import { EmptyState, QueryView } from '../components/states';
@@ -30,6 +31,7 @@ export function DetectionsScreen() {
   const conf = (params.get('conf') as ConfFilter) || 'all';
   const inv = (params.get('inv') as InvFilter) || 'all';
   const status = (params.get('status') as StatusFilter) || 'fail';
+  const [searchQuery, setSearchQuery] = useState('');
   const { when } = useTimeFormat();
 
   const set = (patch: Record<string, string>) => {
@@ -83,19 +85,50 @@ export function DetectionsScreen() {
             </label>
           );
 
+          const searchBar = (
+            <label
+              className="select"
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: '1 1 280px', maxWidth: '460px' }}
+            >
+              <Search size={15} className="muted-icon" aria-hidden />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Threat Hunt: filter by IP, user, rule ID, CIS/STIG check ID, MITRE ID, or command…"
+                style={{
+                  width: '100%',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'inherit',
+                  fontSize: '0.85rem',
+                  outline: 'none',
+                }}
+              />
+            </label>
+          );
+
+          const qLower = searchQuery.trim().toLowerCase();
+
           if (tab === 'alerts') {
             const list = alerts.filter(
               (a) =>
                 (host === 'all' || a.hostId === host) &&
                 (sev === 'all' || a.severity === sev) &&
                 (conf === 'all' || a.confidence === conf) &&
-                (inv === 'all' || a.investigationStatus === inv),
+                (inv === 'all' || a.investigationStatus === inv) &&
+                (!qLower ||
+                  a.title.toLowerCase().includes(qLower) ||
+                  a.ruleId.toLowerCase().includes(qLower) ||
+                  a.reason.toLowerCase().includes(qLower) ||
+                  a.id.toLowerCase().includes(qLower)),
             );
             return (
               <>
                 <div className="filters filters--stacked">
                   <div className="filters-row">
                     {hostSelect}
+                    {searchBar}
                     <Chips<SevFilter>
                       label="Threat Impact (Severity)"
                       value={sev}
@@ -234,12 +267,19 @@ export function DetectionsScreen() {
           }
 
           const list = findings.filter(
-            (f) => (host === 'all' || f.hostId === host) && (status === 'all' || f.status === status),
+            (f) =>
+              (host === 'all' || f.hostId === host) &&
+              (status === 'all' || f.status === status) &&
+              (!qLower ||
+                f.checkId.toLowerCase().includes(qLower) ||
+                f.title.toLowerCase().includes(qLower) ||
+                f.indicators.some((ind) => ind.toLowerCase().includes(qLower))),
           );
           return (
             <>
               <div className="filters">
                 {hostSelect}
+                {searchBar}
                 <Chips<StatusFilter>
                   label="Check result"
                   value={status}

@@ -294,6 +294,74 @@ RULE_METADATA: Dict[str, Dict[str, Any]] = {
             "Verify authorized_keys contains only approved key fingerprints and permissions are 0600.",
         ],
     },
+    "RULE-ANTI-FORENSICS": {
+        "mitre_id": "T1070",
+        "mitre_name": "Indicator Removal on Host (Log Wiping & History Erasure)",
+        "condition": "Execution of history -c, unset HISTFILE, shred, truncate -s 0, rm -rf /var/log, or journalctl --vacuum-time",
+        "rationale": "Adversaries clear command history or destroy /var/log and systemd journal files to erase forensic evidence after compromising a defense node.",
+        "investigation_cmds": [
+            "sudo ls -la /var/log /var/log/journal",
+            "sudo journalctl --verify",
+            "sudo ausearch -m DELETE,TRUNCATE -ts recent 2>/dev/null || true",
+        ],
+        "remediation_plan": [
+            "Preserve remaining volatile memory and off-host telemetry immediately.",
+            "Enforce append-only attribute on critical log files ('sudo chattr +a /var/log/auth.log') and immutable auditd rules ('-e 2').",
+            "Verify remote syslog/AEGIS telemetry forwarding is intact.",
+        ],
+        "service_impact": "Setting append-only (+a) requires logrotate to temporarily clear the attribute during rotation.",
+        "rollback_steps": [
+            "Remove append-only attribute if logrotate fails: 'sudo chattr -a /var/log/auth.log'.",
+        ],
+        "verification_steps": [
+            "Confirm 'journalctl --verify' passes and zero new RULE-ANTI-FORENSICS alerts trigger.",
+        ],
+    },
+    "RULE-DATA-EXFIL": {
+        "mitre_id": "T1041 / T1560",
+        "mitre_name": "Archive Collected Data & Exfiltration Over Network",
+        "condition": "Sensitive directory archiving (tar/zip/7z on /etc, /var/www, /root) or outbound file transfer (scp, rsync, curl -F)",
+        "rationale": "Packaging sensitive configuration or database directories and transferring them externally indicates active data theft.",
+        "investigation_cmds": [
+            "sudo ss -tnp state established",
+            "sudo find /tmp /var/tmp /dev/shm -name '*.tar*' -o -name '*.zip' -o -name '*.7z' 2>/dev/null",
+            "sudo journalctl _COMM=scp _COMM=rsync _COMM=curl _COMM=tar --since '2 hours ago'",
+        ],
+        "remediation_plan": [
+            "Inspect active outbound connections and quarantine any unauthorized staged archive files in /tmp or /dev/shm.",
+            "Rotate credentials, SSH keys, or TLS certificates that were included in the staged archive.",
+            "Restrict egress traffic via UFW to authorized military/management subnets only.",
+        ],
+        "service_impact": "Restricting outbound SCP/RSYNC may affect unapproved manual file transfers.",
+        "rollback_steps": [
+            "Whitelist authorized backup server IPs in UFW outbound rules.",
+        ],
+        "verification_steps": [
+            "Confirm staged archive files are removed and no unauthorized outbound transfers remain active.",
+        ],
+    },
+    "RULE-ROOTKIT-SNIFF": {
+        "mitre_id": "T1547.006 / T1040",
+        "mitre_name": "Kernel Modules and Extensions / Network Sniffing",
+        "condition": "Kernel log 'entered promiscuous mode' or unauthorized execution of insmod, modprobe, rmmod, or tcpdump",
+        "rationale": "Loading unauthorized loadable kernel modules (.ko) or placing network interfaces into promiscuous mode indicates rootkit installation or passive credential sniffing.",
+        "investigation_cmds": [
+            "lsmod | head -n 30",
+            "ip -d link show | grep -i promisc",
+            "sudo dmesg -T | grep -iE 'promiscuous|taint|module' | tail -n 30",
+        ],
+        "remediation_plan": [
+            "Disable promiscuous mode on the interface ('sudo ip link set <iface> promisc off') and terminate unauthorized packet capture processes.",
+            "If an unauthorized kernel module was loaded, isolate the node and lock future module loading via 'sudo sysctl -w kernel.modules_disabled=1' after reboot verification.",
+        ],
+        "service_impact": "Setting kernel.modules_disabled=1 prevents loading any new kernel modules until the next reboot.",
+        "rollback_steps": [
+            "Reboot into a known-good signed kernel image if module state is unstable.",
+        ],
+        "verification_steps": [
+            "Verify 'ip link' shows no PROMISC flag and 'lsmod' contains only signed distribution modules.",
+        ],
+    },
 }
 
 
@@ -336,6 +404,7 @@ class OperationalStateStore:
         self.ai_analyses: Dict[str, AiAnalysisResponse] = {}
         self.investigations: Dict[str, Dict[str, Any]] = {}
         self.verifications: Dict[str, RecoveryVerificationResponse] = {}
+        self.host_findings: Dict[str, List[FindingItem]] = {}
         self.evidence_sessions: List[EvidenceSessionItem] = []
         self.audit_logs: List[AuditLogItem] = [
             AuditLogItem(
@@ -1382,11 +1451,11 @@ def build_alert_context(
     # Map rules to 6 Kill-Chain stages
     stage_defs = [
         ("Reconnaissance", "TA0043 / TA0007", ("RULE-FW-PORTSCAN", "RULE-WEB-ATTACK")),
-        ("Credential Access", "TA0006 · Brute Force", ("RULE-SSH-BRUTE",)),
+        ("Credential Access", "TA0006 · Brute Force / Sniffing", ("RULE-SSH-BRUTE", "RULE-ROOTKIT-SNIFF")),
         ("Initial Access", "TA0001 · Valid Accounts", ("RULE-AUTH-003",)),
         ("Privilege Escalation", "TA0004 · Sudo / Exploit", ("RULE-SUSP-SUDO", "RULE-KERNEL-EXPLOIT")),
         ("Persistence", "TA0003 · Backdoor / Cron / Keys", ("RULE-ACCT-BACKDOOR", "RULE-CRON-PERSIST", "RULE-SSH-KEY-BACKDOOR")),
-        ("Defense Evasion", "TA0005 · Impair Defenses", ("RULE-DEFENSE-EVASION",)),
+        ("Defense Evasion & Exfil", "TA0005 / TA0010 · Anti-Forensics & Exfil", ("RULE-DEFENSE-EVASION", "RULE-ANTI-FORENSICS", "RULE-DATA-EXFIL")),
     ]
 
     kill_chain: List[KillChainStageItem] = []

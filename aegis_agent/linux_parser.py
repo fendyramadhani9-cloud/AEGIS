@@ -36,6 +36,10 @@ class LinuxTelemetryParser:
         if parsed:
             return parsed
 
+        parsed = self._parse_defense_apt_log(line, event_id_prefix)
+        if parsed:
+            return parsed
+
         parsed = self._parse_sudo_log(line, event_id_prefix)
         if parsed:
             return parsed
@@ -608,6 +612,128 @@ class LinuxTelemetryParser:
                         "raw_summary": line[:240],
                     },
                 )
+        return None
+
+    def _parse_defense_apt_log(self, line: str, prefix: str) -> Optional[LogEventInput]:
+        """
+        Source 6: Defense-Grade / APT Telemetry (Anti-Forensics, Data Exfiltration, Rootkit/Sniffing).
+        Specifically designed for critical infrastructure & military defense monitoring.
+        """
+        lower_line = line.lower()
+        ts_match = re.match(r"^(\S+\s+\d+\s+\d{2}:\d{2}:\d{2})\s+(\S+)", line)
+        ts_iso = self._parse_syslog_timestamp(ts_match.group(1)) if ts_match else None
+        host = ts_match.group(2) if ts_match else "unknown"
+        sudo_user_m = re.search(r"sudo(?:\[\d+\])?:\s+(\S+)\s*:", line)
+        calling_user = sudo_user_m.group(1) if sudo_user_m else "root"
+        cmd_m = re.search(r"COMMAND=(.+)$", line)
+        cmd_str = cmd_m.group(1).strip() if cmd_m else line
+
+        # 1. Anti-Forensics & Log Wiping (MITRE T1070)
+        anti_forensics_patterns = (
+            "history -c",
+            "history -w",
+            "unset histfile",
+            "histfilesize=0",
+            "rm -rf /var/log",
+            "rm -f /var/log",
+            "shred ",
+            "truncate -s 0 /var/log",
+            "truncate -s0 /var/log",
+            "journalctl --vacuum-time",
+            "/dev/null > /var/log",
+            "> /var/log/auth.log",
+            "> /var/log/syslog",
+            "> /var/log/wtmp",
+            "> /var/log/btmp",
+        )
+        for pat in anti_forensics_patterns:
+            if pat in lower_line:
+                return LogEventInput(
+                    event_id=f"{prefix}-APT-ANTIFORENSICS-{abs(hash(line)) % 100000}",
+                    timestamp=ts_iso,
+                    event_type="anti_forensics_execution",
+                    user=calling_user,
+                    command=cmd_str,
+                    details={
+                        "service": "auditd",
+                        "host": host,
+                        "technique": "T1070",
+                        "matched_indicator": pat.strip(),
+                        "command": cmd_str,
+                        "raw_summary": line[:240],
+                    },
+                )
+
+        # 2. Data Exfiltration & Sensitive Archive Staging (MITRE T1041 / T1560)
+        is_archive_sensitive = (
+            any(arch in lower_line for arch in ("tar ", "zip ", "7z ", "/bin/tar", "/usr/bin/tar", "/usr/bin/zip"))
+            and any(
+                sens in lower_line
+                for sens in ("/etc/shadow", "/etc/passwd", "/etc/ssh", "/var/www", "/root", "/home", ".sql", ".env")
+            )
+        )
+        is_network_exfil = any(
+            exf in lower_line
+            for exf in (
+                "scp ",
+                "/usr/bin/scp",
+                "rsync ",
+                "/usr/bin/rsync",
+                "curl -f ",
+                "curl --upload-file",
+                "wget --post-file",
+            )
+        )
+        if is_archive_sensitive or is_network_exfil:
+            ip_m = re.search(r"(\d{1,3}(?:\.\d{1,3}){3})", cmd_str)
+            dst_ip = ip_m.group(1) if ip_m else None
+            exfil_stage = "network_transfer" if is_network_exfil else "archive_staging"
+            return LogEventInput(
+                event_id=f"{prefix}-APT-EXFIL-{abs(hash(line)) % 100000}",
+                timestamp=ts_iso,
+                event_type="data_exfiltration_attempt",
+                source_ip=dst_ip,
+                user=calling_user,
+                command=cmd_str,
+                details={
+                    "service": "auditd",
+                    "host": host,
+                    "technique": "T1041" if is_network_exfil else "T1560",
+                    "exfil_stage": exfil_stage,
+                    "destination_ip": dst_ip or "external",
+                    "command": cmd_str,
+                    "raw_summary": line[:240],
+                },
+            )
+
+        # 3. Rootkit Kernel Module Loading & Network Sniffing (MITRE T1547.006 / T1040)
+        is_promisc = "entered promiscuous mode" in lower_line
+        is_kernel_mod = any(
+            kmod in lower_line
+            for kmod in ("insmod ", "/sbin/insmod", "/usr/sbin/insmod", "modprobe ", "rmmod audit", "tcpdump -i")
+        )
+        if is_promisc or is_kernel_mod:
+            iface_m = re.search(r"device\s+(\S+)\s+entered promiscuous mode", lower_line)
+            ko_m = re.search(r"(\S+\.ko)", cmd_str)
+            sub_type = "promiscuous_sniffing" if is_promisc else "kernel_module_load"
+            return LogEventInput(
+                event_id=f"{prefix}-APT-ROOTKIT-{abs(hash(line)) % 100000}",
+                timestamp=ts_iso,
+                event_type="rootkit_or_sniff_activity",
+                user="kernel" if is_promisc else calling_user,
+                command=cmd_str if not is_promisc else None,
+                details={
+                    "service": "kernel" if is_promisc else "auditd",
+                    "host": host,
+                    "technique": "T1040" if is_promisc else "T1547.006",
+                    "activity_type": sub_type,
+                    "interface": iface_m.group(1) if iface_m else None,
+                    "module_path": ko_m.group(1) if ko_m else None,
+                    "command": cmd_str,
+                    "raw_summary": line[:240],
+                },
+            )
+
         return None
 
     def parse_batch(self, lines: List[str], prefix: str = "EVT-LINUX") -> List[LogEventInput]:

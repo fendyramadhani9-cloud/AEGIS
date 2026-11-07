@@ -252,6 +252,66 @@ const RULE_META_MAP: Record<string, { mitreId: string; mitreName: string; condit
     condition: 'sudo_exec matching interactive root shell (/bin/bash, /bin/sh) or overly permissive chmod (777)',
     rationale: 'Spawning an interactive root shell via sudo bypasses per-command audit logging, and world-writable permission changes expose system or web files to tampering.',
   },
+  'RULE-WEB-ATTACK': {
+    mitreId: 'T1190',
+    mitreName: 'Exploit Public-Facing Application',
+    condition: 'Web LFI/SQLi/RCE/.env probe or HTTP 401/403 burst',
+    rationale: 'Active web vulnerability probing or credential brute-forcing against HTTP endpoints.',
+  },
+  'RULE-ACCT-BACKDOOR': {
+    mitreId: 'T1136.001 / T1098',
+    mitreName: 'Create Account / Privileged Group Escalation',
+    condition: 'useradd or usermod/gpasswd adding user to sudo/root/docker group',
+    rationale: 'Rogue account creation or privileged group escalation for persistent root access.',
+  },
+  'RULE-FW-PORTSCAN': {
+    mitreId: 'T1046',
+    mitreName: 'Network Service Discovery (Port Scan)',
+    condition: 'count(firewall_block) >= 4 within 300s from same source_ip',
+    rationale: 'Rapid UFW firewall blocks from a single source IP indicate network port scanning.',
+  },
+  'RULE-KERNEL-EXPLOIT': {
+    mitreId: 'T1068',
+    mitreName: 'Exploitation for Privilege Escalation (Segfault)',
+    condition: 'Kernel segmentation fault reported in daemon or binary',
+    rationale: 'Binary crashes or memory corruption anomalies indicating potential exploit attempts.',
+  },
+  'RULE-CRON-PERSIST': {
+    mitreId: 'T1053.003',
+    mitreName: 'Scheduled Task/Job: Cron Persistence',
+    condition: 'CRON execution matching suspicious payload (curl/wget/nc/bash -i/tmp)',
+    rationale: 'Scheduled task executing remote script or reverse shell payload.',
+  },
+  'RULE-DEFENSE-EVASION': {
+    mitreId: 'T1562.001',
+    mitreName: 'Impair Defenses: Disable or Modify Tools',
+    condition: 'Systemd stopping critical security service (ufw, auditd, ssh, fail2ban, aegis-collector)',
+    rationale: 'Deactivating host firewall or audit telemetry daemons to evade detection.',
+  },
+  'RULE-SSH-KEY-BACKDOOR': {
+    mitreId: 'T1098.004',
+    mitreName: 'SSH Authorized Keys & Critical Config Tampering',
+    condition: 'Modification of ~/.ssh/authorized_keys, /etc/ssh/sshd_config, or /etc/sudoers',
+    rationale: 'Unauthorized SSH public key injection or critical security file modification.',
+  },
+  'RULE-ANTI-FORENSICS': {
+    mitreId: 'T1070',
+    mitreName: 'Indicator Removal on Host (Log Wiping)',
+    condition: 'Execution of history -c, unset HISTFILE, shred, truncate -s 0, or rm -rf /var/log',
+    rationale: 'Destroying audit logs or clearing command history to erase forensic evidence.',
+  },
+  'RULE-DATA-EXFIL': {
+    mitreId: 'T1041 / T1560',
+    mitreName: 'Archive Collected Data & Outbound Exfiltration',
+    condition: 'Archiving /etc, /var/www, /root or outbound transfer via scp/rsync/curl -F',
+    rationale: 'Staging and transferring sensitive host files to an external destination.',
+  },
+  'RULE-ROOTKIT-SNIFF': {
+    mitreId: 'T1547.006 / T1040',
+    mitreName: 'Kernel Rootkit Module / Promiscuous Network Sniffing',
+    condition: 'Kernel interface entered promiscuous mode or unauthorized insmod/modprobe execution',
+    rationale: 'Loading unauthorized kernel modules or sniffing network traffic in promiscuous mode.',
+  },
 };
 
 function mapBackendAlert(a: BackendAlertItem, allAlerts?: BackendAlertItem[]): Alert {
@@ -1674,5 +1734,17 @@ export const actions = {
         bump();
       }
     }, 2500);
+  },
+
+  async runPostureScan(hostId?: string) {
+    if (previewState !== 'sample') {
+      try {
+        const qs = hostId ? `?host_id=${encodeURIComponent(hostId)}` : '';
+        await requestBackend(`/api/findings/scan${qs}`, { method: 'POST' });
+      } catch {
+        // Fallback if backend unreachable
+      }
+    }
+    bump();
   },
 };

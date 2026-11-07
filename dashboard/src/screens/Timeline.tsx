@@ -1,6 +1,6 @@
-import { Fragment, useEffect } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowDownUp, ListTree } from 'lucide-react';
+import { ArrowDownUp, ListTree, Search } from 'lucide-react';
 import { Screen } from '../components/AppShell';
 import { GapBlock } from '../components/domain';
 import { EmptyState, QueryView } from '../components/states';
@@ -20,6 +20,7 @@ export function TimelineScreen() {
   const range = (params.get('range') as Range) || '24';
   const order = (params.get('order') as Order) || 'asc';
   const focus = params.get('focus');
+  const [searchQuery, setSearchQuery] = useState('');
   const { time, dayKey, dayLabel, tzLabel } = useTimeFormat();
 
   const set = (patch: Record<string, string | null>) => {
@@ -62,8 +63,29 @@ export function TimelineScreen() {
     >
       <QueryView query={q}>
         {({ items, hosts }) => {
-          const list = order === 'asc' ? [...items].reverse() : items;
-          const counts = items.reduce(
+          const qLower = searchQuery.trim().toLowerCase();
+          const filteredItems = !qLower
+            ? items
+            : items.filter((i) => {
+                if (i.kind === 'alert') {
+                  return (
+                    i.alert.title.toLowerCase().includes(qLower) ||
+                    i.alert.ruleId.toLowerCase().includes(qLower) ||
+                    i.alert.reason.toLowerCase().includes(qLower)
+                  );
+                }
+                if (i.kind === 'event') {
+                  const fieldVals = Object.values(i.event.fields || {}).join(' ').toLowerCase();
+                  return (
+                    i.event.message.toLowerCase().includes(qLower) ||
+                    i.event.type.toLowerCase().includes(qLower) ||
+                    fieldVals.includes(qLower)
+                  );
+                }
+                return i.gap.reason.toLowerCase().includes(qLower);
+              });
+          const list = order === 'asc' ? [...filteredItems].reverse() : filteredItems;
+          const counts = filteredItems.reduce(
             (a, i) => ({ ...a, [i.kind]: a[i.kind] + 1 }),
             { event: 0, alert: 0, gap: 0 } as Record<TimelineItem['kind'], number>,
           );
@@ -81,6 +103,26 @@ export function TimelineScreen() {
                       </option>
                     ))}
                   </select>
+                </label>
+                <label
+                  className="select"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: '1 1 260px', maxWidth: '420px' }}
+                >
+                  <Search size={15} className="muted-icon" aria-hidden />
+                  <input
+                    type="search"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Threat Hunt: filter events by IP, user, command, or rule…"
+                    style={{
+                      width: '100%',
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'inherit',
+                      fontSize: '0.85rem',
+                      outline: 'none',
+                    }}
+                  />
                 </label>
                 <Chips<Range>
                   label="Time range"

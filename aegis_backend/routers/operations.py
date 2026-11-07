@@ -39,13 +39,33 @@ router = APIRouter(prefix="/api", tags=["Operations"])
 
 def _build_default_findings_for_hosts(hosts: List[Dict[str, Any]]) -> List[FindingItem]:
     """
-    Generates the 8-module read-only Security Checker (SC) posture checks bound to active hosts.
+    Generates the 12-module (8 CIS + 4 DISA STIG) read-only Security Checker (SC)
+    posture checks bound to active hosts, preferring live agent-reported posture if available.
     """
     items: List[FindingItem] = []
     now_iso = datetime.now(timezone.utc).isoformat()
     for h in hosts:
         hid = h.get("id", "host-unknown")
         checked_at = h.get("last_sc_run_at") or h.get("last_data_at") or now_iso
+        live_stored = op_store.host_findings.get(hid)
+        if live_stored:
+            for f in live_stored:
+                f_ai = op_store.ai_analyses.get(f.id)
+                items.append(
+                    f.model_copy(
+                        update={
+                            "ai_state": f_ai.state if f_ai else f.ai_state,
+                            "ai_role": "SC Analysis Agent",
+                            "ai_generated_at": f_ai.generated_at if f_ai else f.ai_generated_at,
+                            "ai_summary": f_ai.summary if f_ai else f.ai_summary,
+                            "ai_evidence_refs": f_ai.evidence_refs if f_ai else f.ai_evidence_refs,
+                            "ai_uncertainty": f_ai.uncertainty if f_ai else f.ai_uncertainty,
+                            "ai_next_steps": f_ai.next_steps if f_ai else f.ai_next_steps,
+                        }
+                    )
+                )
+            continue
+
         catalog = ReadOnlySecurityChecker.build_host_posture_catalog(hid, checked_at)
         for entry in catalog:
             fid = entry["id"]
@@ -155,7 +175,7 @@ def list_audit_logs():
 @router.get(
     "/findings",
     response_model=List[FindingItem],
-    summary="List Security Checker Posture Findings (8 CIS Modules)",
+    summary="List Security Checker Posture Findings (12 CIS + DISA STIG Modules)",
 )
 def list_findings(
     host_id: Optional[str] = Query(default=None),
@@ -164,6 +184,54 @@ def list_findings(
     hosts, _ = repo.list_hosts(limit=100, offset=0)
     if host_id:
         hosts = [h for h in hosts if h.get("id") == host_id]
+    return _build_default_findings_for_hosts(hosts)
+
+
+@router.post(
+    "/findings/scan",
+    response_model=List[FindingItem],
+    summary="Execute Read-Only 12-Control (CIS + DISA STIG) Security Checker Scan",
+)
+def trigger_posture_scan(
+    host_id: Optional[str] = Query(default=None),
+    repo: BaseAegisRepository = Depends(get_repository),
+):
+    hosts, _ = repo.list_hosts(limit=100, offset=0)
+    if host_id:
+        hosts = [h for h in hosts if h.get("id") == host_id]
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    for h in hosts:
+        hid = h.get("id", "host-unknown")
+        checker = ReadOnlySecurityChecker(host_id=hid)
+        scanned_raw = checker.run_live_scan(checked_at=now_iso)
+        op_store.host_findings[hid] = [
+            FindingItem(
+                id=entry["id"],
+                host_id=hid,
+                check_id=entry["check_id"],
+                title=entry["title"],
+                status=entry["status"],
+                severity=entry["severity"],
+                checked_at=now_iso,
+                indicators=entry["indicators"],
+                limits=entry["limits"],
+            )
+            for entry in scanned_raw
+        ]
+        h["last_sc_run_at"] = now_iso
+        try:
+            repo.upsert_host(h)
+        except Exception:
+            pass
+        op_store.record_audit(
+            actor="ops-admin",
+            action="run_sc_scan",
+            target_type="host",
+            target_id=hid,
+            summary=f"Executed read-only 12-control CIS + DISA STIG Security Checker scan on '{hid}'",
+        )
+
     return _build_default_findings_for_hosts(hosts)
 
 

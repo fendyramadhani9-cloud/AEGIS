@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from aegis_backend.sanitizer import TelemetrySanitizer
+from aegis_agent.security_checker import ReadOnlySecurityChecker
 
 # Load .env configuration
 load_dotenv()
@@ -53,12 +54,14 @@ class AegisTelemetryCollector:
 
         self.poll_interval = int(os.getenv("AEGIS_POLL_INTERVAL", "15"))
         self.heartbeat_interval = int(os.getenv("AEGIS_HEARTBEAT_INTERVAL", "60"))
+        self.posture_interval = int(os.getenv("AEGIS_POSTURE_INTERVAL", "300"))
 
         # Cursor file for persistent journal tracking
         default_cursor = Path(__file__).resolve().parent.parent / ".collector_cursor"
         self.cursor_file = Path(os.getenv("AEGIS_CURSOR_FILE", str(default_cursor)))
 
         self.last_heartbeat_time = 0.0
+        self.last_posture_time = 0.0
 
         # Register signal handlers
         signal.signal(signal.SIGINT, self._handle_shutdown)
@@ -244,14 +247,42 @@ class AegisTelemetryCollector:
             logger.warning(f"Heartbeat backend connection failed: {e}")
             return False
 
+    def send_posture(self) -> bool:
+        """Executes read-only 12-control (CIS + DISA STIG) posture scan and submits to backend."""
+        url = f"{self.api_url}/telemetry/posture"
+        headers = {
+            "X-Agent-Token": self.agent_token,
+            "Content-Type": "application/json",
+        }
+        try:
+            checker = ReadOnlySecurityChecker(host_id=self.host_id)
+            findings = checker.run_live_scan()
+            payload = {
+                "host_id": self.host_id,
+                "hostname": self.hostname,
+                "findings": findings,
+            }
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            if res.status_code == 200:
+                self.last_posture_time = time.time()
+                logger.info(f"Submitted {len(findings)} live CIS/DISA-STIG posture findings for '{self.host_id}'.")
+                return True
+            else:
+                logger.warning(f"Posture submission failed with HTTP {res.status_code}: {res.text}")
+                return False
+        except Exception as e:
+            logger.warning(f"Posture scan/submission failed: {e}")
+            return False
+
     def run(self):
         """Continuous polling loop with two-phase cursor commit."""
         logger.info(f"AEGIS Collector started for host '{self.host_id}' ({self.hostname}).")
         logger.info(f"Target API: {self.api_url} | Poll interval: {self.poll_interval}s | Heartbeat: {self.heartbeat_interval}s")
         self.init_cursor_if_missing()
 
-        # Initial heartbeat on startup
+        # Initial heartbeat & read-only posture scan on startup
         self.send_heartbeat()
+        self.send_posture()
 
         while self.running:
             try:
@@ -271,10 +302,12 @@ class AegisTelemetryCollector:
                         # Entire batch quarantined; advance cursor to avoid infinite loop on bad lines
                         self.commit_cursor(pending_cursor)
 
-                # 2. Check if heartbeat is due
+                # 2. Check if heartbeat or posture scan is due
                 now = time.time()
                 if now - self.last_heartbeat_time >= self.heartbeat_interval:
                     self.send_heartbeat()
+                if now - self.last_posture_time >= self.posture_interval:
+                    self.send_posture()
 
             except Exception as e:
                 logger.error(f"Unexpected error in collector cycle: {e}")

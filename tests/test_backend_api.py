@@ -501,7 +501,7 @@ def test_three_key_ai_roles_and_8_module_security_checker():
     findings_res = client.get("/api/findings?host_id=srv-prod-auth")
     assert findings_res.status_code == 200
     findings = findings_res.json()
-    assert len(findings) == 8
+    assert len(findings) == 12
     check_ids = {f["check_id"] for f in findings}
     assert "CIS-SSH-5.2.8" in check_ids
     assert "CIS-PERM-6.1.2" in check_ids
@@ -511,6 +511,15 @@ def test_three_key_ai_roles_and_8_module_security_checker():
     assert "CIS-SYSCTL-3.3.1" in check_ids
     assert "CIS-PKG-1.9" in check_ids
     assert "CIS-PERSIST-5.1.8" in check_ids
+    assert "STIG-BANNER-8.1" in check_ids
+    assert "STIG-CRYPTO-5.2" in check_ids
+    assert "STIG-AUDIT-4.1" in check_ids
+    assert "STIG-MEDIA-1.1" in check_ids
+
+    # Trigger operator read-only posture scan
+    scan_res = client.post("/api/findings/scan?host_id=srv-prod-auth")
+    assert scan_res.status_code == 200
+    assert len(scan_res.json()) == 12
 
 
 def test_kill_chain_context_signed_evidence_bundle_and_pdf_report():

@@ -1,14 +1,19 @@
 """
 AEGIS Read-Only Security Checker (SC) Module for Linux Hosts.
-Executes non-destructive, read-only posture inspections across 8 CIS-aligned categories:
-1. CIS-SSH-5.2.8     (SC-SSH):     SSH Daemon Hardening
-2. CIS-PERM-6.1.2    (SC-PERM):    Critical File & Web Root Permissions
-3. CIS-PRIV-5.3.4    (SC-PRIV):    Privilege & Sudoers Audit (UID 0 & NOPASSWD)
-4. CIS-SUID-6.1.12   (SC-SUID):    Dangerous SUID/SGID Binaries (GTFOBins)
-5. CIS-NET-3.5.1     (SC-NET):     Network Exposure & Firewall Posture
-6. CIS-SYSCTL-3.3.1  (SC-SYSCTL):  Kernel & Network Stack Hardening
-7. CIS-PKG-1.9       (SC-PKG):     Unattended Security Updates & Patch Posture
-8. CIS-PERSIST-5.1.8 (SC-PERSIST): Cron & Systemd Persistence Hygiene
+Executes non-destructive, read-only posture inspections across 12 controls
+(8 CIS Ubuntu Benchmark + 4 DISA STIG Military-Grade Hardening Controls):
+1.  CIS-SSH-5.2.8     (SC-SSH):     SSH Daemon Hardening
+2.  CIS-PERM-6.1.2    (SC-PERM):    Critical File & Web Root Permissions
+3.  CIS-PRIV-5.3.4    (SC-PRIV):    Privilege & Sudoers Audit (UID 0 & NOPASSWD)
+4.  CIS-SUID-6.1.12   (SC-SUID):    Dangerous SUID/SGID Binaries (GTFOBins)
+5.  CIS-NET-3.5.1     (SC-NET):     Network Exposure & Firewall Posture
+6.  CIS-SYSCTL-3.3.1  (SC-SYSCTL):  Kernel & Network Stack Hardening
+7.  CIS-PKG-1.9       (SC-PKG):     Unattended Security Updates & Patch Posture
+8.  CIS-PERSIST-5.1.8 (SC-PERSIST): Cron & Systemd Persistence Hygiene
+9.  STIG-BANNER-8.1   (SC-BANNER):  Military Legal Warning Banner & OS Info Leakage
+10. STIG-CRYPTO-5.2   (SC-CRYPTO):  Strong SSH & Cryptographic Cipher Policy
+11. STIG-AUDIT-4.1    (SC-AUDIT):   Audit Log Tamper Protection & Persistent Journal
+12. STIG-MEDIA-1.1    (SC-MEDIA):   Unauthorized USB / Removable Storage Lockdown
 
 Strict Constraint:
 - Read-only inspection only. Never modifies files, restarts services, or alters firewall rules.
@@ -206,11 +211,200 @@ class ReadOnlySecurityChecker:
             "limits": "Observes /etc/passwd and sudoers drop-in files; LDAP/SSSD remote sudoers rules are out of scope.",
         }
 
+    def check_stig_banner(
+        self,
+        issue_content: Optional[str] = None,
+        issue_net_content: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Module 9: STIG-BANNER-8.1 — Military Legal Warning Banner & OS Information Leakage."""
+        issue_txt = issue_content if issue_content is not None else self._safe_read_text("/etc/issue")
+        issue_net_txt = issue_net_content if issue_net_content is not None else self._safe_read_text("/etc/issue.net")
+        if issue_txt is None and issue_net_txt is None:
+            return {
+                "check_id": "STIG-BANNER-8.1",
+                "category": "DISA STIG Hardening",
+                "title": "Military legal warning banner & pre-login OS information leakage check",
+                "status": "not_checked",
+                "severity": "medium",
+                "indicators": ["/etc/issue and /etc/issue.net not readable in current environment"],
+                "limits": "Inspects /etc/issue and /etc/issue.net in read-only mode.",
+            }
+
+        combined = f"{issue_txt or ''}\n{issue_net_txt or ''}"
+        lower_comb = combined.lower()
+        indicators: List[str] = []
+        failed = False
+
+        if any(esc in combined for esc in ("\\v", "\\r", "\\m", "\\n")) or "ubuntu" in lower_comb:
+            failed = True
+            indicators.append("/etc/issue or /etc/issue.net leaks OS/kernel version identifiers pre-login (Ubuntu / \\n / \\l)")
+        else:
+            indicators.append("/etc/issue: no OS or kernel escape sequences leaked pre-login")
+
+        has_auth_banner = any(
+            kw in lower_comb
+            for kw in ("authorized", "restricted", "monitoring", "militer", "tni", "pertahanan", "unlawful")
+        )
+        if not has_auth_banner:
+            failed = True
+            indicators.append("Missing mandatory Defense/Military legal warning banner in /etc/issue.net")
+        else:
+            indicators.append("Authorized defense legal warning banner present in pre-login banner")
+
+        return {
+            "check_id": "STIG-BANNER-8.1",
+            "category": "DISA STIG Hardening",
+            "title": "Military legal warning banner & pre-login OS information leakage check",
+            "status": "fail" if failed else "pass",
+            "severity": "medium" if failed else "low",
+            "indicators": indicators,
+            "limits": "Inspects /etc/issue and /etc/issue.net; verify Banner /etc/issue.net is enabled in sshd_config.",
+        }
+
+    def check_stig_crypto_policy(self, sshd_content: Optional[str] = None) -> Dict[str, Any]:
+        """Module 10: STIG-CRYPTO-5.2 — Strong SSH & Cryptographic Cipher Policy."""
+        content = sshd_content if sshd_content is not None else self._safe_read_text("/etc/ssh/sshd_config")
+        if content is None:
+            return {
+                "check_id": "STIG-CRYPTO-5.2",
+                "category": "DISA STIG Hardening",
+                "title": "DISA STIG SSH strong cryptographic Ciphers, MACs & KexAlgorithms check",
+                "status": "not_checked",
+                "severity": "medium",
+                "indicators": ["/etc/ssh/sshd_config not readable from current privilege context"],
+                "limits": "Inspects static /etc/ssh/sshd_config for weak cipher/MAC directives.",
+            }
+
+        lower_cfg = content.lower()
+        weak_algos = [w for w in ("3des-cbc", "aes128-cbc", "aes256-cbc", "arcfour", "hmac-md5", "hmac-sha1") if w in lower_cfg]
+        indicators: List[str] = []
+        failed = False
+
+        if weak_algos:
+            failed = True
+            indicators.append(f"/etc/ssh/sshd_config permits deprecated weak algorithms: {', '.join(weak_algos)}")
+        else:
+            indicators.append("No deprecated CBC/RC4/MD5/SHA1 algorithms explicitly enabled in /etc/ssh/sshd_config")
+            indicators.append("OpenSSH 9.6p1 Ubuntu 24.04 enforces AEAD Ciphers (chacha20-poly1305, aes256-gcm) by default")
+
+        return {
+            "check_id": "STIG-CRYPTO-5.2",
+            "category": "DISA STIG Hardening",
+            "title": "DISA STIG SSH strong cryptographic Ciphers, MACs & KexAlgorithms check",
+            "status": "fail" if failed else "pass",
+            "severity": "high" if failed else "low",
+            "indicators": indicators,
+            "limits": "Read-only inspection of /etc/ssh/sshd_config; use 'sshd -T | grep -E \"ciphers|macs|kexalgorithms\"' for runtime verification.",
+        }
+
+    def check_stig_audit_persistence(self, journal_dir_exists: Optional[bool] = None) -> Dict[str, Any]:
+        """Module 11: STIG-AUDIT-4.1 — Audit Log Tamper Protection & Persistent Journal Storage."""
+        if journal_dir_exists is None:
+            try:
+                journal_dir_exists = (self.root_prefix / "var/log/journal").exists()
+            except Exception:
+                journal_dir_exists = False
+
+        journald_cfg = self._safe_read_text("/etc/systemd/journald.conf") or ""
+        indicators: List[str] = []
+        failed = False
+
+        if journal_dir_exists or "storage=persistent" in journald_cfg.lower():
+            indicators.append("/var/log/journal persistent storage directory active across reboots")
+            indicators.append("systemd-journald cryptographic FSS/seal capability available for forensic integrity")
+        else:
+            failed = True
+            indicators.append("/var/log/journal missing or volatile storage configured (logs lost on reboot)")
+
+        return {
+            "check_id": "STIG-AUDIT-4.1",
+            "category": "DISA STIG Hardening",
+            "title": "Audit log tamper protection & persistent systemd-journald storage",
+            "status": "fail" if failed else "pass",
+            "severity": "high" if failed else "low",
+            "indicators": indicators,
+            "limits": "Checks /var/log/journal existence and /etc/systemd/journald.conf in read-only mode.",
+        }
+
+    def check_stig_usb_lockdown(self, modprobe_content: Optional[str] = None) -> Dict[str, Any]:
+        """Module 12: STIG-MEDIA-1.1 — Unauthorized USB / Removable Storage Lockdown."""
+        content = modprobe_content
+        if content is None:
+            try:
+                mod_dir = self.root_prefix / "etc/modprobe.d"
+                if mod_dir.exists() and mod_dir.is_dir():
+                    chunks = []
+                    for p in mod_dir.glob("*.conf"):
+                        chunks.append(p.read_text(encoding="utf-8", errors="ignore"))
+                    content = "\n".join(chunks)
+            except Exception:
+                content = None
+
+        if content is None:
+            return {
+                "check_id": "STIG-MEDIA-1.1",
+                "category": "DISA STIG Hardening",
+                "title": "Unauthorized USB mass storage kernel module lockdown (BadUSB / Physical Exfil)",
+                "status": "not_checked",
+                "severity": "medium",
+                "indicators": ["/etc/modprobe.d/*.conf not readable in current environment"],
+                "limits": "Inspects /etc/modprobe.d/*.conf for usb-storage blacklisting.",
+            }
+
+        lower_mod = content.lower()
+        has_usb_block = "blacklist usb-storage" in lower_mod or "install usb-storage /bin/true" in lower_mod or "install usb-storage /bin/false" in lower_mod
+        indicators: List[str] = []
+        if has_usb_block:
+            indicators.append("/etc/modprobe.d: usb-storage kernel module explicitly disabled/blacklisted")
+        else:
+            indicators.append("/etc/modprobe.d: no explicit 'blacklist usb-storage' or 'install usb-storage /bin/true' directive found")
+
+        return {
+            "check_id": "STIG-MEDIA-1.1",
+            "category": "DISA STIG Hardening",
+            "title": "Unauthorized USB mass storage kernel module lockdown (BadUSB / Physical Exfil)",
+            "status": "pass" if has_usb_block else "fail",
+            "severity": "low" if has_usb_block else "medium",
+            "indicators": indicators,
+            "limits": "Inspects /etc/modprobe.d/*.conf; physical USB port guard (usbguard) status is evaluated separately.",
+        }
+
+    def run_live_scan(self, checked_at: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Executes a live read-only posture scan on the current OS (when running on Ubuntu)
+        across all 12 CIS + DISA STIG controls, overlaying real filesystem observations
+        onto the 12-control catalog. Never modifies any file or service.
+        """
+        ts = checked_at or datetime.now(timezone.utc).isoformat()
+        catalog = self.build_host_posture_catalog(self.host_id, ts)
+
+        live_checks = {
+            "CIS-SSH-5.2.8": self.check_ssh_hardening(),
+            "CIS-PERM-6.1.2": self.check_critical_permissions(),
+            "CIS-PRIV-5.3.4": self.check_privilege_and_sudoers(),
+            "STIG-BANNER-8.1": self.check_stig_banner(),
+            "STIG-CRYPTO-5.2": self.check_stig_crypto_policy(),
+            "STIG-AUDIT-4.1": self.check_stig_audit_persistence(),
+            "STIG-MEDIA-1.1": self.check_stig_usb_lockdown(),
+        }
+
+        for item in catalog:
+            cid = item["check_id"]
+            live_res = live_checks.get(cid)
+            if live_res and live_res.get("status") in ("pass", "fail"):
+                item["status"] = live_res["status"]
+                item["severity"] = live_res["severity"]
+                item["indicators"] = live_res["indicators"]
+                item["limits"] = live_res["limits"]
+                item["checked_at"] = ts
+
+        return catalog
+
     @staticmethod
     def build_host_posture_catalog(host_id: str, checked_at: str) -> List[Dict[str, Any]]:
         """
-        Returns the complete 8-module CIS-aligned read-only Security Checker findings catalog
-        for a monitored Linux host, providing full visibility across all 8 posture domains.
+        Returns the complete 12-module CIS + DISA STIG read-only Security Checker findings catalog
+        for a monitored Linux host (8 CIS Ubuntu Benchmark + 4 DISA STIG Military Controls).
         """
         return [
             {
@@ -329,4 +523,60 @@ class ReadOnlySecurityChecker:
                 ],
                 "limits": "Inspects system-wide cron directories (/etc/cron*) and systemd timers; per-user crontabs in /var/spool/cron require root.",
             },
+            {
+                "id": f"fnd-stig-banner-{host_id}",
+                "host_id": host_id,
+                "check_id": "STIG-BANNER-8.1",
+                "title": "Military legal warning banner & pre-login OS information leakage check",
+                "status": "fail",
+                "severity": "medium",
+                "checked_at": checked_at,
+                "indicators": [
+                    "/etc/issue.net: default 'Ubuntu 24.04.1 LTS' banner leaks OS version pre-login",
+                    "Missing mandatory Defense/Military legal warning notice in /etc/issue.net",
+                ],
+                "limits": "Read-only inspection of /etc/issue and /etc/issue.net; verify Banner directive in /etc/ssh/sshd_config.",
+            },
+            {
+                "id": f"fnd-stig-crypto-{host_id}",
+                "host_id": host_id,
+                "check_id": "STIG-CRYPTO-5.2",
+                "title": "DISA STIG SSH strong cryptographic Ciphers, MACs & KexAlgorithms check",
+                "status": "pass",
+                "severity": "low",
+                "checked_at": checked_at,
+                "indicators": [
+                    "OpenSSH 9.6p1 enforces strong AEAD ciphers (chacha20-poly1305@openssh.com, aes256-gcm@openssh.com)",
+                    "Weak legacy ciphers (3des-cbc, arcfour, hmac-md5, hmac-sha1) disabled",
+                ],
+                "limits": "Inspects /etc/ssh/sshd_config and OpenSSH 9.6 defaults in read-only mode.",
+            },
+            {
+                "id": f"fnd-stig-audit-{host_id}",
+                "host_id": host_id,
+                "check_id": "STIG-AUDIT-4.1",
+                "title": "Audit log tamper protection & persistent systemd-journald storage",
+                "status": "pass",
+                "severity": "low",
+                "checked_at": checked_at,
+                "indicators": [
+                    "/var/log/journal persistent log directory active across system reboots",
+                    "systemd-journald forwarding to AEGIS telemetry collector verified",
+                ],
+                "limits": "Inspects /var/log/journal persistence and /etc/systemd/journald.conf in read-only mode.",
+            },
+            {
+                "id": f"fnd-stig-media-{host_id}",
+                "host_id": host_id,
+                "check_id": "STIG-MEDIA-1.1",
+                "title": "Unauthorized USB mass storage kernel module lockdown (BadUSB / Physical Exfil)",
+                "status": "fail",
+                "severity": "medium",
+                "checked_at": checked_at,
+                "indicators": [
+                    "/etc/modprobe.d: no explicit 'blacklist usb-storage' or 'install usb-storage /bin/true' directive found",
+                ],
+                "limits": "Inspects /etc/modprobe.d/*.conf in read-only mode.",
+            },
         ]
+

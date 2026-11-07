@@ -151,6 +151,11 @@ class RulesEngine:
         alerts.extend(tamper_alerts)
         alert_evidence.extend(tamper_ev)
 
+        # Step 10: Evaluate Defense-Grade APT Rules (RULE-ANTI-FORENSICS, RULE-DATA-EXFIL, RULE-ROOTKIT-SNIFF)
+        apt_alerts, apt_ev = self._evaluate_defense_apt_rules(sorted_events, generated_alert_ids)
+        alerts.extend(apt_alerts)
+        alert_evidence.extend(apt_ev)
+
         return alerts, alert_evidence
 
     def _evaluate_ssh_brute(
@@ -878,4 +883,115 @@ class RulesEngine:
             })
 
         return alerts, evidence_links
+
+    def _evaluate_defense_apt_rules(
+        self,
+        events: List[Dict[str, Any]],
+        generated_ids: Set[str],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Defense-Grade APT Rules for Critical Infrastructure & Military Cyber Defense:
+        - RULE-ANTI-FORENSICS (MITRE T1070): Audit log wiping, command history clearing, shred/truncate. Severity: Critical.
+        - RULE-DATA-EXFIL (MITRE T1041 / T1560): Sensitive data archiving or network exfiltration (scp/rsync/curl). Severity: Critical.
+        - RULE-ROOTKIT-SNIFF (MITRE T1547.006 / T1040): Kernel module insertion (insmod/modprobe) or promiscuous sniffing. Severity: Critical.
+        """
+        alerts: List[Dict[str, Any]] = []
+        evidence_links: List[Dict[str, Any]] = []
+
+        for ev in events:
+            ev_type = ev.get("event_type")
+            h_id = ev.get("host_id", "")
+            user = ev.get("user_name") or "unknown"
+            details = ev.get("details", {}) or {}
+            cmd = details.get("command", "")
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            if ev_type == "anti_forensics_execution":
+                fp_raw = f"{h_id}:RULE-ANTI-FORENSICS:{ev['id']}"
+                alert_id = f"ALT-FORENSIC-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+                if alert_id in generated_ids:
+                    continue
+                generated_ids.add(alert_id)
+                ind = details.get("matched_indicator", "log/history tampering")
+                alerts.append({
+                    "id": alert_id,
+                    "host_id": h_id,
+                    "rule_id": "RULE-ANTI-FORENSICS",
+                    "rule_version": "1.0",
+                    "title": "Anti-Forensics Log Wiping & History Erasure (MITRE T1070)",
+                    "severity": "critical",
+                    "detected_at": ev.get("event_timestamp") or now_iso,
+                    "reason": (
+                        f"Detected anti-forensics indicator '{ind}' executed by '{user}' on host '{h_id}'"
+                        + (f": {cmd}" if cmd else ".")
+                    ),
+                    "created_at": now_iso,
+                })
+                evidence_links.append({
+                    "alert_id": alert_id,
+                    "event_id": ev["id"],
+                    "citation_role": "trigger",
+                })
+
+            elif ev_type == "data_exfiltration_attempt":
+                fp_raw = f"{h_id}:RULE-DATA-EXFIL:{ev['id']}"
+                alert_id = f"ALT-EXFIL-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+                if alert_id in generated_ids:
+                    continue
+                generated_ids.add(alert_id)
+                stage = details.get("exfil_stage", "data_exfiltration")
+                dst = details.get("destination_ip") or ev.get("source_ip") or "external destination"
+                alerts.append({
+                    "id": alert_id,
+                    "host_id": h_id,
+                    "rule_id": "RULE-DATA-EXFIL",
+                    "rule_version": "1.0",
+                    "title": "Sensitive Data Staging & Outbound Exfiltration (MITRE T1041)",
+                    "severity": "critical",
+                    "detected_at": ev.get("event_timestamp") or now_iso,
+                    "reason": (
+                        f"Detected sensitive {stage.replace('_', ' ')} initiated by '{user}' targeting '{dst}' on host '{h_id}'"
+                        + (f": {cmd}" if cmd else ".")
+                    ),
+                    "created_at": now_iso,
+                })
+                evidence_links.append({
+                    "alert_id": alert_id,
+                    "event_id": ev["id"],
+                    "citation_role": "trigger",
+                })
+
+            elif ev_type == "rootkit_or_sniff_activity":
+                fp_raw = f"{h_id}:RULE-ROOTKIT-SNIFF:{ev['id']}"
+                alert_id = f"ALT-ROOTKIT-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+                if alert_id in generated_ids:
+                    continue
+                generated_ids.add(alert_id)
+                act = details.get("activity_type", "kernel_or_sniff")
+                iface = details.get("interface")
+                mod_path = details.get("module_path")
+                desc = (
+                    f"network interface '{iface}' entered promiscuous packet sniffing mode"
+                    if act == "promiscuous_sniffing" and iface
+                    else f"unauthorized kernel module or packet capture operation ({mod_path or cmd})"
+                )
+                alerts.append({
+                    "id": alert_id,
+                    "host_id": h_id,
+                    "rule_id": "RULE-ROOTKIT-SNIFF",
+                    "rule_version": "1.0",
+                    "title": "Kernel Rootkit Module Load / Promiscuous Network Sniffing (MITRE T1547.006)",
+                    "severity": "critical",
+                    "detected_at": ev.get("event_timestamp") or now_iso,
+                    "reason": f"Detected {desc} on host '{h_id}' under user '{user}'.",
+                    "created_at": now_iso,
+                })
+                evidence_links.append({
+                    "alert_id": alert_id,
+                    "event_id": ev["id"],
+                    "citation_role": "trigger",
+                })
+
+        return alerts, evidence_links
+
 

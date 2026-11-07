@@ -1,10 +1,11 @@
+import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { CircleHelp, ListTree, Radio, ShieldCheck, Unplug } from 'lucide-react';
+import { CircleHelp, ListTree, Radio, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
 import { Screen } from '../components/AppShell';
 import { AlertRow, EvidenceBanner, FindingRow, GapRow } from '../components/domain';
 import { EmptyState, QueryView, SkeletonBlock } from '../components/states';
-import { Badge, Group, KeyValues, LinkButton, Notice, Row, Section, Segmented, Tag, Unavailable } from '../components/ui';
-import { api } from '../data/api';
+import { Badge, Button, Group, KeyValues, LinkButton, Notice, Row, Section, Segmented, Tag, Unavailable } from '../components/ui';
+import { actions, api } from '../data/api';
 import { useQuery } from '../lib/hooks';
 import { agentStatusMeta, sourceLabel, sourceStatusMeta } from '../lib/status';
 import { useTimeFormat } from '../lib/time';
@@ -16,6 +17,7 @@ export function HostDetailScreen() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'alerts';
   const { when, dateTime } = useTimeFormat();
+  const [scanning, setScanning] = useState(false);
 
   const q = useQuery(async () => {
     const [host, alerts, findings, gaps, evidence] = await Promise.all([
@@ -157,34 +159,56 @@ export function HostDetailScreen() {
                   (findings.length ? (
                     <>
                       <div className="provenance-card" style={{ marginBottom: '1rem' }}>
-                        <div className="provenance-header">
+                        <div className="provenance-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
                           <div className="provenance-title">
                             <ShieldCheck className="provenance-icon" aria-hidden />
-                            <span>8-Module Read-Only Security Posture Compliance Breakdown</span>
+                            <span>12-Module CIS & DISA STIG Security Posture Breakdown</span>
                           </div>
-                          <Tag>
-                            {findings.filter((f) => f.status === 'pass').length}/{findings.length} Passing (
-                            {Math.round((findings.filter((f) => f.status === 'pass').length / Math.max(1, findings.length)) * 100)}
-                            %)
-                          </Tag>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <Tag>
+                              {findings.filter((f) => f.status === 'pass').length}/{findings.length} Passing (
+                              {Math.round(
+                                (findings.filter((f) => f.status === 'pass').length / Math.max(1, findings.length)) * 100,
+                              )}
+                              %)
+                            </Tag>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon={RefreshCw}
+                              disabled={scanning}
+                              onClick={async () => {
+                                setScanning(true);
+                                try {
+                                  await actions.runPostureScan(host.id);
+                                } finally {
+                                  setScanning(false);
+                                }
+                              }}
+                            >
+                              {scanning ? 'Scanning…' : 'Refresh SC Scan'}
+                            </Button>
+                          </div>
                         </div>
                         <div className="provenance-grid" style={{ marginTop: '0.65rem' }}>
                           <div className="provenance-item">
-                            <span className="provenance-label">Compliant (PASS)</span>
+                            <span className="provenance-label">CIS Benchmark (8 Controls)</span>
                             <span className="provenance-value mono" style={{ color: 'var(--status-healthy-fg)' }}>
-                              {findings.filter((f) => f.status === 'pass').length} module(s)
+                              {findings.filter((f) => f.checkId.startsWith('CIS-') && f.status === 'pass').length}/
+                              {findings.filter((f) => f.checkId.startsWith('CIS-')).length || 8} Compliant
+                            </span>
+                          </div>
+                          <div className="provenance-item">
+                            <span className="provenance-label">DISA STIG Military (4 Controls)</span>
+                            <span className="provenance-value mono" style={{ color: 'var(--status-healthy-fg)' }}>
+                              {findings.filter((f) => f.checkId.startsWith('STIG-') && f.status === 'pass').length}/
+                              {findings.filter((f) => f.checkId.startsWith('STIG-')).length || 4} Compliant
                             </span>
                           </div>
                           <div className="provenance-item">
                             <span className="provenance-label">Non-Compliant (FAIL)</span>
                             <span className="provenance-value mono" style={{ color: 'var(--status-critical-fg)' }}>
-                              {findings.filter((f) => f.status === 'fail').length} module(s)
-                            </span>
-                          </div>
-                          <div className="provenance-item">
-                            <span className="provenance-label">Not Checked</span>
-                            <span className="provenance-value mono">
-                              {findings.filter((f) => f.status === 'not_checked').length} module(s)
+                              {findings.filter((f) => f.status === 'fail').length} control(s)
                             </span>
                           </div>
                           <div className="provenance-item">

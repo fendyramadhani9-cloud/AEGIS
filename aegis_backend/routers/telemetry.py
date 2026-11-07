@@ -17,8 +17,12 @@ from aegis_backend.schemas import (
     TelemetryIngestResponse,
     HeartbeatRequest,
     HeartbeatResponse,
+    PostureIngestRequest,
+    PostureIngestResponse,
+    FindingItem,
     ErrorResponse,
 )
+from aegis_backend.incident_service import op_store
 from aegis_backend.repository import BaseAegisRepository, get_repository
 from aegis_backend.sanitizer import TelemetrySanitizer
 from aegis_agent.pipeline_adapter import LinuxLogPipelineAdapter
@@ -112,6 +116,16 @@ def _build_safe_event_message(ev_type: str, user: Optional[str], src_ip: Optiona
     if ev_type == "critical_file_modified":
         target = details.get("target_file", "critical file")
         return f"Critical security file '{target}' modified by user '{u}'."
+    if ev_type == "anti_forensics_execution":
+        ind = details.get("matched_indicator", "log tampering")
+        return f"Anti-forensics indicator '{ind}' executed by user '{u}'."
+    if ev_type == "data_exfiltration_attempt":
+        stage = details.get("exfil_stage", "data_exfiltration")
+        dst = details.get("destination_ip") or ip
+        return f"Data exfiltration ({stage}) by user '{u}' targeting {dst}."
+    if ev_type == "rootkit_or_sniff_activity":
+        act = details.get("activity_type", "kernel_or_sniff")
+        return f"Rootkit / promiscuous network activity ({act}) under '{u}'."
     return f"Security telemetry event '{ev_type}' observed."
 
 
@@ -122,7 +136,7 @@ def _resolve_source_id(details: Dict[str, Any], event_type: str) -> str:
         return "nginx-access"
     if service in ["sshd", "pam_unix", "sudo", "useradd", "adduser", "usermod", "gpasswd", "passwd"] or "auth" in event_type or "session" in event_type or "sudo" in event_type or event_type in ("account_created", "privilege_group_added", "password_changed"):
         return "ssh-auth"
-    if "audit_msg_id" in details or "process" in event_type or event_type == "critical_file_modified":
+    if "audit_msg_id" in details or "process" in event_type or event_type in ("critical_file_modified", "anti_forensics_execution", "data_exfiltration_attempt", "rootkit_or_sniff_activity"):
         return "auditd"
     if "connection_state" in details or "network" in event_type:
         return "network-conn"
@@ -350,4 +364,73 @@ def register_heartbeat(
         timestamp=now_iso,
         message="Heartbeat registered successfully.",
     )
+
+
+@router.post(
+    "/posture",
+    response_model=PostureIngestResponse,
+    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Ingest Read-Only Security Checker Posture Findings from Linux Agent",
+)
+def ingest_posture(
+    payload: PostureIngestRequest,
+    _auth: str = Depends(verify_agent_token),
+    repo: BaseAegisRepository = Depends(get_repository),
+):
+    """
+    Receives live read-only 12-control (8 CIS + 4 DISA STIG) Security Checker
+    posture scan results from a monitored Linux host agent.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    validated_findings: List[FindingItem] = []
+
+    for idx, raw in enumerate(payload.findings):
+        check_id = str(raw.get("check_id") or f"CIS-CHK-{idx+1}")
+        fid = str(raw.get("id") or f"fnd-{check_id.lower()}-{payload.host_id}")
+        status_val = str(raw.get("status") or "pass").lower()
+        if status_val not in ("pass", "fail", "not_checked"):
+            status_val = "pass"
+        sev_val = str(raw.get("severity") or "low").lower()
+        if sev_val not in ("critical", "high", "medium", "low"):
+            sev_val = "low"
+        validated_findings.append(
+            FindingItem(
+                id=fid,
+                host_id=payload.host_id,
+                check_id=check_id,
+                title=str(raw.get("title") or check_id),
+                status=status_val,
+                severity=sev_val,
+                checked_at=str(raw.get("checked_at") or now_iso),
+                indicators=[str(x) for x in (raw.get("indicators") or [])],
+                limits=str(raw.get("limits") or "Read-only inspection."),
+            )
+        )
+
+    op_store.host_findings[payload.host_id] = validated_findings
+
+    existing_host = repo.get_host_by_id(payload.host_id)
+    if existing_host:
+        existing_host["last_sc_run_at"] = now_iso
+        try:
+            repo.upsert_host(existing_host)
+        except Exception as e:
+            logger.warning(f"Could not update last_sc_run_at for host '{payload.host_id}': {e}")
+
+    op_store.record_audit(
+        actor=f"agent:{payload.host_id}",
+        action="ingest_posture",
+        target_type="host",
+        target_id=payload.host_id,
+        summary=f"Ingested {len(validated_findings)} live CIS/DISA-STIG Security Checker posture controls for '{payload.host_id}'",
+    )
+
+    return PostureIngestResponse(
+        status="ok",
+        host_id=payload.host_id,
+        updated_controls=len(validated_findings),
+        timestamp=now_iso,
+        message=f"Updated {len(validated_findings)} Security Checker posture findings for host '{payload.host_id}'.",
+    )
+
 

