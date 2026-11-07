@@ -16,6 +16,14 @@ services:
       - "1709:1709"
     volumes:
       - aegis_state:/app/data
+      # Read-only host config mounts so on-demand SC Posture Scan inspects real host files
+      - /etc/ssh:/etc/ssh:ro
+      - /etc/issue.net:/etc/issue.net:ro
+      - /etc/modprobe.d:/etc/modprobe.d:ro
+      - /etc/crontab:/etc/crontab:ro
+      - /var/log:/var/log:ro
+    cap_add:
+      - DAC_READ_SEARCH
     mem_limit: 192m
     mem_reservation: 64m
     cpus: 0.50
@@ -36,6 +44,8 @@ services:
     cpus: 0.25
 
   # Optional: Linux Host Telemetry Collector container (enable with: docker compose --profile collector up -d)
+  # Note: For 100% native systemd/journalctl/ufw visibility on Ubuntu, running collector.py directly on the host
+  # via systemd is recommended, or use this container with host read-only passthrough mounts below.
   aegis-collector:
     build:
       context: .
@@ -44,19 +54,28 @@ services:
     profiles:
       - collector
     restart: unless-stopped
+    pid: "host"
+    cap_add:
+      - DAC_READ_SEARCH
+      - NET_ADMIN
     env_file:
       - .env
     environment:
       - AEGIS_API_URL=http://aegis-dashboard:1708/api
       - AEGIS_CURSOR_FILE=/app/data/.collector_cursor
-      - AEGIS_LOG_FILES=/host_logs/nginx/access.log,/host_logs/apache2/access.log,/host_logs/audit/audit.log
+      - AEGIS_LOG_FILES=/var/log/nginx/access.log,/var/log/apache2/access.log,/var/log/audit/audit.log
     command: ["python", "aegis_agent/collector.py"]
     depends_on:
       aegis-dashboard:
         condition: service_healthy
     volumes:
       - aegis_state:/app/data
-      - /var/log:/host_logs:ro
+      - /var/log:/var/log:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /etc/ssh:/etc/ssh:ro
+      - /etc/issue.net:/etc/issue.net:ro
+      - /etc/modprobe.d:/etc/modprobe.d:ro
+      - /etc/crontab:/etc/crontab:ro
     mem_limit: 48m
     mem_reservation: 16m
     cpus: 0.20
