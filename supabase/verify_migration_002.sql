@@ -100,3 +100,4 @@ BEGIN
     RAISE NOTICE '  ALL VERIFICATION CHECKS COMPLETED SUCCESSFULLY';
     RAISE NOTICE '=======================================================';
 END $$;
+

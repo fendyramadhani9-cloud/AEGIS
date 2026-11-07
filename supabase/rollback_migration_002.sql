@@ -24,3 +24,4 @@ BEGIN
     RAISE NOTICE 'Rollback complete. public.fn_ingest_alert_with_evidence has been dropped successfully.';
     RAISE NOTICE 'All base tables (alerts, alert_evidence, telemetry_events) remain 100%% intact.';
 END $$;
+

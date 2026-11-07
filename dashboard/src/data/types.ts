@@ -88,22 +88,60 @@ export interface Alert {
   ai: AiAnalysis;
 }
 
-export type FindingStatus = 'fail' | 'pass' | 'not_checked';
+export type FindingStatus = 'fail' | 'pass' | 'warning' | 'not_applicable' | 'error' | 'not_checked';
 
 /** Security Checker result (read-only host check). */
 export interface Finding {
   kind: 'finding';
   id: string;
+  runId?: string;
   checkId: string;
   title: string;
+  category?: string;
   status: FindingStatus;
   severity: Severity;
   hostId: string;
   checkedAt: ISODate;
+  actualValue?: string;
+  expectedValue?: string;
+  securityImpact?: string;
+  recommendation?: string;
+  evidenceSummary?: string;
+  remediationReference?: string;
   indicators: string[];
   /** What this check can and cannot see. */
   limits: string;
   ai: AiAnalysis;
+}
+
+export interface SecuritySummary {
+  totalChecks: number;
+  passed: number;
+  failed: number;
+  warning: number;
+  notApplicable: number;
+  error: number;
+  totalHosts: number;
+  lastCheckedAt?: string | null;
+  criticalFails: number;
+  highFails: number;
+  mediumFails: number;
+  lowFails: number;
+}
+
+export interface SecurityCheckRun {
+  id: string;
+  hostId: string;
+  status: string;
+  totalChecks: number;
+  passedChecks: number;
+  failedChecks: number;
+  warningChecks: number;
+  errorChecks: number;
+  checkerVersion: string;
+  summary: Record<string, any>;
+  startedAt: ISODate;
+  completedAt?: ISODate | null;
 }
 
 export type EvidenceStatus = 'active' | 'expired' | 'stopped';

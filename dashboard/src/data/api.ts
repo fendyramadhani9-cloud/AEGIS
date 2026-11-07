@@ -25,10 +25,13 @@ import type {
   Alert,
   EvidenceSession,
   Finding,
+  FindingStatus,
   Host,
   NormalizedEvent,
   Report,
   ReportType,
+  SecurityCheckRun,
+  SecuritySummary,
   Severity,
   SourceId,
   SystemStatus,
@@ -232,6 +235,77 @@ function mapBackendAlert(a: BackendAlertItem): Alert {
   };
 }
 
+interface BackendFindingItem {
+  id: string;
+  run_id: string;
+  host_id: string;
+  check_id: string;
+  category: string;
+  severity: string;
+  status: string;
+  title: string;
+  actual_value?: string | null;
+  expected_value?: string | null;
+  remediation_summary?: string | null;
+  remediation_steps?: string[];
+  security_impact?: string | null;
+  cis_reference?: string | null;
+  mitre_reference?: string | null;
+  execution_time_ms?: number;
+  evidence?: Record<string, unknown>;
+  checked_at: string;
+}
+
+function mapBackendFinding(f: BackendFindingItem): Finding {
+  const statusMap: Record<string, FindingStatus> = {
+    pass: 'pass',
+    fail: 'fail',
+    warning: 'warning',
+    not_applicable: 'not_applicable',
+    error: 'error',
+    not_checked: 'not_checked',
+  };
+  const status = statusMap[f.status?.toLowerCase()] || 'fail';
+  const validSeverities: Severity[] = ['critical', 'high', 'medium', 'low', 'info'];
+  const severity = validSeverities.includes(f.severity?.toLowerCase() as Severity)
+    ? (f.severity.toLowerCase() as Severity)
+    : 'medium';
+
+  const indicators: string[] = [];
+  if (f.actual_value) indicators.push(`Actual: ${f.actual_value}`);
+  if (f.expected_value) indicators.push(`Expected: ${f.expected_value}`);
+  if (f.evidence && Object.keys(f.evidence).length > 0) {
+    if (f.evidence.output) indicators.push(String(f.evidence.output));
+  }
+
+  return {
+    kind: 'finding',
+    id: f.id,
+    runId: f.run_id,
+    checkId: f.check_id,
+    title: f.title,
+    category: f.category,
+    status,
+    severity,
+    hostId: f.host_id,
+    checkedAt: f.checked_at,
+    actualValue: f.actual_value || undefined,
+    expectedValue: f.expected_value || undefined,
+    securityImpact: f.security_impact || undefined,
+    recommendation:
+      f.remediation_summary ||
+      (f.remediation_steps && f.remediation_steps.length > 0 ? f.remediation_steps.join('\n') : undefined),
+    evidenceSummary: f.evidence && Object.keys(f.evidence).length > 0 ? JSON.stringify(f.evidence, null, 2) : undefined,
+    remediationReference: f.cis_reference || f.mitre_reference || undefined,
+    indicators: indicators.length > 0 ? indicators : [f.actual_value || 'No indicators collected'],
+    limits: 'Read-only check executed locally on host.',
+    ai: {
+      state: 'not_requested',
+      role: 'SC Analysis Agent',
+    },
+  };
+}
+
 interface BackendSystemStatus {
   id: number;
   collector: 'ok' | 'degraded' | 'unavailable';
@@ -348,21 +422,56 @@ export const api = {
     }
   },
 
-  // Security Checker findings (endpoint pending backend implementation)
-  findings: async (hostId?: string): Promise<Finding[]> => {
+  // Security Checker findings
+  findings: async (
+    options?: string | { hostId?: string; category?: string; severity?: string; status?: string; search?: string }
+  ): Promise<Finding[]> => {
     if (previewState === 'loading') return new Promise(() => {});
     if (previewState === 'error') throw new ApiError('Simulated error state');
+
+    const hostId = typeof options === 'string' ? options : options?.hostId;
+    const category = typeof options === 'object' ? options.category : undefined;
+    const severity = typeof options === 'object' ? options.severity : undefined;
+    const status = typeof options === 'object' ? options.status : undefined;
+    const search = typeof options === 'object' ? options.search : undefined;
+
     if (previewState === 'sample') {
       return structuredClone(
         db.findings
-          .filter((f) => !hostId || f.hostId === hostId)
+          .filter((f) => {
+            if (hostId && f.hostId !== hostId) return false;
+            if (category && category !== 'all' && f.category?.toLowerCase() !== category.toLowerCase()) return false;
+            if (severity && severity !== 'all' && f.severity?.toLowerCase() !== severity.toLowerCase()) return false;
+            if (status && status !== 'all' && f.status?.toLowerCase() !== status.toLowerCase()) return false;
+            if (search && !f.title.toLowerCase().includes(search.toLowerCase()) && !f.checkId.toLowerCase().includes(search.toLowerCase())) return false;
+            return true;
+          })
           .sort((a, b) => {
-            const rank = (f: Finding) => (f.status === 'fail' ? 0 : f.status === 'not_checked' ? 1 : 2);
+            const rank = (f: Finding) => (f.status === 'fail' ? 0 : f.status === 'warning' ? 1 : f.status === 'not_checked' ? 2 : 3);
             return rank(a) - rank(b) || SEV_ORDER[a.severity] - SEV_ORDER[b.severity];
           }),
       );
     }
-    return [];
+
+    try {
+      const params = new URLSearchParams();
+      if (hostId) params.set('host_id', hostId);
+      if (category && category !== 'all') params.set('category', category);
+      if (severity && severity !== 'all') params.set('severity', severity);
+      if (status && status !== 'all') params.set('status', status);
+      if (search) params.set('search', search);
+      params.set('limit', '100');
+
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await requestBackend<{ items: BackendFindingItem[]; total: number }>(`/api/security-checker/findings${qs}`);
+      return (res.items || []).map(mapBackendFinding).sort((a, b) => {
+        const rank = (f: Finding) => (f.status === 'fail' ? 0 : f.status === 'warning' ? 1 : f.status === 'not_checked' ? 2 : 3);
+        return rank(a) - rank(b) || SEV_ORDER[a.severity] - SEV_ORDER[b.severity];
+      });
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return [];
+      throw e;
+    }
   },
 
   finding: async (id: string): Promise<Finding | null> => {
@@ -371,7 +480,146 @@ export const api = {
     if (previewState === 'sample') {
       return structuredClone(db.findings.find((f) => f.id === id) ?? null);
     }
-    return null;
+    try {
+      const res = await requestBackend<BackendFindingItem>(`/api/security-checker/findings/${encodeURIComponent(id)}`);
+      return mapBackendFinding(res);
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
+  },
+
+  securitySummary: async (hostId?: string): Promise<SecuritySummary> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'sample') {
+      const filtered = db.findings.filter((f) => !hostId || f.hostId === hostId);
+      const passed = filtered.filter((f) => f.status === 'pass').length;
+      const failed = filtered.filter((f) => f.status === 'fail').length;
+      const warning = filtered.filter((f) => f.status === 'warning').length;
+      const notApplicable = filtered.filter((f) => f.status === 'not_applicable').length;
+      const error = filtered.filter((f) => f.status === 'error').length;
+      const criticalFails = filtered.filter((f) => f.status === 'fail' && f.severity === 'critical').length;
+      const highFails = filtered.filter((f) => f.status === 'fail' && f.severity === 'high').length;
+      const mediumFails = filtered.filter((f) => f.status === 'fail' && f.severity === 'medium').length;
+      const lowFails = filtered.filter((f) => f.status === 'fail' && f.severity === 'low').length;
+      return {
+        totalChecks: filtered.length,
+        passed,
+        failed,
+        warning,
+        notApplicable,
+        error,
+        totalHosts: hostId ? 1 : db.hosts.length,
+        lastCheckedAt: filtered[0]?.checkedAt || null,
+        criticalFails,
+        highFails,
+        mediumFails,
+        lowFails,
+      };
+    }
+
+    try {
+      const q = hostId ? `?host_id=${encodeURIComponent(hostId)}` : '';
+      const res = await requestBackend<{
+        total_checks: number;
+        passed: number;
+        failed: number;
+        warning: number;
+        not_applicable: number;
+        error: number;
+        total_hosts: number;
+        last_checked_at?: string | null;
+        critical_fails: number;
+        high_fails: number;
+        medium_fails: number;
+        low_fails: number;
+      }>(`/api/security-checker/summary${q}`);
+
+      return {
+        totalChecks: res.total_checks,
+        passed: res.passed,
+        failed: res.failed,
+        warning: res.warning,
+        notApplicable: res.not_applicable,
+        error: res.error,
+        totalHosts: res.total_hosts,
+        lastCheckedAt: res.last_checked_at ?? null,
+        criticalFails: res.critical_fails,
+        highFails: res.high_fails,
+        mediumFails: res.medium_fails,
+        lowFails: res.low_fails,
+      };
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) {
+        return {
+          totalChecks: 0,
+          passed: 0,
+          failed: 0,
+          warning: 0,
+          notApplicable: 0,
+          error: 0,
+          totalHosts: hostId ? 1 : 0,
+          lastCheckedAt: null,
+          criticalFails: 0,
+          highFails: 0,
+          mediumFails: 0,
+          lowFails: 0,
+        };
+      }
+      throw e;
+    }
+  },
+
+  securityRuns: async (hostId?: string): Promise<SecurityCheckRun[]> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'sample') return [];
+
+    try {
+      const q = hostId ? `?host_id=${encodeURIComponent(hostId)}` : '';
+      const res = await requestBackend<{ items: any[]; total: number }>(`/api/security-checker/runs${q}`);
+      return (res.items || []).map((r) => ({
+        id: r.id,
+        hostId: r.host_id,
+        status: r.status,
+        totalChecks: r.total_checks,
+        passedChecks: r.passed_checks,
+        failedChecks: r.failed_checks,
+        warningChecks: r.warning_checks,
+        errorChecks: r.error_checks,
+        checkerVersion: r.checker_version,
+        summary: r.summary || {},
+        startedAt: r.started_at,
+        completedAt: r.completed_at,
+      }));
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return [];
+      throw e;
+    }
+  },
+
+  triggerSecurityCheck: async (hostId: string, force = true) => {
+    if (previewState === 'sample') {
+      await wait(800);
+      return {
+        run_id: 'sample-run-' + Date.now(),
+        host_id: hostId,
+        status: 'queued',
+        message: 'Security check scan triggered in preview mode.',
+        total_checks: 24,
+      };
+    }
+    return await requestBackend<{
+      run_id: string;
+      host_id: string;
+      status: string;
+      message: string;
+      total_checks?: number;
+    }>('/api/security-checker/runs', {
+      method: 'POST',
+      body: JSON.stringify({ host_id: hostId, force }),
+    });
   },
 
   alertEvidence: async (alertId: string): Promise<NormalizedEvent[]> => {

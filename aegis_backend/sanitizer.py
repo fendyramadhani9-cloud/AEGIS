@@ -46,7 +46,7 @@ class TelemetrySanitizer:
     # 5. Sensitive Command Line Arguments (Auditd EXECVE or process args)
     # E.g., -p Password123, --password=xxx, --token=xxx, -u user:password
     _RE_CLI_CREDENTIAL = re.compile(
-        r"(?i)(?:--password[=\s]+[^\s]+|-p\s*[^\s\-]+|--token[=\s]+[^\s]+|-u\s+[a-zA-Z0-9_-]+:[^\s]+)",
+        r"(?i)(?:--password[=\s]+[^\s]+|(?:\s|^)-p\s+[^\s\-]+|--token[=\s]+[^\s]+|(?:\s|^)-u\s+[a-zA-Z0-9_-]+:[^\s]+)",
     )
 
     # 6. Common Cloud / Platform Secret Tokens

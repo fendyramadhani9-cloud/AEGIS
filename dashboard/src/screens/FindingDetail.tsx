@@ -39,6 +39,11 @@ export function FindingDetailScreen() {
                   <div className="detail-hero__badges">
                     <Badge meta={statusMeta} />
                     {finding.status === 'fail' && <Badge meta={sev} variant="plain" />}
+                    {finding.category && (
+                      <span className="tag" style={{ textTransform: 'uppercase' }}>
+                        {finding.category}
+                      </span>
+                    )}
                     <span className="kind-label">Security Checker</span>
                   </div>
                   <h2 className="detail-hero__title">{finding.title}</h2>
@@ -62,6 +67,87 @@ export function FindingDetailScreen() {
                   </Notice>
                 )}
 
+                {(finding.actualValue || finding.expectedValue) && (
+                  <Section title="Observed Configuration vs. Standard">
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.75rem' }}>
+                      <div style={{ padding: '0.85rem', background: 'var(--surface-2)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tone-critical)', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
+                          Actual Value (Observed)
+                        </div>
+                        <div className="mono" style={{ fontSize: '0.875rem', wordBreak: 'break-all' }}>
+                          {finding.actualValue || 'None / Not detected'}
+                        </div>
+                      </div>
+                      <div style={{ padding: '0.85rem', background: 'var(--surface-2)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tone-healthy)', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
+                          Expected Value (Compliant)
+                        </div>
+                        <div className="mono" style={{ fontSize: '0.875rem', wordBreak: 'break-all' }}>
+                          {finding.expectedValue || 'Standard secure configuration'}
+                        </div>
+                      </div>
+                    </div>
+                  </Section>
+                )}
+
+                {finding.securityImpact && (
+                  <Section title="Security Impact">
+                    <Group>
+                      <p className="prose" style={{ margin: 0 }}>
+                        {finding.securityImpact}
+                      </p>
+                    </Group>
+                  </Section>
+                )}
+
+                {finding.recommendation && (
+                  <Section title="Remediation Guidance">
+                    <Group>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <p className="prose" style={{ margin: 0, fontWeight: 500 }}>
+                          Recommended administrator actions to resolve this finding:
+                        </p>
+                        <pre
+                          style={{
+                            padding: '0.75rem 1rem',
+                            background: 'var(--surface-3, #1e1e24)',
+                            borderRadius: '6px',
+                            overflowX: 'auto',
+                            fontSize: '0.85rem',
+                            color: 'var(--text)',
+                            border: '1px solid var(--border)',
+                          }}
+                        >
+                          <code>{finding.recommendation}</code>
+                        </pre>
+                      </div>
+                    </Group>
+                  </Section>
+                )}
+
+                {finding.evidenceSummary && (
+                  <Section title="Evidence & Command Output">
+                    <details
+                      style={{
+                        background: 'var(--surface-2)',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border)',
+                        padding: '0.75rem',
+                      }}
+                    >
+                      <summary style={{ cursor: 'pointer', fontWeight: 500, fontSize: '0.85rem' }}>
+                        View raw inspection output & evidence JSON
+                      </summary>
+                      <pre
+                        style={{ marginTop: '0.5rem', maxHeight: '240px', overflowY: 'auto', fontSize: '0.8rem' }}
+                        className="mono"
+                      >
+                        <code>{finding.evidenceSummary}</code>
+                      </pre>
+                    </details>
+                  </Section>
+                )}
+
                 <Section title="What was observed">
                   {finding.indicators.length ? (
                     <div className="loglist">
@@ -83,6 +169,8 @@ export function FindingDetailScreen() {
                     <KeyValues
                       items={[
                         ['Check ID', <Tag>{finding.checkId}</Tag>],
+                        ['Category', <span className="mono">{finding.category || 'General'}</span>],
+                        ['Reference', <span className="mono">{finding.remediationReference || 'CIS Benchmark'}</span>],
                         ['Method', 'Read-only inspection by the agent'],
                         [
                           'Limits',

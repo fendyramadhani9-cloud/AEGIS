@@ -173,3 +173,101 @@ class ErrorResponse(BaseModel):
     message: str
     code: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
+
+
+# ==========================================
+# 6. SECURITY CHECKER SCHEMAS
+# ==========================================
+
+class SecurityFindingItem(BaseModel):
+    id: str
+    run_id: str
+    host_id: str
+    check_id: str
+    check_name: str
+    category: str
+    severity: str
+    status: str
+    actual_value: Optional[str] = None
+    expected_value: Optional[str] = None
+    description: str
+    security_impact: Optional[str] = None
+    recommendation: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    remediation_reference: Optional[str] = None
+    checked_at: str
+    checker_version: Optional[str] = "1.0.0"
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedSecurityFindingsResponse(BaseModel):
+    items: List[SecurityFindingItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class SecurityCheckRunItem(BaseModel):
+    id: str
+    host_id: str
+    status: str
+    total_checks: int
+    passed_checks: int
+    failed_checks: int
+    warning_checks: int
+    error_checks: int
+    checker_version: str = "1.0.0"
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    started_at: str
+    completed_at: Optional[str] = None
+    created_at: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedSecurityRunsResponse(BaseModel):
+    items: List[SecurityCheckRunItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class SecuritySummaryResponse(BaseModel):
+    total_checks: int
+    passed: int
+    failed: int
+    warning: int
+    not_applicable: int
+    error: int
+    total_hosts: int
+    last_checked_at: Optional[str] = None
+    critical_fails: int
+    high_fails: int
+    medium_fails: int
+    low_fails: int
+
+
+class AgentSecurityCheckResultsRequest(BaseModel):
+    run: SecurityCheckRunItem
+    findings: List[SecurityFindingItem]
+
+
+class AgentSecurityCheckResultsResponse(BaseModel):
+    status: str = "ok"
+    run_id: str
+    host_id: str
+    stored_findings: int
+    message: str
+
+
+class TriggerRunRequest(BaseModel):
+    host_id: str
+    force: bool = False
+
+
+class TriggerRunResponse(BaseModel):
+    status: str = "pending"
+    host_id: str
+    message: str
+    requested_at: str

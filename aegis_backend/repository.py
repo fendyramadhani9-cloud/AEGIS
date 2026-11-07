@@ -120,6 +120,59 @@ class BaseAegisRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    def insert_security_check_run(
+        self,
+        run_data: Dict[str, Any],
+        findings: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Persists security check run and associated findings."""
+        pass
+
+    @abstractmethod
+    def list_security_findings(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        category: Optional[str] = None,
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Returns paginated security findings matching filters and total count."""
+        pass
+
+    @abstractmethod
+    def get_security_finding_by_id(self, finding_id: str) -> Optional[Dict[str, Any]]:
+        """Returns single finding by ID or None."""
+        pass
+
+    @abstractmethod
+    def list_security_runs(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Returns paginated security check execution runs and total count."""
+        pass
+
+    @abstractmethod
+    def get_security_run_by_id(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """Returns run by ID with its summary or None."""
+        pass
+
+    @abstractmethod
+    def get_security_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        """Returns aggregated posture counters (total, pass, fail, warning, etc.)."""
+        pass
+
+    @abstractmethod
+    def get_host_security_history(self, host_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Returns recent security runs for a host to enable history comparison."""
+        pass
+
 
 
 class SupabaseRepository(BaseAegisRepository):
@@ -379,6 +432,167 @@ class SupabaseRepository(BaseAegisRepository):
 
         return inserted_alerts, inserted_evidence
 
+    def insert_security_check_run(
+        self,
+        run_data: Dict[str, Any],
+        findings: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        try:
+            self.client.table("security_check_runs").upsert(
+                run_data,
+                on_conflict="id",
+            ).execute()
+
+            if findings:
+                self.client.table("security_findings").upsert(
+                    findings,
+                    on_conflict="run_id,check_id",
+                ).execute()
+
+            # Update host last_sc_run_at
+            if run_data.get("completed_at"):
+                self.client.table("hosts").update({
+                    "last_sc_run_at": run_data["completed_at"]
+                }).eq("id", run_data["host_id"]).execute()
+
+            return run_data
+        except Exception as e:
+            err_code = self._extract_postgrest_error_code(e)
+            logger.warning(f"Failed to persist security check run to Supabase: {e} (code: {err_code})")
+            if not hasattr(self, "_fallback_runs"):
+                self._fallback_runs = []
+                self._fallback_findings = []
+            self._fallback_runs.append(dict(run_data))
+            for f in findings:
+                self._fallback_findings.append(dict(f))
+            return run_data
+
+    def list_security_findings(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        category: Optional[str] = None,
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        try:
+            query = self.client.table("security_findings").select("*", count="exact")
+            if host_id:
+                query = query.eq("host_id", host_id)
+            if category:
+                query = query.eq("category", category)
+            if severity:
+                query = query.eq("severity", severity)
+            if status:
+                query = query.eq("status", status)
+            if search:
+                query = query.ilike("check_name", f"%{search}%")
+            query = query.order("checked_at", desc=True).range(offset, offset + limit - 1)
+            res = query.execute()
+            total = res.count if res.count is not None else len(res.data or [])
+            return res.data or [], total
+        except Exception as e:
+            fallback = getattr(self, "_fallback_findings", [])
+            filtered = fallback
+            if host_id:
+                filtered = [f for f in filtered if f.get("host_id") == host_id]
+            if category:
+                filtered = [f for f in filtered if f.get("category") == category]
+            if severity:
+                filtered = [f for f in filtered if f.get("severity") == severity]
+            if status:
+                filtered = [f for f in filtered if f.get("status") == status]
+            if search:
+                s_lower = search.lower()
+                filtered = [f for f in filtered if s_lower in f.get("check_name", "").lower() or s_lower in f.get("check_id", "").lower()]
+            total = len(filtered)
+            paginated = filtered[offset : offset + limit]
+            return paginated, total
+
+    def get_security_finding_by_id(self, finding_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            res = self.client.table("security_findings").select("*").eq("id", finding_id).limit(1).execute()
+            if res.data and len(res.data) > 0:
+                return res.data[0]
+            fallback = getattr(self, "_fallback_findings", [])
+            for f in fallback:
+                if f.get("id") == finding_id:
+                    return f
+            return None
+        except Exception:
+            fallback = getattr(self, "_fallback_findings", [])
+            for f in fallback:
+                if f.get("id") == finding_id:
+                    return f
+            return None
+
+    def list_security_runs(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        try:
+            query = self.client.table("security_check_runs").select("*", count="exact")
+            if host_id:
+                query = query.eq("host_id", host_id)
+            query = query.order("started_at", desc=True).range(offset, offset + limit - 1)
+            res = query.execute()
+            total = res.count if res.count is not None else len(res.data or [])
+            return res.data or [], total
+        except Exception:
+            fallback = getattr(self, "_fallback_runs", [])
+            filtered = [r for r in fallback if not host_id or r.get("host_id") == host_id]
+            total = len(filtered)
+            return filtered[offset : offset + limit], total
+
+    def get_security_run_by_id(self, run_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            res = self.client.table("security_check_runs").select("*").eq("id", run_id).limit(1).execute()
+            if res.data and len(res.data) > 0:
+                return res.data[0]
+            fallback = getattr(self, "_fallback_runs", [])
+            for r in fallback:
+                if r.get("id") == run_id:
+                    return r
+            return None
+        except Exception:
+            fallback = getattr(self, "_fallback_runs", [])
+            for r in fallback:
+                if r.get("id") == run_id:
+                    return r
+            return None
+
+    def get_security_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        findings, _ = self.list_security_findings(limit=1000, offset=0, host_id=host_id)
+        _, total_hosts = self.list_hosts(limit=100)
+        
+        last_run_time = None
+        runs, _ = self.list_security_runs(limit=1, offset=0, host_id=host_id)
+        if runs:
+            last_run_time = runs[0].get("completed_at") or runs[0].get("started_at")
+
+        return {
+            "total_checks": len(findings),
+            "passed": sum(1 for f in findings if f.get("status") == "pass"),
+            "failed": sum(1 for f in findings if f.get("status") == "fail"),
+            "warning": sum(1 for f in findings if f.get("status") == "warning"),
+            "not_applicable": sum(1 for f in findings if f.get("status") == "not_applicable"),
+            "error": sum(1 for f in findings if f.get("status") == "error"),
+            "total_hosts": total_hosts,
+            "last_checked_at": last_run_time,
+            "critical_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "critical"),
+            "high_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "high"),
+            "medium_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "medium"),
+            "low_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "low"),
+        }
+
+    def get_host_security_history(self, host_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        runs, _ = self.list_security_runs(limit=limit, offset=0, host_id=host_id)
+        return runs
+
 
 
 class MockAegisRepository(BaseAegisRepository):
@@ -389,6 +603,8 @@ class MockAegisRepository(BaseAegisRepository):
 
     def __init__(self, simulate_db_error: bool = False):
         self.simulate_db_error = simulate_db_error
+        self.security_runs: List[Dict[str, Any]] = []
+        self.security_findings: List[Dict[str, Any]] = []
         self.system_status = {
             "id": 1,
             "collector": "ok",
@@ -633,6 +849,128 @@ class MockAegisRepository(BaseAegisRepository):
                 new_evidence += 1
 
         return new_alerts, new_evidence
+
+    def insert_security_check_run(
+        self,
+        run_data: Dict[str, Any],
+        findings: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on security check run insert.")
+        
+        # Check host exists
+        if not any(h["id"] == run_data.get("host_id") for h in self.hosts):
+            raise ValueError(f"Foreign key violation: Host '{run_data.get('host_id')}' not found.")
+
+        # Upsert run
+        self.security_runs = [r for r in self.security_runs if r["id"] != run_data["id"]]
+        self.security_runs.append(dict(run_data))
+
+        # Upsert findings
+        existing_keys = {(f["run_id"], f["check_id"]) for f in self.security_findings}
+        for f in findings:
+            key = (f["run_id"], f["check_id"])
+            if key in existing_keys:
+                self.security_findings = [ef for ef in self.security_findings if (ef["run_id"], ef["check_id"]) != key]
+            self.security_findings.append(dict(f))
+            existing_keys.add(key)
+
+        # Update host last_sc_run_at
+        for h in self.hosts:
+            if h["id"] == run_data.get("host_id"):
+                h["last_sc_run_at"] = run_data.get("completed_at") or datetime.now(timezone.utc).isoformat()
+
+        return run_data
+
+    def list_security_findings(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        category: Optional[str] = None,
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on security findings list.")
+
+        filtered = list(self.security_findings)
+        if host_id:
+            filtered = [f for f in filtered if f.get("host_id") == host_id]
+        if category:
+            filtered = [f for f in filtered if f.get("category") == category]
+        if severity:
+            filtered = [f for f in filtered if f.get("severity") == severity]
+        if status:
+            filtered = [f for f in filtered if f.get("status") == status]
+        if search:
+            s_lower = search.lower()
+            filtered = [
+                f for f in filtered
+                if s_lower in f.get("check_name", "").lower() or s_lower in f.get("check_id", "").lower()
+            ]
+
+        filtered.sort(key=lambda x: x.get("checked_at", ""), reverse=True)
+        total = len(filtered)
+        paginated = filtered[offset : offset + limit]
+        return paginated, total
+
+    def get_security_finding_by_id(self, finding_id: str) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get finding.")
+        for f in self.security_findings:
+            if f["id"] == finding_id:
+                return dict(f)
+        return None
+
+    def list_security_runs(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on list security runs.")
+        filtered = [r for r in self.security_runs if not host_id or r.get("host_id") == host_id]
+        filtered.sort(key=lambda x: x.get("started_at", ""), reverse=True)
+        total = len(filtered)
+        return filtered[offset : offset + limit], total
+
+    def get_security_run_by_id(self, run_id: str) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get security run.")
+        for r in self.security_runs:
+            if r["id"] == run_id:
+                return dict(r)
+        return None
+
+    def get_security_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on security summary.")
+        findings = [f for f in self.security_findings if not host_id or f.get("host_id") == host_id]
+        runs = [r for r in self.security_runs if not host_id or r.get("host_id") == host_id]
+        runs.sort(key=lambda x: x.get("started_at", ""), reverse=True)
+        last_checked = runs[0].get("completed_at") or runs[0].get("started_at") if runs else None
+
+        return {
+            "total_checks": len(findings),
+            "passed": sum(1 for f in findings if f.get("status") == "pass"),
+            "failed": sum(1 for f in findings if f.get("status") == "fail"),
+            "warning": sum(1 for f in findings if f.get("status") == "warning"),
+            "not_applicable": sum(1 for f in findings if f.get("status") == "not_applicable"),
+            "error": sum(1 for f in findings if f.get("status") == "error"),
+            "total_hosts": len(self.hosts),
+            "last_checked_at": last_checked,
+            "critical_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "critical"),
+            "high_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "high"),
+            "medium_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "medium"),
+            "low_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "low"),
+        }
+
+    def get_host_security_history(self, host_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        runs, _ = self.list_security_runs(limit=limit, offset=0, host_id=host_id)
+        return runs
 
 
 

@@ -59,6 +59,9 @@ export const severityMeta: Record<Severity, StatusMeta> = {
 export const findingStatusMeta: Record<FindingStatus, StatusMeta> = {
   fail: { label: 'Failed', tone: 'high', icon: TriangleAlert },
   pass: { label: 'Passed', tone: 'healthy', icon: CircleCheck },
+  warning: { label: 'Warning', tone: 'warning', icon: CircleAlert, hint: 'Potentially insecure configuration requiring review' },
+  not_applicable: { label: 'N/A', tone: 'disabled', icon: CircleMinus, hint: 'Check not applicable to this host distribution or profile' },
+  error: { label: 'Error', tone: 'critical', icon: Ban, hint: 'Inspection failed or target configuration unreadable' },
   not_checked: {
     label: 'Not checked',
     tone: 'unknown',

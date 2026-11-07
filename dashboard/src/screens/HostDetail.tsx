@@ -1,9 +1,32 @@
+import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { CircleHelp, ListTree, Radio, ShieldCheck, Unplug } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CircleHelp,
+  ListTree,
+  Play,
+  Radio,
+  RotateCw,
+  ShieldCheck,
+  Unplug,
+} from 'lucide-react';
 import { Screen } from '../components/AppShell';
 import { AlertRow, EvidenceBanner, FindingRow, GapRow } from '../components/domain';
 import { EmptyState, QueryView, SkeletonBlock } from '../components/states';
-import { Badge, Group, KeyValues, LinkButton, Notice, Row, Section, Segmented, Tag, Unavailable } from '../components/ui';
+import {
+  Badge,
+  Button,
+  Group,
+  KeyValues,
+  LinkButton,
+  Notice,
+  Row,
+  Section,
+  Segmented,
+  Tag,
+  Unavailable,
+} from '../components/ui';
 import { api } from '../data/api';
 import { useQuery } from '../lib/hooks';
 import { agentStatusMeta, sourceLabel, sourceStatusMeta } from '../lib/status';
@@ -15,6 +38,8 @@ export function HostDetailScreen() {
   const { id = '' } = useParams();
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'alerts';
+  const [triggering, setTriggering] = useState(false);
+  const [triggerNotice, setTriggerNotice] = useState<{ tone: 'healthy' | 'critical'; text: string } | null>(null);
   const { when, dateTime } = useTimeFormat();
 
   const q = useQuery(async () => {
@@ -153,18 +178,98 @@ export function HostDetailScreen() {
                     </EmptyState>
                   ))}
 
-                {tab === 'checks' &&
-                  (findings.length ? (
-                    <Group>
-                      {findings.map((f) => (
-                        <FindingRow key={f.id} finding={f} showHost={false} />
-                      ))}
-                    </Group>
-                  ) : (
-                    <EmptyState icon={CircleHelp} title="No Security Checker results">
-                      The Security Checker has not reported results for this host yet.
-                    </EmptyState>
-                  ))}
+                {tab === 'checks' && (
+                  <div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '0.75rem',
+                        marginBottom: '1rem',
+                        padding: '0.75rem 1rem',
+                        background: 'var(--surface-2)',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'center' }}>
+                        <div>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--tone-healthy)', fontWeight: 600 }}>PASSED</span>
+                          <div style={{ fontWeight: 700, fontSize: '1.2rem', color: 'var(--tone-healthy)' }}>
+                            {findings.filter((f) => f.status === 'pass').length}
+                          </div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--tone-critical)', fontWeight: 600 }}>FAILED</span>
+                          <div style={{ fontWeight: 700, fontSize: '1.2rem', color: 'var(--tone-critical)' }}>
+                            {findings.filter((f) => f.status === 'fail').length}
+                          </div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--tone-warning)', fontWeight: 600 }}>WARNING</span>
+                          <div style={{ fontWeight: 700, fontSize: '1.2rem', color: 'var(--tone-warning)' }}>
+                            {findings.filter((f) => f.status === 'warning').length}
+                          </div>
+                        </div>
+                      </div>
+
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        icon={triggering ? RotateCw : Play}
+                        disabled={triggering}
+                        onClick={async () => {
+                          setTriggering(true);
+                          setTriggerNotice(null);
+                          try {
+                            const res = await api.triggerSecurityCheck(host.id, true);
+                            setTriggerNotice({
+                              tone: 'healthy',
+                              text: `Security Check triggered for ${host.hostname}. Run ID: ${res.run_id}`,
+                            });
+                            q.retry();
+                          } catch (err: unknown) {
+                            const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+                            setTriggerNotice({
+                              tone: 'critical',
+                              text: `Failed to trigger check: ${errorMsg}`,
+                            });
+                          } finally {
+                            setTriggering(false);
+                          }
+                        }}
+                      >
+                        {triggering ? 'Scanning…' : 'Run Security Check'}
+                      </Button>
+                    </div>
+
+                    {triggerNotice && (
+                      <div style={{ marginBottom: '1rem' }}>
+                        <Notice
+                          tone={triggerNotice.tone}
+                          icon={triggerNotice.tone === 'healthy' ? CheckCircle2 : AlertTriangle}
+                          title={triggerNotice.tone === 'healthy' ? 'Check Started' : 'Execution Notice'}
+                        >
+                          {triggerNotice.text}
+                        </Notice>
+                      </div>
+                    )}
+
+                    {findings.length ? (
+                      <Group>
+                        {findings.map((f) => (
+                          <FindingRow key={f.id} finding={f} showHost={false} />
+                        ))}
+                      </Group>
+                    ) : (
+                      <EmptyState icon={CircleHelp} title="No Security Checker results">
+                        The Security Checker has not reported results for this host yet.
+                      </EmptyState>
+                    )}
+                  </div>
+                )}
 
                 {tab === 'sources' && (
                   <Section title={`Telemetry gaps (${gaps.length})`}>
