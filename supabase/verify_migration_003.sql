@@ -73,3 +73,4 @@ BEGIN
     RAISE NOTICE '  MIGRATION 003 VERIFICATION COMPLETED SUCCESSFULLY';
     RAISE NOTICE '=======================================================';
 END $$;
+

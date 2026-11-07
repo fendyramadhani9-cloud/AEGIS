@@ -56,3 +56,4 @@ node tests/verify_security_checker_migration.cjs
 # Run full AEGIS regression suite
 pytest tests/ -v
 ```
+

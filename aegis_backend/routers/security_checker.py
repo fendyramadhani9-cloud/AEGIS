@@ -300,3 +300,4 @@ def submit_agent_security_results(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to store security check results.",
         )
+

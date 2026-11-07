@@ -173,6 +173,69 @@ class BaseAegisRepository(ABC):
         """Returns recent security runs for a host to enable history comparison."""
         pass
 
+    @abstractmethod
+    def get_incident_by_id(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        """Returns single incident by ID or None."""
+        pass
+
+    @abstractmethod
+    def list_incidents(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        status: Optional[str] = None,
+        severity: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Returns paginated incidents matching filters and total count."""
+        pass
+
+    @abstractmethod
+    def upsert_incident(
+        self,
+        incident_data: Dict[str, Any],
+        alert_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Creates or updates an incident and links its correlated alerts."""
+        pass
+
+    @abstractmethod
+    def update_incident_status(
+        self,
+        incident_id: str,
+        status: str,
+        note: Optional[str] = None,
+        operator: str = "admin",
+    ) -> Optional[Dict[str, Any]]:
+        """Updates incident status and logs transition in history."""
+        pass
+
+    @abstractmethod
+    def get_incident_alerts(self, incident_id: str) -> List[Dict[str, Any]]:
+        """Returns all alerts linked to an incident."""
+        pass
+
+    @abstractmethod
+    def save_ai_analysis(self, analysis_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Saves an AI analysis result linked to an incident or alert."""
+        pass
+
+    @abstractmethod
+    def get_latest_ai_analysis(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        """Returns the most recent AI analysis for an incident or None."""
+        pass
+
+    @abstractmethod
+    def get_incident_timeline(self, incident_id: str) -> List[Dict[str, Any]]:
+        """Returns chronological timeline items for an incident."""
+        pass
+
+    @abstractmethod
+    def get_incidents_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        """Returns aggregated incident lifecycle metrics and risk distribution."""
+        pass
+
 
 
 class SupabaseRepository(BaseAegisRepository):
@@ -182,6 +245,7 @@ class SupabaseRepository(BaseAegisRepository):
     """
 
     def __init__(self, client: Optional[Client] = None):
+        self.simulate_db_error = False
         if client:
             self.client = client
         else:
@@ -593,6 +657,234 @@ class SupabaseRepository(BaseAegisRepository):
         runs, _ = self.list_security_runs(limit=limit, offset=0, host_id=host_id)
         return runs
 
+    # ==========================================
+    # INCIDENT INVESTIGATION & AI ANALYSIS (MOCK)
+    # ==========================================
+
+    def _ensure_mock_incident_stores(self):
+        if not hasattr(self, "incidents"):
+            self.incidents: Dict[str, Dict[str, Any]] = {}
+            self.incident_alerts_map: Dict[str, List[str]] = {}
+            self.ai_analyses_map: Dict[str, List[Dict[str, Any]]] = {}
+            self.status_history_map: Dict[str, List[Dict[str, Any]]] = {}
+            self.timeline_map: Dict[str, List[Dict[str, Any]]] = {}
+
+    def get_incident_by_id(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incident.")
+        self._ensure_mock_incident_stores()
+        if incident_id in self.incidents:
+            return dict(self.incidents[incident_id], storage_backend="mock")
+        return None
+
+    def list_incidents(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        status: Optional[str] = None,
+        severity: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on list incidents.")
+        self._ensure_mock_incident_stores()
+        filtered = list(self.incidents.values())
+        if host_id:
+            filtered = [i for i in filtered if i.get("host_id") == host_id]
+        if status:
+            filtered = [i for i in filtered if i.get("status", "").lower() == status.lower()]
+        if severity:
+            filtered = [i for i in filtered if i.get("severity", "").lower() == severity.lower()]
+        if search:
+            s_low = search.lower()
+            filtered = [
+                i for i in filtered
+                if s_low in i.get("id", "").lower()
+                or s_low in i.get("title", "").lower()
+                or s_low in i.get("attack_scenario", "").lower()
+            ]
+        filtered.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        total = len(filtered)
+        items = [dict(i, storage_backend="mock") for i in filtered[offset : offset + limit]]
+        return items, total
+
+    def upsert_incident(
+        self,
+        incident_data: Dict[str, Any],
+        alert_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on upsert incident.")
+        self._ensure_mock_incident_stores()
+        inc_id = incident_data["id"]
+        now_iso = datetime.now(timezone.utc).isoformat()
+        clean = dict(incident_data)
+        clean.setdefault("created_at", now_iso)
+        clean.setdefault("updated_at", now_iso)
+        clean["storage_backend"] = "mock"
+        self.incidents[inc_id] = clean
+        if alert_ids:
+            self.incident_alerts_map[inc_id] = list(alert_ids)
+
+        self.timeline_map.setdefault(inc_id, []).append({
+            "id": f"TL-{inc_id}-INIT",
+            "incident_id": inc_id,
+            "timestamp": clean.get("first_seen_at") or now_iso,
+            "kind": "alert",
+            "title": f"Incident Created: {clean.get('title')}",
+            "description": clean.get("attack_scenario") or "Correlated incident initialized.",
+            "severity": clean.get("severity"),
+            "metadata": {"alert_count": len(alert_ids or [])},
+        })
+        return clean
+
+    def update_incident_status(
+        self,
+        incident_id: str,
+        status: str,
+        note: Optional[str] = None,
+        operator: str = "admin",
+    ) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on update incident status.")
+        self._ensure_mock_incident_stores()
+        if incident_id not in self.incidents:
+            return None
+        old_st = self.incidents[incident_id].get("status", "new")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        self.incidents[incident_id]["status"] = status.lower()
+        self.incidents[incident_id]["updated_at"] = now_iso
+
+        self.status_history_map.setdefault(incident_id, []).append({
+            "id": f"HIST-{incident_id}-{len(self.status_history_map.get(incident_id, []))}",
+            "incident_id": incident_id,
+            "old_status": old_st,
+            "new_status": status.lower(),
+            "note": note,
+            "operator": operator,
+            "transitioned_at": now_iso,
+        })
+
+        self.timeline_map.setdefault(incident_id, []).append({
+            "id": f"TL-{incident_id}-ST-{int(datetime.now(timezone.utc).timestamp())}",
+            "incident_id": incident_id,
+            "timestamp": now_iso,
+            "kind": "status_change",
+            "title": f"Status updated to {status.upper()}",
+            "description": note or f"Status changed by {operator}.",
+            "severity": self.incidents[incident_id].get("severity"),
+            "metadata": {"old_status": old_st, "new_status": status.lower(), "operator": operator},
+        })
+        return dict(self.incidents[incident_id], storage_backend="mock")
+
+    def get_incident_alerts(self, incident_id: str) -> List[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incident alerts.")
+        self._ensure_mock_incident_stores()
+        alert_ids = self.incident_alerts_map.get(incident_id, [])
+        if not alert_ids and incident_id in self.incidents:
+            primary_id = self.incidents[incident_id].get("primary_alert_id")
+            if primary_id:
+                alert_ids = [primary_id]
+
+        out = []
+        for aid in alert_ids:
+            a = self.get_alert_by_id(aid)
+            if a:
+                out.append(a)
+        return out
+
+    def save_ai_analysis(self, analysis_data: Dict[str, Any]) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on save ai analysis.")
+        self._ensure_mock_incident_stores()
+        clean = dict(analysis_data)
+        inc_id = clean.get("incident_id")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        clean.setdefault("created_at", now_iso)
+        clean["storage_backend"] = "mock"
+        self.ai_analyses_map.setdefault(inc_id, []).append(clean)
+
+        if inc_id:
+            self.timeline_map.setdefault(inc_id, []).append({
+                "id": f"TL-{inc_id}-ANL-{int(datetime.now(timezone.utc).timestamp())}",
+                "incident_id": inc_id,
+                "timestamp": clean.get("completed_at") or now_iso,
+                "kind": "analysis",
+                "title": f"AI Investigation: {clean.get('threat_classification')}",
+                "description": clean.get("executive_summary", "")[:200],
+                "severity": clean.get("risk_level"),
+                "metadata": {
+                    "provider": clean.get("provider"),
+                    "model": clean.get("model"),
+                    "confidence": clean.get("confidence_level"),
+                },
+            })
+        return clean
+
+    def get_latest_ai_analysis(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get latest ai analysis.")
+        self._ensure_mock_incident_stores()
+        analyses = self.ai_analyses_map.get(incident_id, [])
+        if analyses:
+            return dict(analyses[-1], storage_backend="mock")
+        return None
+
+    def get_incident_timeline(self, incident_id: str) -> List[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incident timeline.")
+        self._ensure_mock_incident_stores()
+        items = list(self.timeline_map.get(incident_id, []))
+
+        alerts = self.get_incident_alerts(incident_id)
+        for a in alerts:
+            aid = a.get("id")
+            if aid:
+                evs = self.get_alert_evidence(aid) or []
+                for ev in evs:
+                    items.append({
+                        "id": f"TL-EVT-{ev.get('event_id') or ev.get('id')}",
+                        "incident_id": incident_id,
+                        "timestamp": ev.get("event_timestamp") or ev.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                        "kind": "event",
+                        "title": f"Telemetry: {ev.get('source_id') or 'auth'}",
+                        "description": ev.get("message", ""),
+                        "severity": a.get("severity"),
+                        "metadata": {
+                            "source_ip": ev.get("source_ip"),
+                            "user_name": ev.get("user_name"),
+                            "alert_id": aid,
+                        },
+                    })
+
+        items.sort(key=lambda x: x.get("timestamp", ""))
+        return items
+
+    def get_incidents_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incidents summary.")
+        incidents, _ = self.list_incidents(limit=200, offset=0, host_id=host_id)
+        hosts = {i.get("host_id") for i in incidents if i.get("host_id")}
+        latest = incidents[0].get("created_at") if incidents else None
+
+        return {
+            "total_incidents": len(incidents),
+            "new_incidents": sum(1 for i in incidents if i.get("status") == "new"),
+            "investigating": sum(1 for i in incidents if i.get("status") == "investigating"),
+            "confirmed": sum(1 for i in incidents if i.get("status") == "confirmed"),
+            "resolved": sum(1 for i in incidents if i.get("status") == "resolved"),
+            "false_positives": sum(1 for i in incidents if i.get("status") == "false_positive"),
+            "contained": sum(1 for i in incidents if i.get("status") == "contained"),
+            "critical_risk": sum(1 for i in incidents if i.get("risk_level") == "critical"),
+            "high_risk": sum(1 for i in incidents if i.get("risk_level") == "high"),
+            "medium_risk": sum(1 for i in incidents if i.get("risk_level") == "medium"),
+            "low_risk": sum(1 for i in incidents if i.get("risk_level") == "low"),
+            "total_hosts_affected": len(hosts),
+            "latest_incident_at": latest,
+        }
+
 
 
 class MockAegisRepository(BaseAegisRepository):
@@ -971,6 +1263,234 @@ class MockAegisRepository(BaseAegisRepository):
     def get_host_security_history(self, host_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         runs, _ = self.list_security_runs(limit=limit, offset=0, host_id=host_id)
         return runs
+
+    # ==========================================
+    # INCIDENT INVESTIGATION & AI ANALYSIS (MOCK)
+    # ==========================================
+
+    def _ensure_mock_incident_stores(self):
+        if not hasattr(self, "incidents"):
+            self.incidents: Dict[str, Dict[str, Any]] = {}
+            self.incident_alerts_map: Dict[str, List[str]] = {}
+            self.ai_analyses_map: Dict[str, List[Dict[str, Any]]] = {}
+            self.status_history_map: Dict[str, List[Dict[str, Any]]] = {}
+            self.timeline_map: Dict[str, List[Dict[str, Any]]] = {}
+
+    def get_incident_by_id(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incident.")
+        self._ensure_mock_incident_stores()
+        if incident_id in self.incidents:
+            return dict(self.incidents[incident_id], storage_backend="mock")
+        return None
+
+    def list_incidents(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        status: Optional[str] = None,
+        severity: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on list incidents.")
+        self._ensure_mock_incident_stores()
+        filtered = list(self.incidents.values())
+        if host_id:
+            filtered = [i for i in filtered if i.get("host_id") == host_id]
+        if status:
+            filtered = [i for i in filtered if i.get("status", "").lower() == status.lower()]
+        if severity:
+            filtered = [i for i in filtered if i.get("severity", "").lower() == severity.lower()]
+        if search:
+            s_low = search.lower()
+            filtered = [
+                i for i in filtered
+                if s_low in i.get("id", "").lower()
+                or s_low in i.get("title", "").lower()
+                or s_low in i.get("attack_scenario", "").lower()
+            ]
+        filtered.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        total = len(filtered)
+        items = [dict(i, storage_backend="mock") for i in filtered[offset : offset + limit]]
+        return items, total
+
+    def upsert_incident(
+        self,
+        incident_data: Dict[str, Any],
+        alert_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on upsert incident.")
+        self._ensure_mock_incident_stores()
+        inc_id = incident_data["id"]
+        now_iso = datetime.now(timezone.utc).isoformat()
+        clean = dict(incident_data)
+        clean.setdefault("created_at", now_iso)
+        clean.setdefault("updated_at", now_iso)
+        clean["storage_backend"] = "mock"
+        self.incidents[inc_id] = clean
+        if alert_ids:
+            self.incident_alerts_map[inc_id] = list(alert_ids)
+
+        self.timeline_map.setdefault(inc_id, []).append({
+            "id": f"TL-{inc_id}-INIT",
+            "incident_id": inc_id,
+            "timestamp": clean.get("first_seen_at") or now_iso,
+            "kind": "alert",
+            "title": f"Incident Created: {clean.get('title')}",
+            "description": clean.get("attack_scenario") or "Correlated incident initialized.",
+            "severity": clean.get("severity"),
+            "metadata": {"alert_count": len(alert_ids or [])},
+        })
+        return clean
+
+    def update_incident_status(
+        self,
+        incident_id: str,
+        status: str,
+        note: Optional[str] = None,
+        operator: str = "admin",
+    ) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on update incident status.")
+        self._ensure_mock_incident_stores()
+        if incident_id not in self.incidents:
+            return None
+        old_st = self.incidents[incident_id].get("status", "new")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        self.incidents[incident_id]["status"] = status.lower()
+        self.incidents[incident_id]["updated_at"] = now_iso
+
+        self.status_history_map.setdefault(incident_id, []).append({
+            "id": f"HIST-{incident_id}-{len(self.status_history_map.get(incident_id, []))}",
+            "incident_id": incident_id,
+            "old_status": old_st,
+            "new_status": status.lower(),
+            "note": note,
+            "operator": operator,
+            "transitioned_at": now_iso,
+        })
+
+        self.timeline_map.setdefault(incident_id, []).append({
+            "id": f"TL-{incident_id}-ST-{int(datetime.now(timezone.utc).timestamp())}",
+            "incident_id": incident_id,
+            "timestamp": now_iso,
+            "kind": "status_change",
+            "title": f"Status updated to {status.upper()}",
+            "description": note or f"Status changed by {operator}.",
+            "severity": self.incidents[incident_id].get("severity"),
+            "metadata": {"old_status": old_st, "new_status": status.lower(), "operator": operator},
+        })
+        return dict(self.incidents[incident_id], storage_backend="mock")
+
+    def get_incident_alerts(self, incident_id: str) -> List[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incident alerts.")
+        self._ensure_mock_incident_stores()
+        alert_ids = self.incident_alerts_map.get(incident_id, [])
+        if not alert_ids and incident_id in self.incidents:
+            primary_id = self.incidents[incident_id].get("primary_alert_id")
+            if primary_id:
+                alert_ids = [primary_id]
+
+        out = []
+        for aid in alert_ids:
+            a = self.get_alert_by_id(aid)
+            if a:
+                out.append(a)
+        return out
+
+    def save_ai_analysis(self, analysis_data: Dict[str, Any]) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on save ai analysis.")
+        self._ensure_mock_incident_stores()
+        clean = dict(analysis_data)
+        inc_id = clean.get("incident_id")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        clean.setdefault("created_at", now_iso)
+        clean["storage_backend"] = "mock"
+        self.ai_analyses_map.setdefault(inc_id, []).append(clean)
+
+        if inc_id:
+            self.timeline_map.setdefault(inc_id, []).append({
+                "id": f"TL-{inc_id}-ANL-{int(datetime.now(timezone.utc).timestamp())}",
+                "incident_id": inc_id,
+                "timestamp": clean.get("completed_at") or now_iso,
+                "kind": "analysis",
+                "title": f"AI Investigation: {clean.get('threat_classification')}",
+                "description": clean.get("executive_summary", "")[:200],
+                "severity": clean.get("risk_level"),
+                "metadata": {
+                    "provider": clean.get("provider"),
+                    "model": clean.get("model"),
+                    "confidence": clean.get("confidence_level"),
+                },
+            })
+        return clean
+
+    def get_latest_ai_analysis(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get latest ai analysis.")
+        self._ensure_mock_incident_stores()
+        analyses = self.ai_analyses_map.get(incident_id, [])
+        if analyses:
+            return dict(analyses[-1], storage_backend="mock")
+        return None
+
+    def get_incident_timeline(self, incident_id: str) -> List[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incident timeline.")
+        self._ensure_mock_incident_stores()
+        items = list(self.timeline_map.get(incident_id, []))
+
+        alerts = self.get_incident_alerts(incident_id)
+        for a in alerts:
+            aid = a.get("id")
+            if aid:
+                evs = self.get_alert_evidence(aid) or []
+                for ev in evs:
+                    items.append({
+                        "id": f"TL-EVT-{ev.get('event_id') or ev.get('id')}",
+                        "incident_id": incident_id,
+                        "timestamp": ev.get("event_timestamp") or ev.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                        "kind": "event",
+                        "title": f"Telemetry: {ev.get('source_id') or 'auth'}",
+                        "description": ev.get("message", ""),
+                        "severity": a.get("severity"),
+                        "metadata": {
+                            "source_ip": ev.get("source_ip"),
+                            "user_name": ev.get("user_name"),
+                            "alert_id": aid,
+                        },
+                    })
+
+        items.sort(key=lambda x: x.get("timestamp", ""))
+        return items
+
+    def get_incidents_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incidents summary.")
+        incidents, _ = self.list_incidents(limit=200, offset=0, host_id=host_id)
+        hosts = {i.get("host_id") for i in incidents if i.get("host_id")}
+        latest = incidents[0].get("created_at") if incidents else None
+
+        return {
+            "total_incidents": len(incidents),
+            "new_incidents": sum(1 for i in incidents if i.get("status") == "new"),
+            "investigating": sum(1 for i in incidents if i.get("status") == "investigating"),
+            "confirmed": sum(1 for i in incidents if i.get("status") == "confirmed"),
+            "resolved": sum(1 for i in incidents if i.get("status") == "resolved"),
+            "false_positives": sum(1 for i in incidents if i.get("status") == "false_positive"),
+            "contained": sum(1 for i in incidents if i.get("status") == "contained"),
+            "critical_risk": sum(1 for i in incidents if i.get("risk_level") == "critical"),
+            "high_risk": sum(1 for i in incidents if i.get("risk_level") == "high"),
+            "medium_risk": sum(1 for i in incidents if i.get("risk_level") == "medium"),
+            "low_risk": sum(1 for i in incidents if i.get("risk_level") == "low"),
+            "total_hosts_affected": len(hosts),
+            "latest_incident_at": latest,
+        }
 
 
 

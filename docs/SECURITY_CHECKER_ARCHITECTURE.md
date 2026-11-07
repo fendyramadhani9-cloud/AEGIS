@@ -82,3 +82,4 @@ The AEGIS Security Checker is a read-only host configuration auditing subsystem 
 - Each scan run is assigned an immutable ID: `RUN-<host_id>-<timestamp_hash>`.
 - Findings are identified uniquely by `(run_id, check_id)` with database-level uniqueness constraints (`uq_run_check`).
 - Submissions for unknown hosts or cross-host payload mismatches (where a finding's `host_id` does not match the run's `host_id`) are rejected with `400 Bad Request`.
+

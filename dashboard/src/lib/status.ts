@@ -5,6 +5,7 @@
  */
 import {
   Ban,
+  CircleAlert,
   CircleCheck,
   CircleDashed,
   CircleDot,
@@ -17,8 +18,9 @@ import {
   LoaderCircle,
   OctagonAlert,
   Radio,
+  Search,
+  ShieldCheck,
   TriangleAlert,
-  CircleAlert,
   Unplug,
   type LucideIcon,
 } from 'lucide-react';
@@ -26,6 +28,7 @@ import type {
   AgentStatus,
   EvidenceStatus,
   FindingStatus,
+  IncidentStatus,
   ReportStatus,
   Severity,
   SourceStatus,
@@ -87,6 +90,15 @@ export const evidenceStatusMeta: Record<EvidenceStatus, StatusMeta> = {
   active: { label: 'Active', tone: 'brand', icon: Radio },
   expired: { label: 'Expired', tone: 'disabled', icon: Clock },
   stopped: { label: 'Stopped', tone: 'disabled', icon: CircleMinus },
+};
+
+export const incidentStatusMeta: Record<IncidentStatus, StatusMeta> = {
+  open: { label: 'Open', tone: 'critical', icon: OctagonAlert, hint: 'Newly correlated incident requiring review' },
+  investigating: { label: 'Investigating', tone: 'high', icon: Search, hint: 'Active investigation in progress' },
+  mitigated: { label: 'Mitigated', tone: 'warning', icon: CircleAlert, hint: 'Threat contained, remediation pending verification' },
+  resolved: { label: 'Resolved', tone: 'healthy', icon: ShieldCheck, hint: 'Incident resolved and verified' },
+  closed: { label: 'Closed', tone: 'disabled', icon: CircleCheck, hint: 'Archived and completed' },
+  false_positive: { label: 'False Positive', tone: 'disabled', icon: Ban, hint: 'Dismissed as non-malicious' },
 };
 
 export const sourceLabel: Record<string, string> = {

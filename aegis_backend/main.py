@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 from aegis_backend.config import settings
 from aegis_backend.schemas import ErrorResponse
-from aegis_backend.routers import health, system, hosts, alerts, telemetry, security_checker
+from aegis_backend.routers import health, system, hosts, alerts, telemetry, security_checker, incidents
 
 # Setup logging
 logging.basicConfig(
@@ -64,6 +64,7 @@ app.include_router(hosts.router)
 app.include_router(alerts.router)
 app.include_router(telemetry.router)
 app.include_router(security_checker.router)
+app.include_router(incidents.router)
 
 
 @app.get("/", include_in_schema=False)

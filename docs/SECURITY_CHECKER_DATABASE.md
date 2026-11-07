@@ -90,3 +90,4 @@ CREATE TABLE IF NOT EXISTS public.security_findings (
   - Drops tables `security_findings` and `security_check_runs` in reverse dependency order.
   - Drops column `hosts.last_sc_run_at`.
   - Leaves historical alerts (`alerts`) and evidence (`alert_evidence`) intact.
+

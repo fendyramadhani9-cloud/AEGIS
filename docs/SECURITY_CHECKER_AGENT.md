@@ -62,3 +62,4 @@ python3 -m aegis_agent.security_checker \
 | `AEGIS_AGENT_TOKEN` | `aegis-agent-dev-secret-token` | Ingestion authentication token |
 | `AEGIS_HOST_ID` | `host-fenn-ubuntu` | Host identifier matching registered host |
 | `AEGIS_HOSTNAME` | `socket.gethostname()` | Hostname reported in metadata |
+

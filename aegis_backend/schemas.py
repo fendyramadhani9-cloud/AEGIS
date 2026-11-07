@@ -271,3 +271,147 @@ class TriggerRunResponse(BaseModel):
     host_id: str
     message: str
     requested_at: str
+
+
+# ==========================================
+# 6. INCIDENT & AI INVESTIGATION SCHEMAS
+# ==========================================
+
+class IncidentItem(BaseModel):
+    id: str
+    host_id: str
+    title: str
+    severity: str
+    risk_level: str
+    risk_score: int
+    status: str
+    primary_alert_id: str
+    alert_count: int = 1
+    source_ip: Optional[str] = None
+    target_user: Optional[str] = None
+    attack_scenario: Optional[str] = None
+    assigned_to: Optional[str] = None
+    first_seen_at: str
+    last_seen_at: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedIncidentsResponse(BaseModel):
+    items: List[IncidentItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class IncidentStatusUpdateRequest(BaseModel):
+    status: str
+    note: Optional[str] = None
+    operator: Optional[str] = "admin"
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        valid = {"new", "investigating", "confirmed", "false_positive", "contained", "resolved"}
+        if v.lower() not in valid:
+            raise ValueError(f"Invalid status '{v}'. Must be one of {valid}")
+        return v.lower()
+
+
+class IncidentTimelineItem(BaseModel):
+    id: str
+    incident_id: str
+    timestamp: str
+    kind: str  # 'event', 'alert', 'finding', 'analysis', 'status_change'
+    title: str
+    description: str
+    severity: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AIAnalysisItem(BaseModel):
+    analysis_id: str
+    incident_id: Optional[str] = None
+    alert_id: Optional[str] = None
+    host_id: str
+    analysis_status: str  # 'completed', 'partial', 'insufficient_data', 'failed', 'unavailable'
+    threat_classification: str
+    executive_summary: str
+    attack_scenario: str
+    observed_behaviors: List[Dict[str, Any]] = Field(default_factory=list)
+    timeline: List[Dict[str, Any]] = Field(default_factory=list)
+    risk_level: str
+    risk_score: int
+    confidence_level: str  # 'high', 'medium', 'low'
+    confidence_reason: str
+    supporting_evidence: List[str] = Field(default_factory=list)
+    contradicting_evidence: List[str] = Field(default_factory=list)
+    unknowns: List[str] = Field(default_factory=list)
+    impact_assessment: str
+    recommended_actions: List[Dict[str, Any]] = Field(default_factory=list)
+    containment_recommendations: List[str] = Field(default_factory=list)
+    investigation_notes: Optional[str] = None
+    provider: str
+    model: str
+    storage_backend: str = "database"
+    created_at: str
+    completed_at: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentDetailResponse(BaseModel):
+    incident: IncidentItem
+    alerts: List[AlertItem]
+    evidence_count: int
+    posture_context: Dict[str, Any] = Field(default_factory=dict)
+    risk_factors: List[Dict[str, Any]] = Field(default_factory=list)
+    latest_analysis: Optional[AIAnalysisItem] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentSummaryResponse(BaseModel):
+    total_incidents: int
+    new_incidents: int
+    open_incidents: Optional[int] = 0
+    investigating: int
+    confirmed: int
+    resolved: int
+    false_positives: int
+    contained: int
+    critical_risk: int
+    high_risk: int
+    medium_risk: int
+    low_risk: int
+    total_hosts_affected: int
+    latest_incident_at: Optional[str] = None
+    storage_backend: Optional[str] = "database"
+
+
+class AnalyzeIncidentRequest(BaseModel):
+    force: bool = False
+    model: Optional[str] = None
+
+
+class AIHealthResponse(BaseModel):
+    status: str  # 'ok', 'degraded', 'unavailable'
+    provider: str
+    active_provider: Optional[str] = None
+    model: str
+    configured: bool
+    reachable: bool
+    key_available: Optional[bool] = None
+    offline_fallback_ready: Optional[bool] = True
+    message: str
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.active_provider:
+            self.active_provider = self.provider
+        if self.key_available is None:
+            self.key_available = self.configured and self.reachable
+

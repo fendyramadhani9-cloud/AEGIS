@@ -50,3 +50,4 @@ At the top of the **SC checks** tab, summary metrics display the posture of your
    - **Evidence & Command Output**: Expandable drawer revealing raw inspection output and diagnostic evidence.
    - **References**: Lists standard citations (e.g. CIS Ubuntu Linux Benchmark 24.04).
 3. Apply the recommended fix on the host and re-run the check to confirm remediation.
+

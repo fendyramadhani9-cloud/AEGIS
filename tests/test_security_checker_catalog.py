@@ -55,3 +55,4 @@ def test_categories_coverage():
         CheckCategory.FILESYSTEM,
     }
     assert categories_present == expected_categories
+

@@ -208,3 +208,4 @@ def test_agent_submission_happy_path(client):
     res_hist = client.get("/api/security-checker/hosts/srv-prod-auth/history")
     assert res_hist.status_code == 200
     assert res_hist.json()["total"] >= 1
+

@@ -28,3 +28,4 @@ BEGIN
     RAISE NOTICE 'Rollback complete. Security Checker tables dropped cleanly.';
     RAISE NOTICE 'Base tables (hosts, alerts, alert_evidence, telemetry_events) remain 100%% intact.';
 END $$;
+

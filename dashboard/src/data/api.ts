@@ -37,6 +37,12 @@ import type {
   SystemStatus,
   TelemetryGap,
   TimelineItem,
+  Incident,
+  IncidentStatus,
+  IncidentTimelineItem,
+  AIAnalysisRecord,
+  IncidentSummary,
+  AIHealthStatus,
 } from './types';
 
 /** API Gateway base URL from Vite environment variable. Defaults to '' (relative path for reverse proxy). */
@@ -303,6 +309,63 @@ function mapBackendFinding(f: BackendFindingItem): Finding {
       state: 'not_requested',
       role: 'SC Analysis Agent',
     },
+  };
+}
+
+function mapBackendAnalysis(item: any): AIAnalysisRecord {
+  return {
+    id: item.id,
+    incidentId: item.incident_id,
+    provider: item.provider || 'unknown',
+    model: item.model || 'unknown',
+    state: item.state || 'ready',
+    threatClassification: item.threat_classification || 'Suspicious Activity',
+    executiveSummary: item.executive_summary || '',
+    attackScenario: item.attack_scenario || '',
+    keyObservations: (item.key_observations || []).map((o: any) => ({
+      observation: typeof o === 'string' ? o : o.observation || '',
+      evidenceIds: o.evidence_ids || [],
+      confidence: o.confidence ?? 1.0,
+    })),
+    recommendedActions: (item.recommended_actions || []).map((a: any) => ({
+      priority: a.priority ?? 1,
+      action: a.action || (typeof a === 'string' ? a : ''),
+      rationale: a.rationale || '',
+    })),
+    unknowns: item.unknowns || [],
+    riskScore: item.risk_score ?? 0,
+    riskLevel: item.risk_level || 'medium',
+    tokensUsed: item.tokens_used,
+    latencyMs: item.latency_ms,
+    promptSanitized: item.prompt_sanitized,
+    createdAt: item.created_at || new Date().toISOString(),
+    error: item.error,
+  };
+}
+
+function mapBackendIncident(item: any): Incident {
+  return {
+    id: item.id,
+    title: item.title || 'Security Incident',
+    hostId: item.host_id,
+    hostname: item.hostname || hostName(item.host_id),
+    primaryAlertId: item.primary_alert_id || item.alert_id,
+    status: item.status || 'open',
+    severity: item.severity || 'medium',
+    riskScore: item.risk_score ?? 0,
+    riskLevel: item.risk_level || item.severity || 'medium',
+    alertCount: item.alert_count ?? 1,
+    evidenceCount: item.evidence_count ?? 0,
+    detectedAt: item.detected_at,
+    resolvedAt: item.resolved_at,
+    correlationScenario: item.correlation_scenario,
+    riskFactors: (item.risk_factors || []).map((f: any) => ({
+      name: f.name,
+      weight: f.weight ?? 0,
+      contribution: f.contribution ?? 0,
+      description: f.description || '',
+    })),
+    latestAnalysis: item.latest_analysis ? mapBackendAnalysis(item.latest_analysis) : null,
   };
 }
 
@@ -725,6 +788,266 @@ export const api = {
       return structuredClone(db.reports.find((r) => r.id === id) ?? null);
     }
     return null;
+  },
+
+  /* --- Prioritas 5: AI Incident Investigation & Analysis Methods --- */
+
+  incidents: async (opts: {
+    hostId?: string;
+    status?: string;
+    riskLevel?: string;
+    page?: number;
+    pageSize?: number;
+  } = {}): Promise<{ items: Incident[]; total: number }> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return { items: [], total: 0 };
+    if (previewState === 'sample') {
+      // Synthesize sample incidents from sample alerts
+      return {
+        items: [
+          {
+            id: 'INC-host-fenn-ubuntu-sample1',
+            title: 'Multiple SSH Brute Force Failures leading to Privilege Escalation',
+            hostId: 'host-fenn-ubuntu',
+            hostname: 'fenn',
+            primaryAlertId: 'alt-01',
+            status: 'investigating',
+            severity: 'critical',
+            riskScore: 88,
+            riskLevel: 'critical',
+            alertCount: 3,
+            evidenceCount: 6,
+            detectedAt: new Date(Date.now() - 3600_000).toISOString(),
+            correlationScenario: 'SSH Brute Force followed by suspicious sudo privilege elevation.',
+            riskFactors: [
+              { name: 'Base Severity', weight: 0.35, contribution: 28, description: 'High severity starting alert' },
+              { name: 'Kill-Chain Progression', weight: 0.25, contribution: 25, description: 'Brute-force -> Auth -> Root Sudo' },
+              { name: 'Security Posture Penalty', weight: 0.15, contribution: 15, description: 'Firewall inactive (FW-001)' },
+            ],
+            latestAnalysis: {
+              id: 'ana-sample1',
+              incidentId: 'INC-host-fenn-ubuntu-sample1',
+              provider: 'mock-offline',
+              model: 'deterministic-mock-v1',
+              state: 'ready',
+              threatClassification: 'Privilege Escalation via SSH Credential Stuffing',
+              executiveSummary: 'An external entity performed multiple SSH credential attacks before attempting administrative command execution.',
+              attackScenario: 'Attacker targeted SSH port 22, failed several attempts, then successfully logged in and executed chmod 777.',
+              keyObservations: [
+                { observation: '3 consecutive SSH failed login attempts within 5 minutes', evidenceIds: ['ev-01', 'ev-02'], confidence: 0.95 },
+                { observation: 'Suspicious sudo command invocation altering root permissions', evidenceIds: ['ev-03'], confidence: 0.98 },
+              ],
+              recommendedActions: [
+                { priority: 1, action: 'Disable SSH password authentication and enforce Ed25519 keys', rationale: 'Prevents further brute force attempts' },
+                { priority: 2, action: 'Enable UFW firewall to restrict SSH port 22 access', rationale: 'Mitigates external network exposure' },
+              ],
+              unknowns: ['Process lineage for subsequent child processes was unobserved.'],
+              riskScore: 88,
+              riskLevel: 'critical',
+              createdAt: new Date().toISOString(),
+            },
+          },
+        ],
+        total: 1,
+      };
+    }
+
+    try {
+      const params = new URLSearchParams();
+      if (opts.hostId) params.set('host_id', opts.hostId);
+      if (opts.status) params.set('status', opts.status);
+      if (opts.riskLevel) params.set('risk_level', opts.riskLevel);
+      if (opts.page) params.set('page', opts.page.toString());
+      if (opts.pageSize) params.set('page_size', opts.pageSize.toString());
+
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await requestBackend<{ items: any[]; total: number }>(`/api/incidents${qs}`);
+      return {
+        items: (res.items || []).map(mapBackendIncident),
+        total: res.total || 0,
+      };
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return { items: [], total: 0 };
+      throw e;
+    }
+  },
+
+  incident: async (id: string): Promise<Incident | null> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return null;
+
+    try {
+      const res = await requestBackend<any>(`/api/incidents/${encodeURIComponent(id)}`);
+      if (!res || !res.incident) return null;
+      const incident = mapBackendIncident(res.incident);
+      if (res.alerts) {
+        incident.alerts = (res.alerts || []).map(mapBackendAlert);
+      }
+      if (res.latest_analysis) {
+        incident.latestAnalysis = mapBackendAnalysis(res.latest_analysis);
+      }
+      return incident;
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
+  },
+
+  incidentSummary: async (): Promise<IncidentSummary> => {
+    if (previewState === 'sample') {
+      return {
+        totalIncidents: 1,
+        openIncidents: 0,
+        investigatingIncidents: 1,
+        resolvedIncidents: 0,
+        criticalIncidents: 1,
+        highIncidents: 0,
+        mediumIncidents: 0,
+        lowIncidents: 0,
+        avgRiskScore: 88,
+        storageBackend: 'sample_preview',
+      };
+    }
+
+    try {
+      const res = await requestBackend<any>('/api/incidents/summary');
+      return {
+        totalIncidents: res.total_incidents || 0,
+        openIncidents: res.open_incidents || 0,
+        investigatingIncidents: res.investigating_incidents || 0,
+        resolvedIncidents: res.resolved_incidents || 0,
+        criticalIncidents: res.critical_incidents || 0,
+        highIncidents: res.high_incidents || 0,
+        mediumIncidents: res.medium_incidents || 0,
+        lowIncidents: res.low_incidents || 0,
+        avgRiskScore: res.avg_risk_score || 0,
+        storageBackend: res.storage_backend || 'unknown',
+      };
+    } catch (e) {
+      return {
+        totalIncidents: 0,
+        openIncidents: 0,
+        investigatingIncidents: 0,
+        resolvedIncidents: 0,
+        criticalIncidents: 0,
+        highIncidents: 0,
+        mediumIncidents: 0,
+        lowIncidents: 0,
+        avgRiskScore: 0,
+        storageBackend: 'fallback_memory',
+      };
+    }
+  },
+
+  updateIncidentStatus: async (
+    id: string,
+    status: IncidentStatus,
+    notes?: string
+  ): Promise<Incident> => {
+    const res = await requestBackend<any>(`/api/incidents/${encodeURIComponent(id)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, notes }),
+    });
+    return mapBackendIncident(res);
+  },
+
+  incidentTimeline: async (id: string): Promise<IncidentTimelineItem[]> => {
+    try {
+      const res = await requestBackend<{ incident_id: string; items: any[]; total: number }>(
+        `/api/incidents/${encodeURIComponent(id)}/timeline`
+      );
+      return (res.items || []).map((t: any) => ({
+        id: t.id,
+        incidentId: t.incident_id,
+        timestamp: t.timestamp,
+        entryType: t.entry_type,
+        title: t.title,
+        description: t.description,
+        severity: t.severity,
+        source: t.source,
+        referenceId: t.reference_id,
+        metadata: t.metadata || {},
+      }));
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return [];
+      throw e;
+    }
+  },
+
+  incidentEvidence: async (id: string): Promise<NormalizedEvent[]> => {
+    try {
+      const res = await requestBackend<{ incident_id: string; items: any[]; total: number }>(
+        `/api/incidents/${encodeURIComponent(id)}/evidence`
+      );
+      return (res.items || []).map((ev: any) => ({
+        id: ev.event_id || ev.id,
+        ts: ev.event_timestamp || ev.created_at || new Date().toISOString(),
+        hostId: ev.host_id || '',
+        source: (ev.source_id === 'nginx-access' || ev.source_id === 'nginx-error' ? ev.source_id : 'ssh-auth') as SourceId,
+        type: ev.event_type || 'auth',
+        message: ev.message,
+      }));
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return [];
+      throw e;
+    }
+  },
+
+  analyzeIncident: async (id: string, force = false): Promise<AIAnalysisRecord> => {
+    const res = await requestBackend<any>(`/api/incidents/${encodeURIComponent(id)}/analyze`, {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    });
+    return mapBackendAnalysis(res);
+  },
+
+  incidentAnalysis: async (id: string): Promise<AIAnalysisRecord | null> => {
+    try {
+      const res = await requestBackend<any>(`/api/incidents/${encodeURIComponent(id)}/analysis`);
+      if (!res || !res.id) return null;
+      return mapBackendAnalysis(res);
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
+  },
+
+  correlateIncidents: async (hostId?: string) => {
+    const res = await requestBackend<any>('/api/incidents', {
+      method: 'POST',
+      body: JSON.stringify(hostId ? { host_id: hostId } : {}),
+    });
+    return {
+      message: res.message || '',
+      created: res.created_incidents || 0,
+      existing: res.existing_incidents || 0,
+      totalAlertsProcessed: res.total_alerts_processed || 0,
+    };
+  },
+
+  aiHealth: async (): Promise<AIHealthStatus> => {
+    try {
+      const res = await requestBackend<any>('/api/analysis/health');
+      return {
+        status: res.status || 'degraded',
+        activeProvider: res.active_provider || 'unknown',
+        model: res.model || '',
+        keyAvailable: !!res.key_available,
+        offlineFallbackReady: !!res.offline_fallback_ready,
+        providersConfigured: res.providers_configured || [],
+      };
+    } catch (e) {
+      return {
+        status: 'unavailable',
+        activeProvider: 'none',
+        model: '',
+        keyAvailable: false,
+        offlineFallbackReady: false,
+        providersConfigured: [],
+      };
+    }
   },
 };
 

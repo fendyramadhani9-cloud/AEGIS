@@ -195,3 +195,102 @@ export type TimelineItem =
   | { kind: 'alert'; ts: ISODate; alert: Alert }
   | { kind: 'gap'; ts: ISODate; gap: TelemetryGap };
 
+/* ========================================================================= */
+/* Prioritas 5: AI Security Analysis & Incident Investigation Domain Types   */
+/* ========================================================================= */
+
+export type IncidentStatus = 'open' | 'investigating' | 'mitigated' | 'resolved' | 'closed' | 'false_positive';
+export type IncidentSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+
+export interface IncidentRiskFactor {
+  name: string;
+  weight: number;
+  contribution: number;
+  description: string;
+}
+
+export interface AIAnalysisRecord {
+  id: string;
+  incidentId: string;
+  provider: string;
+  model: string;
+  state: 'pending' | 'ready' | 'failed';
+  threatClassification: string;
+  executiveSummary: string;
+  attackScenario: string;
+  keyObservations: Array<{
+    observation: string;
+    evidenceIds: string[];
+    confidence: number;
+  }>;
+  recommendedActions: Array<{
+    priority: number;
+    action: string;
+    rationale: string;
+  }>;
+  unknowns: string[];
+  riskScore: number;
+  riskLevel: IncidentSeverity;
+  tokensUsed?: number;
+  latencyMs?: number;
+  promptSanitized?: boolean;
+  createdAt: ISODate;
+  error?: string | null;
+}
+
+export interface Incident {
+  id: string;
+  title: string;
+  hostId: string;
+  hostname?: string;
+  primaryAlertId: string;
+  status: IncidentStatus;
+  severity: IncidentSeverity;
+  riskScore: number;
+  riskLevel: IncidentSeverity;
+  alertCount: number;
+  evidenceCount: number;
+  detectedAt: ISODate;
+  resolvedAt?: ISODate | null;
+  correlationScenario?: string;
+  riskFactors?: IncidentRiskFactor[];
+  alerts?: Alert[];
+  latestAnalysis?: AIAnalysisRecord | null;
+}
+
+export interface IncidentTimelineItem {
+  id: string;
+  incidentId: string;
+  timestamp: ISODate;
+  entryType: 'alert' | 'event' | 'action' | 'ai_analysis' | 'status_change';
+  title: string;
+  description: string;
+  severity?: IncidentSeverity | null;
+  source?: string | null;
+  referenceId?: string | null;
+  metadata?: Record<string, any>;
+}
+
+export interface IncidentSummary {
+  totalIncidents: number;
+  openIncidents: number;
+  investigatingIncidents: number;
+  resolvedIncidents: number;
+  criticalIncidents: number;
+  highIncidents: number;
+  mediumIncidents: number;
+  lowIncidents: number;
+  avgRiskScore: number;
+  storageBackend: string;
+}
+
+export interface AIHealthStatus {
+  status: 'ok' | 'degraded' | 'unavailable';
+  activeProvider: string;
+  model: string;
+  keyAvailable: boolean;
+  offlineFallbackReady: boolean;
+  providersConfigured: string[];
+}
+
+

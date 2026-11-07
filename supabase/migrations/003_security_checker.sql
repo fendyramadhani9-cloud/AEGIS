@@ -96,3 +96,4 @@ REVOKE ALL ON TABLE public.security_findings FROM PUBLIC, anon, authenticated;
 
 GRANT SELECT, INSERT, UPDATE ON TABLE public.security_check_runs TO service_role, postgres;
 GRANT SELECT, INSERT, UPDATE ON TABLE public.security_findings TO service_role, postgres;
+

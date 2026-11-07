@@ -32,7 +32,7 @@ class TelemetrySanitizer:
 
     # 3. HTTP Authorization Headers & Bearer Tokens
     _RE_AUTH_HEADER = re.compile(
-        r"(?i)(?:authorization:\s*(?:bearer|basic)\s+|bearer\s+[a-zA-Z0-9_\-\.]{20,})",
+        r"(?i)(?:authorization:\s*(?:bearer|basic)\s+[^\s]+|bearer\s+[a-zA-Z0-9_\-\.]{20,})",
     )
 
     # 4. Explicit Password / Credential Key-Value Pairs
@@ -41,7 +41,6 @@ class TelemetrySanitizer:
     _RE_CREDENTIAL_KV = re.compile(
         r"(?i)\b(?:password|passwd|api[_-]?key|access[_-]?token|client[_-]?secret|secret[_-]?key)\s*[:=]\s*['\"]?[^\s'\",;&]+['\"]?",
     )
-
 
     # 5. Sensitive Command Line Arguments (Auditd EXECVE or process args)
     # E.g., -p Password123, --password=xxx, --token=xxx, -u user:password
@@ -121,3 +120,46 @@ class TelemetrySanitizer:
                         if not is_safe:
                             return False, reason
         return True, None
+
+    @classmethod
+    def sanitize_text(cls, text: str) -> str:
+        """
+        Redacts sensitive tokens, private keys, passwords, and authorization headers from text
+        so it can safely be sent to AI providers or logged.
+        """
+        if not text:
+            return ""
+        redacted = cls._RE_PRIVATE_KEY.sub("[REDACTED_PRIVATE_KEY]", text)
+        redacted = cls._RE_SHADOW_HASH.sub(" [REDACTED_HASH]", redacted)
+        redacted = cls._RE_AUTH_HEADER.sub("Authorization: [REDACTED_AUTH_TOKEN]", redacted)
+        redacted = cls._RE_CREDENTIAL_KV.sub("[REDACTED_SECRET]", redacted)
+        redacted = cls._RE_CLI_CREDENTIAL.sub("[REDACTED_CLI_ARG]", redacted)
+        redacted = cls._RE_PLATFORM_SECRETS.sub("[REDACTED_PLATFORM_KEY]", redacted)
+        redacted = cls._RE_URI_CREDENTIAL.sub("[REDACTED_URI]", redacted)
+        return redacted
+
+    mask_text = sanitize_text
+
+    @classmethod
+    def mask_dict(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Sanitizes dictionary values recursively."""
+        if not data or not isinstance(data, dict):
+            return {}
+        cleaned = {}
+        sensitive_keys = {"password", "passwd", "token", "secret", "private_key", "api_key", "authorization"}
+        for k, v in data.items():
+            k_lower = str(k).lower()
+            if any(s in k_lower for s in sensitive_keys):
+                cleaned[k] = "[REDACTED_SECRET]"
+            elif isinstance(v, str):
+                cleaned[k] = cls.sanitize_text(v)
+            elif isinstance(v, dict):
+                cleaned[k] = cls.mask_dict(v)
+            elif isinstance(v, list):
+                cleaned[k] = [
+                    cls.mask_dict(i) if isinstance(i, dict) else cls.sanitize_text(str(i)) if isinstance(i, str) else i
+                    for i in v
+                ]
+            else:
+                cleaned[k] = v
+        return cleaned

@@ -222,3 +222,4 @@ AEGIS Security Checker incorporates **28 standardized security checks** across 7
 #### 28. `FS-003`: Sudoers Directory Permissions (/etc/sudoers.d)
 - **Severity**: High | **CIS**: §5.3.4 | **MITRE**: T1222.002
 - **Description**: Ensures `/etc/sudoers.d` is owned by `root:root` with permissions `<= 755`.
+

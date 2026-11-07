@@ -387,3 +387,4 @@ SECURITY_CHECKS_CATALOG: Dict[str, SecurityCheckDefinition] = {
         remediation_reference="CIS Ubuntu Linux Benchmark 24.04 §5.3.3",
     ),
 }
+

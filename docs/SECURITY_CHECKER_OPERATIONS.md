@@ -79,3 +79,4 @@ When a check reports `FAIL`:
    python3 -m aegis_agent.security_checker --submit
    ```
 7. Refresh the dashboard to verify the finding transitions from `FAIL` to `PASS`.
+

@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ChevronRight,
   FileText,
+  Flame,
   FlaskConical,
   LayoutGrid,
   ListTree,
@@ -23,6 +24,7 @@ import { countdown } from '../lib/time';
 const NAV_DESKTOP = [
   { to: '/', label: 'Overview', icon: LayoutGrid, end: true },
   { to: '/hosts', label: 'Hosts', icon: Server },
+  { to: '/incidents', label: 'Incidents', icon: Flame, match: ['/incidents'] },
   { to: '/detections', label: 'Detections', icon: ShieldAlert, match: ['/detections', '/alerts', '/findings'] },
   { to: '/timeline', label: 'Timeline', icon: ListTree },
   { to: '/evidence', label: 'Evidence Mode', icon: Radio },
@@ -32,6 +34,7 @@ const NAV_DESKTOP = [
 const NAV_MOBILE = [
   { to: '/', label: 'Overview', icon: LayoutGrid, end: true },
   { to: '/hosts', label: 'Hosts', icon: Server },
+  { to: '/incidents', label: 'Incidents', icon: Flame, match: ['/incidents'] },
   { to: '/detections', label: 'Detections', icon: ShieldAlert, match: ['/detections', '/alerts', '/findings'] },
   { to: '/timeline', label: 'Timeline', icon: ListTree },
   { to: '/reports', label: 'Reports', icon: FileText, match: ['/reports'] },
@@ -63,12 +66,13 @@ function DesktopSidebar() {
   const now = useNow(1000);
 
   const q = useQuery(async () => {
-    const [evidence, system, alerts, findings, gaps] = await Promise.all([
+    const [evidence, system, alerts, findings, gaps, incSummary] = await Promise.all([
       api.evidence(),
       api.system(),
       api.alerts(),
       api.findings(),
       api.gaps({ openOnly: true }),
+      api.incidentSummary().catch(() => ({ openIncidents: 0, investigatingIncidents: 0 })),
     ]);
     return {
       activeEvidence: evidence.find((e) => e.status === 'active'),
@@ -76,6 +80,7 @@ function DesktopSidebar() {
       alertCount: alerts.length,
       failedChecks: findings.filter((f) => f.status === 'fail').length,
       openGaps: gaps.length,
+      incidentCount: (incSummary.openIncidents || 0) + (incSummary.investigatingIncidents || 0),
     };
   });
 
@@ -119,7 +124,9 @@ function DesktopSidebar() {
         {NAV_DESKTOP.map(({ to, label, icon: Icon, end, match }) => {
           const forced = match?.some((m) => pathname.startsWith(m));
           let badgeCount: number | null = null;
-          if (to === '/detections' && q.data) {
+          if (to === '/incidents' && q.data) {
+            badgeCount = q.data.incidentCount;
+          } else if (to === '/detections' && q.data) {
             badgeCount = q.data.alertCount + q.data.failedChecks;
           } else if (to === '/evidence' && activeSession) {
             badgeCount = 1;

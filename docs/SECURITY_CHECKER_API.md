@@ -205,3 +205,4 @@ Submits a complete Security Checker scan run and its associated findings from an
   - `host_id` must match a registered host in `hosts`.
   - Every finding in `findings` must have `host_id == payload.host_id` (cross-host finding injection rejected with 400).
   - All findings must have valid status: `pass`, `fail`, `warning`, `not_applicable`, `error`.
+

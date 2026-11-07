@@ -89,3 +89,4 @@ def test_submit_results_constructs_valid_payload(mock_post, checker):
     assert kwargs["headers"]["X-Agent-Token"] == "test-token-sc-12345"
     assert kwargs["json"]["run"]["id"] == "RUN-01"
     assert len(kwargs["json"]["findings"]) == 1
+
