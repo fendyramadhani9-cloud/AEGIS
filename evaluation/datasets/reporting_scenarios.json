@@ -1,0 +1,55 @@
+[
+  {
+    "scenario_id": "RPT-SYNTH-001",
+    "description": "Standard daily briefing synthesis from stored incident & posture records",
+    "report_id": "RPT-2026-EVAL-01",
+    "report_type": "daily_security_briefing",
+    "generated_at": "2026-11-01T23:59:59Z",
+    "period_start": "2026-11-01T00:00:00Z",
+    "period_end": "2026-11-01T23:59:59Z",
+    "target_hosts": ["srv-prod-auth"],
+    "stored_incidents": [
+      {
+        "incident_id": "INC-001",
+        "alert_id": "ALT-001",
+        "severity": "High",
+        "analysis_status": "completed",
+        "incident_summary": "Brute force attempts observed with single successful login.",
+        "hypotheses_count": 1,
+        "key_evidence_ids": ["EVT-AUTH-101", "EVT-AUTH-201"],
+        "recommended_actions": [
+          {
+            "action_type": "investigative",
+            "description": "Inspect session tokens.",
+            "priority": "immediate"
+          }
+        ]
+      }
+    ],
+    "stored_postures": [
+      {
+        "audit_id": "AUD-001",
+        "host_id": "srv-prod-auth",
+        "analysis_status": "completed",
+        "coverage": {
+          "total_controls_evaluated": 5,
+          "passed": 4,
+          "failed": 1,
+          "unknown": 0,
+          "not_applicable": 0
+        },
+        "failed_controls": ["CIS-SSH-5.2.1"],
+        "key_findings": []
+      }
+    ],
+    "backend_metadata": {
+      "environment": "production"
+    },
+    "expected": {
+      "expected_total_alerts": 1,
+      "expected_high_alerts": 1,
+      "expected_failed_controls": 1,
+      "expected_audited_hosts": 1
+    }
+  }
+]
