@@ -50,55 +50,128 @@ AEGIS dirancang sangat hemat memori karena tidak menjalankan JVM, Elasticsearch,
 
 ---
 
-## 3. Cara Menjalankan AEGIS dengan Docker (Direkomendasikan)
+## 3. Tiga Cara Menjalankan AEGIS (Setup & Perbandingan Kelebihan)
 
-### A. Persiapan Konfigurasi `.env`
-Salin `.env.example` menjadi `.env` dan isi kredensial Supabase serta 3 API Key AI (`AEGIS1`, `AEGIS2`, `AEGIS3`):
-```bash
-cp .env.example .env
-```
-
-### B. Menjalankan Backend + Dashboard via Docker Compose
-```bash
-docker compose up -d --build
-```
-- **Dashboard Web UI & Gateway Utama (Port `1708`):** `http://localhost:1708`
-- **Swagger API Docs (via Gateway `1708`):** `http://localhost:1708/docs`
-- **Direct FastAPI Backend (Port `1709`):** `http://localhost:1709/api/health`
-
-*(Opsional)* Jika dijalankan langsung di server Linux yang ingin dipantau sekaligus oleh container collector:
-```bash
-docker compose --profile collector up -d --build
-```
-
-### C. Memantau Penggunaan RAM Container Secara Real-Time
-```bash
-docker stats aegis-backend aegis-dashboard
-```
+AEGIS dirancang fleksibel sehingga dapat dijalankan dalam **3 skenario deployment** yang berbeda sesuai kebutuhan: untuk demo lomba, monitoring server nyata, atau pengembangan kode lokal.
 
 ---
 
-## 4. Cara Menjalankan Secara Lokal (Tanpa Docker)
+### METODE 1: Full Docker Containerized (Paling Praktis — Rekomendasi Demo Lomba)
+> **Skenario:** Sangat direkomendasikan untuk **presentasi ke dewan juri, demonstrasi fitur, simulasi serangan (Incident Replay), audit postur CIS/STIG, dan ekspor laporan PDF.**
 
-### A. Menjalankan FastAPI Backend (Port `1709`)
-```powershell
-python -m pip install -r requirements.txt
-python -m uvicorn aegis_backend.main:app --host 127.0.0.1 --port 1709 --reload
-```
+Semua layanan (Frontend Dashboard di port `1708` dan Backend FastAPI di port `1709`) dikemas dalam container multi-stage berukuran sangat kecil dengan penggunaan RAM terukur (< 135 MB total).
 
-### B. Menjalankan Frontend Dashboard (Port `1708`)
-```powershell
-cd dashboard
-npm install
-npm run dev
-```
-Buka dashboard di: `http://localhost:1708`
+#### Langkah Setup:
+1. **Konfigurasi Environment Variable (`.env`):**
+   ```bash
+   cp .env.example .env
+   # Buka .env dan pastikan kredensial Supabase serta 3 API Key AI (AEGIS1, AEGIS2, AEGIS3) terisi
+   ```
+2. **Jalankan Container via Docker Compose:**
+   ```bash
+   docker compose up -d --build
+   ```
+3. **Akses Layanan:**
+   - **Dashboard Web UI & Gateway Utama:** `http://localhost:1708` (atau ganti `localhost` dengan IP mini server kamu)
+   - **Swagger API Docs:** `http://localhost:1708/docs`
+   - **Direct Backend Health Check:** `http://localhost:1709/api/health`
+4. **Pantau Penggunaan RAM:**
+   ```bash
+   docker stats aegis-backend aegis-dashboard
+   ```
 
-### C. Menjalankan Linux Telemetry Collector (Pada Server Ubuntu Target)
-```bash
-python3 aegis_agent/collector.py
-```
-Collector membaca `journalctl` serta melakukan *incremental file tailing* pada `/var/log/nginx/access.log`, `/var/log/apache2/access.log`, dan `/var/log/audit/audit.log` dengan mekanisme **Two-Phase Cursor & Offset Commit** (nol kehilangan log saat jaringan terputus) dan **Pre-Transmission Credential Sanitizer**.
+#### Kelebihan Metode 1:
+- ✅ **Cukup Satu Perintah:** Seluruh platform langsung aktif tanpa perlu menginstall Python, Node.js, atau Nginx di OS host server.
+- ✅ **Sudah Terintegrasi Read-Only Host Mount:** Konfigurasi `/etc/ssh`, `/etc/issue.net`, `/etc/modprobe.d`, dan `/var/log` dari host sudah di-mount secara aman (`:ro`), sehingga pemeriksaan postur CIS/STIG berbasis file tetap dapat membaca konfigurasi asli server.
+- ✅ **Isolasi Penuh & Aman:** Layanan web tidak memiliki hak modifikasi ke sistem host (`read-only`), mencegah resiko kerusakan sistem.
+- ✅ **Konsumsi RAM Sangat Rendah:** Total konsumsi RAM container hanya ~65 MB (idle) hingga ~135 MB (beban puncak).
+
+---
+
+### METODE 2: Mode Hibrida (Docker Core + Native Host Agent — Rekomendasi Monitoring Server Nyata)
+> **Skenario:** Sangat direkomendasikan untuk **server Linux produksi / mini server nyata** yang ingin dipantau kondisi log dan layanannya secara 100% *real-time* tanpa batasan abstraksi container.
+
+Backend FastAPI dan Dashboard UI tetap berjalan rapi di dalam Docker container, sedangkan script `collector.py` dijalankan langsung sebagai *native process* atau *systemd service* pada OS Ubuntu host.
+
+#### Langkah Setup:
+1. **Jalankan Backend & Dashboard di Docker:**
+   ```bash
+   docker compose up -d --build
+   ```
+2. **Jalankan Collector di Host Linux (Ubuntu 22.04 / 24.04):**
+   ```bash
+   # Di terminal server host (luar docker):
+   sudo python3 -m aegis_agent.collector --backend-url http://127.0.0.1:1708/api
+   ```
+3. *(Opsional)* **Jadikan Systemd Service Otomatis:**
+   Buat file `/etc/systemd/system/aegis-collector.service`:
+   ```ini
+   [Unit]
+   Description=AEGIS Security Telemetry Collector
+   After=network.target docker.service
+
+   [Service]
+   Type=simple
+   User=root
+   WorkingDirectory=/opt/aegis
+   ExecStart=/usr/bin/python3 -m aegis_agent.collector --backend-url http://127.0.0.1:1708/api
+   Restart=always
+   RestartSec=5
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+   Aktifkan service:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now aegis-collector
+   ```
+
+#### Kelebihan Metode 2:
+- ✅ **Visibilitas Sistem 100% Tanpa Hambatan:** Collector berjalan langsung di OS host sehingga memiliki akses instan dan akurat ke `journalctl`, `systemctl is-active auditd`, `ufw status`, `dpkg -s`, serta socket jaringan `/proc/net` tanpa terhalang isolasi container.
+- ✅ **Infrastruktur Bersih & Rapi:** Web server, API gateway, dan database client tetap terisolasi di dalam Docker container tanpa mengotori package manager host.
+- ✅ **Overhead di Host Sangat Minim:** Native agent collector hanya membutuhkan Python standar dan memakan RAM **~20 MB** saja di OS host.
+- ✅ **Toleransi Gangguan Jaringan (Two-Phase Cursor):** Jika container backend sedang direstart, collector di host akan menyimpan kursor log terakhir dan melanjutkan pengiriman otomatis saat backend kembali aktif tanpa ada log yang hilang.
+
+---
+
+### METODE 3: Bare Metal / Native Development (Tanpa Docker)
+> **Skenario:** Sangat direkomendasikan untuk **pengembangan kode (development), penambahan fitur baru, debugging, dan pengujian cepat di laptop/PC developer.**
+
+Semua komponen dijalankan langsung dari terminal lokal menggunakan lingkungan Python Virtualenv dan Node.js Vite dev server dengan dukungan *Hot Module Replacement (HMR)*.
+
+#### Langkah Setup:
+1. **Menjalankan Backend FastAPI (Port `1709`):**
+   ```bash
+   # Windows (PowerShell):
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   python -m uvicorn aegis_backend.main:app --host 127.0.0.1 --port 1709 --reload
+
+   # Linux / macOS (Bash):
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   python3 -m uvicorn aegis_backend.main:app --host 127.0.0.1 --port 1709 --reload
+   ```
+2. **Menjalankan Frontend Dashboard (Port `1708`):**
+   ```bash
+   cd dashboard
+   npm install
+   npm run dev
+   ```
+   Buka peramban di: `http://localhost:1708`
+3. **Menjalankan Telemetry Collector (Opsional jika ingin ingest log langsung):**
+   ```bash
+   python -m aegis_agent.collector --backend-url http://127.0.0.1:1709/api
+   ```
+
+#### Kelebihan Metode 3:
+- ✅ **Hot-Reload Instan (HMR):** Perubahan pada kode React/TypeScript langsung ter-update di layar tanpa perlu rebuild container atau reload halaman secara manual.
+- ✅ **Auto-Reload Backend:** Perubahan pada file Python backend langsung di-reload secara otomatis oleh Uvicorn (`--reload`).
+- ✅ **Kemudahan Debugging Mendalam:** Pesan log terminal, stack trace Python, console inspect browser, dan breakpoint debugger IDE dapat diakses secara langsung tanpa perantara container.
+- ✅ **Tanpa Ketergantungan Docker Engine:** Dapat dijalankan di mesin atau laptop yang tidak memiliki Docker Desktop / daemon aktif.
 
 ---
 
