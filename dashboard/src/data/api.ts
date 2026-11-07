@@ -1,14 +1,12 @@
 /**
- * Data access layer.
+ * Data access layer for AEGIS Dashboard.
  *
- * In this build every call resolves against in-memory SAMPLE data with a
- * small artificial latency. Replace the bodies of these functions with
- * calls to the FastAPI backend when it exists; screens only depend on
- * the function signatures and the types in ./types.
+ * Connects directly to the local FastAPI backend gateway (PRD §7.10).
+ * In 'live' mode (default), data is retrieved from FastAPI endpoints
+ * backed by PostgreSQL (Supabase).
  *
- * The frontend never holds AI provider keys or storage credentials
- * (PRD §7.10). "Request AI explanation" asks the backend to run the
- * relevant analysis role on filtered context.
+ * For UI testing and design review, 'sample', 'loading', 'empty',
+ * and 'error' preview states can be selected in Settings.
  */
 import {
   allowedEvidenceTypes,
@@ -25,7 +23,9 @@ import {
   sampleSystem,
 } from './sample';
 import type {
+  AgentStatus,
   Alert,
+  Confidence,
   EvidenceSession,
   Finding,
   Host,
@@ -35,19 +35,27 @@ import type {
   PipelineSourceHealth,
   Report,
   ReportType,
+  Severity,
+  SourceId,
   SystemStatus,
   TelemetryGap,
   TimelineItem,
 } from './types';
 
-/** Design-review switch for exercising loading / empty / error states. */
-export type PreviewState = 'sample' | 'loading' | 'empty' | 'error';
+/** API Gateway base URL from Vite environment variable. Defaults to '' (relative path for reverse proxy). */
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') || '';
 
-let previewState: PreviewState = 'sample';
+/** Design-review switch for exercising live / sample / loading / empty / error states. */
+export type PreviewState = 'live' | 'sample' | 'loading' | 'empty' | 'error';
+
+let previewState: PreviewState = 'live';
+
 export const setPreviewState = (s: PreviewState) => {
   previewState = s;
   bump();
 };
+
+export const getPreviewState = () => previewState;
 
 /* ---------------- tiny reactive store ---------------- */
 const db = {
@@ -77,60 +85,375 @@ export const store = {
   getVersion: () => version,
 };
 
-export class ApiError extends Error {}
-
-const LATENCY = 320;
-function respond<T>(produce: () => T, emptyValue: T): Promise<T> {
-  if (previewState === 'loading') return new Promise(() => {});
-  return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      if (previewState === 'error') reject(new ApiError('Could not reach the AEGIS backend (sample: simulated network error).'));
-      else resolve(previewState === 'empty' ? emptyValue : structuredClone(produce()));
-    }, LATENCY);
-  });
+export class ApiError extends Error {
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
 }
 
-/* ---------------- queries ---------------- */
+/** HTTP client helper for communicating with FastAPI backend */
+async function requestBackend<T>(path: string, options?: RequestInit): Promise<T> {
+  const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+  try {
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+    });
+
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}: ${res.statusText}`;
+      try {
+        const body = await res.json();
+        if (body?.detail) {
+          msg = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+        } else if (body?.message) {
+          msg = body.message;
+        } else if (body?.error) {
+          msg = body.error;
+        }
+      } catch {
+        // Fallback to HTTP status text
+      }
+      throw new ApiError(msg, res.status);
+    }
+
+    return (await res.json()) as T;
+  } catch (err: unknown) {
+    if (err instanceof ApiError) throw err;
+    const errorMsg = err instanceof Error ? err.message : 'Network error';
+    const target = API_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+    throw new ApiError(`Could not reach AEGIS backend at ${target}: ${errorMsg}`);
+  }
+}
+
+/* ---------------- mappers & cache ---------------- */
+const hostCache = new Map<string, string>();
+
+function cacheHosts(hosts: Host[]) {
+  for (const h of hosts) {
+    hostCache.set(h.id, h.hostname);
+  }
+}
+
+export const hostName = (id: string): string => {
+  return hostCache.get(id) ?? db.hosts.find((h) => h.id === id)?.hostname ?? id;
+};
+
+interface BackendHostItem {
+  id: string;
+  hostname: string;
+  ip_address?: string | null;
+  os: string;
+  agent_version: string;
+  agent_status: string;
+  last_data_at?: string | null;
+  last_sc_run_at?: string | null;
+  is_archived?: boolean;
+}
+
+function mapBackendHost(h: BackendHostItem): Host {
+  const host: Host = {
+    id: h.id,
+    hostname: h.hostname,
+    os: h.os || 'Ubuntu Server',
+    agentVersion: h.agent_version || '1.0.0',
+    agentStatus: (h.agent_status as AgentStatus) || 'unknown',
+    lastDataAt: h.last_data_at ?? null,
+    lastScRunAt: h.last_sc_run_at ?? null,
+    sources: [
+      {
+        id: 'ssh-auth',
+        path: '/var/log/auth.log',
+        status: h.agent_status === 'online' ? 'collecting' : 'not_configured',
+        lastEventAt: h.last_data_at ?? null,
+      },
+      {
+        id: 'nginx-access',
+        path: '/var/log/nginx/access.log',
+        status: 'not_configured',
+        lastEventAt: null,
+      },
+      {
+        id: 'nginx-error',
+        path: '/var/log/nginx/error.log',
+        status: 'not_configured',
+        lastEventAt: null,
+      },
+    ],
+  };
+  hostCache.set(host.id, host.hostname);
+  return host;
+}
+
+interface BackendAlertItem {
+  id: string;
+  host_id: string;
+  rule_id: string;
+  rule_version: string;
+  title: string;
+  severity: string;
+  detected_at: string;
+  reason: string;
+  created_at?: string | null;
+}
+
+interface BackendEvidenceItem {
+  alert_id: string;
+  event_id: string;
+  citation_role: string;
+  created_at?: string | null;
+  event_timestamp?: string | null;
+  source_id?: string | null;
+  event_type?: string | null;
+  message: string;
+  source_ip?: string | null;
+  user_name?: string | null;
+  host_id?: string | null;
+  details?: Record<string, unknown> | null;
+}
+
+
+function mapBackendAlert(a: BackendAlertItem): Alert {
+  return {
+    kind: 'alert',
+    id: a.id,
+    ruleId: a.rule_id || 'R-UNKNOWN',
+    ruleVersion: a.rule_version || '1.0',
+    title: a.title,
+    severity: (a.severity as Severity) || 'medium',
+    confidence: 'high' as Confidence,
+    investigationStatus: 'new' as InvestigationStatus,
+    provenance: {
+      source: 'ssh-auth',
+      sourceLabel: 'SSH Authentication Logs',
+      logFilePath: '/var/log/auth.log',
+      collector: 'AEGIS RM Collector v1.0',
+      ingestedAt: a.created_at || a.detected_at,
+      parser: 'linux_auth_parser',
+      integrityHash: a.id,
+    },
+    ruleLogic: {
+      ruleId: a.rule_id,
+      ruleName: a.title,
+      condition: a.reason,
+      observed: `Security event matching ${a.rule_id}`,
+      rationale: a.reason,
+    },
+    hostId: a.host_id,
+    source: ('ssh-auth' as SourceId),
+    detectedAt: a.detected_at,
+    reason: a.reason,
+    supportingEventIds: [],
+    ai: {
+      state: 'not_requested',
+      role: 'RM Analysis Agent',
+    },
+  };
+}
+
+interface BackendSystemStatus {
+  id: number;
+  collector: 'ok' | 'degraded' | 'unavailable';
+  rules_engine: 'ok' | 'degraded' | 'unavailable';
+  ai_provider: 'ok' | 'degraded' | 'unavailable';
+  ai_provider_note?: string | null;
+  checked_at?: string | null;
+}
+
+function mapBackendSystemStatus(s: BackendSystemStatus): SystemStatus {
+  return {
+    collector: s.collector,
+    rulesEngine: s.rules_engine,
+    aiProvider: s.ai_provider,
+    aiProviderNote: s.ai_provider_note ?? undefined,
+    checkedAt: s.checked_at ?? new Date().toISOString(),
+  };
+}
+
 const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4 } as const;
 const byTimeDesc = <T>(get: (x: T) => string) => (a: T, b: T) => get(b).localeCompare(get(a));
 
+/* ---------------- api queries ---------------- */
 export const api = {
-  hosts: () => respond<Host[]>(() => db.hosts, []),
-  host: (id: string) => respond<Host | null>(() => db.hosts.find((h) => h.id === id) ?? null, null),
+  // Live health checks
+  health: async () => {
+    return requestBackend<{ status: string; service: string; environment: string; version: string }>('/api/health');
+  },
 
-  alerts: (hostId?: string) =>
-    respond<Alert[]>(
-      () => db.alerts.filter((a) => !hostId || a.hostId === hostId).sort(byTimeDesc((a) => a.detectedAt)),
-      [],
-    ),
-  alert: (id: string) => respond<Alert | null>(() => db.alerts.find((a) => a.id === id) ?? null, null),
+  databaseHealth: async () => {
+    return requestBackend<{
+      status: string;
+      connected: boolean;
+      checked_at: string;
+      message: string;
+      latency_ms?: number;
+    }>('/api/health/database');
+  },
 
-  findings: (hostId?: string) =>
-    respond<Finding[]>(
-      () =>
+  // Live system status
+  system: async (): Promise<SystemStatus | null> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return null;
+    if (previewState === 'sample') return structuredClone(db.system);
+
+    const raw = await requestBackend<BackendSystemStatus>('/api/system/status');
+    return mapBackendSystemStatus(raw);
+  },
+
+  // Live hosts
+  hosts: async (): Promise<Host[]> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return [];
+    if (previewState === 'sample') {
+      cacheHosts(db.hosts);
+      return structuredClone(db.hosts);
+    }
+
+    const res = await requestBackend<{ items: BackendHostItem[]; total: number }>('/api/hosts?limit=100');
+    const mapped = res.items.map(mapBackendHost);
+    cacheHosts(mapped);
+    return mapped;
+  },
+
+  host: async (id: string): Promise<Host | null> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return null;
+    if (previewState === 'sample') {
+      return structuredClone(db.hosts.find((h) => h.id === id) ?? null);
+    }
+
+    try {
+      const raw = await requestBackend<BackendHostItem>(`/api/hosts/${encodeURIComponent(id)}`);
+      return mapBackendHost(raw);
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
+  },
+
+  // Live alerts
+  alerts: async (hostId?: string): Promise<Alert[]> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return [];
+    if (previewState === 'sample') {
+      return structuredClone(
+        db.alerts.filter((a) => !hostId || a.hostId === hostId).sort(byTimeDesc((a) => a.detectedAt)),
+      );
+    }
+
+    const q = hostId ? `?host_id=${encodeURIComponent(hostId)}&limit=100` : '?limit=100';
+    const res = await requestBackend<{ items: BackendAlertItem[]; total: number }>(`/api/alerts${q}`);
+    return res.items.map(mapBackendAlert).sort(byTimeDesc((a) => a.detectedAt));
+  },
+
+  alert: async (id: string): Promise<Alert | null> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return null;
+    if (previewState === 'sample') {
+      return structuredClone(db.alerts.find((a) => a.id === id) ?? null);
+    }
+
+    try {
+      const raw = await requestBackend<BackendAlertItem>(`/api/alerts/${encodeURIComponent(id)}`);
+      return mapBackendAlert(raw);
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
+  },
+
+  // Security Checker findings (endpoint pending backend implementation)
+  findings: async (hostId?: string): Promise<Finding[]> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'sample') {
+      return structuredClone(
         db.findings
           .filter((f) => !hostId || f.hostId === hostId)
           .sort((a, b) => {
             const rank = (f: Finding) => (f.status === 'fail' ? 0 : f.status === 'not_checked' ? 1 : 2);
             return rank(a) - rank(b) || SEV_ORDER[a.severity] - SEV_ORDER[b.severity];
           }),
-      [],
-    ),
-  finding: (id: string) => respond<Finding | null>(() => db.findings.find((f) => f.id === id) ?? null, null),
+      );
+    }
+    return [];
+  },
 
-  events: (ids: string[]) => respond<NormalizedEvent[]>(() => db.events.filter((e) => ids.includes(e.id)), []),
+  finding: async (id: string): Promise<Finding | null> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'sample') {
+      return structuredClone(db.findings.find((f) => f.id === id) ?? null);
+    }
+    return null;
+  },
 
-  gaps: (opts: { hostId?: string; openOnly?: boolean } = {}) =>
-    respond<TelemetryGap[]>(
-      () =>
+  alertEvidence: async (alertId: string): Promise<NormalizedEvent[]> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return [];
+    if (previewState === 'sample') {
+      const alert = db.alerts.find((a) => a.id === alertId);
+      if (!alert) return [];
+      return structuredClone(db.events.filter((e) => alert.supportingEventIds.includes(e.id)));
+    }
+
+    try {
+      const res = await requestBackend<{ alert_id: string; items: BackendEvidenceItem[]; total: number }>(
+        `/api/alerts/${encodeURIComponent(alertId)}/evidence`
+      );
+      return (res.items || []).map((ev) => ({
+        id: ev.event_id,
+        ts: ev.event_timestamp || ev.created_at || new Date().toISOString(),
+        hostId: ev.host_id || '',
+        source: (ev.source_id === 'nginx-access' || ev.source_id === 'nginx-error' ? ev.source_id : 'ssh-auth') as SourceId,
+        type: ev.event_type || 'auth',
+        message: ev.message,
+      }));
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return [];
+      throw e;
+    }
+  },
+
+  events: async (ids: string[]): Promise<NormalizedEvent[]> => {
+    if (previewState === 'sample') {
+      return structuredClone(db.events.filter((e) => ids.includes(e.id)));
+    }
+    return [];
+  },
+
+  gaps: async (opts: { hostId?: string; openOnly?: boolean } = {}): Promise<TelemetryGap[]> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return [];
+    if (previewState === 'sample') {
+      return structuredClone(
         db.gaps
           .filter((g) => (!opts.hostId || g.hostId === opts.hostId) && (!opts.openOnly || g.end === null))
           .sort(byTimeDesc((g) => g.start)),
-      [],
-    ),
+      );
+    }
+    return [];
+  },
 
-  timeline: (opts: { hostId?: string; sinceHours?: number } = {}) =>
-    respond<TimelineItem[]>(() => {
+  timeline: async (opts: { hostId?: string; sinceHours?: number } = {}): Promise<TimelineItem[]> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return [];
+    if (previewState === 'sample') {
       const since = Date.now() - (opts.sinceHours ?? 24) * 3600_000;
       const inScope = (hostId: string, ts: string) =>
         (!opts.hostId || hostId === opts.hostId) && new Date(ts).getTime() >= since;
@@ -141,32 +464,66 @@ export const api = {
           .filter((g) => (!opts.hostId || g.hostId === opts.hostId) && new Date(g.end ?? Date.now()).getTime() >= since)
           .map((g) => ({ kind: 'gap' as const, ts: g.start, gap: g })),
       ];
-      // Newest first; alerts sort just above the event that triggered them.
       const rank = { alert: 0, gap: 1, event: 2 } as const;
       return items.sort((a, b) => b.ts.localeCompare(a.ts) || rank[a.kind] - rank[b.kind]);
-    }, []),
+    }
+    return [];
+  },
 
-  evidence: () => respond<EvidenceSession[]>(() => [...db.evidence].sort(byTimeDesc((s) => s.startedAt)), []),
-  evidenceOptions: () =>
-    respond(() => ({ types: allowedEvidenceTypes, durations: evidenceDurationOptions }), {
-      types: [] as string[],
-      durations: [] as number[],
-    }),
+  evidence: async (): Promise<EvidenceSession[]> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return [];
+    if (previewState === 'sample') {
+      return structuredClone([...db.evidence].sort(byTimeDesc((s) => s.startedAt)));
+    }
+    return [];
+  },
 
-  reports: () => respond<Report[]>(() => [...db.reports].sort(byTimeDesc((r) => r.requestedAt)), []),
-  report: (id: string) => respond<Report | null>(() => db.reports.find((r) => r.id === id) ?? null, null),
+  evidenceOptions: async () => ({
+    types: allowedEvidenceTypes,
+    durations: evidenceDurationOptions,
+  }),
 
-  system: () => respond<SystemStatus | null>(() => db.system, null),
+  auditLogs: async (): Promise<OperatorAuditLog[]> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return [];
+    return structuredClone([...db.auditLogs].sort(byTimeDesc((a) => a.ts)));
+  },
 
-  auditLogs: () => respond<OperatorAuditLog[]>(() => [...db.auditLogs].sort(byTimeDesc((a) => a.ts)), []),
-  pipelineHealth: () => respond<PipelineSourceHealth[]>(() => db.pipelineHealth, []),
+  pipelineHealth: async (): Promise<PipelineSourceHealth[]> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return [];
+    return structuredClone(db.pipelineHealth);
+  },
+
+  reports: async (): Promise<Report[]> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return [];
+    if (previewState === 'sample') {
+      return structuredClone([...db.reports].sort(byTimeDesc((r) => r.requestedAt)));
+    }
+    return [];
+  },
+
+  report: async (id: string): Promise<Report | null> => {
+    if (previewState === 'loading') return new Promise(() => {});
+    if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return null;
+    if (previewState === 'sample') {
+      return structuredClone(db.reports.find((r) => r.id === id) ?? null);
+    }
+    return null;
+  },
 };
 
-/* ---------------- mutations (sample implementations) ---------------- */
+/* ---------------- actions ---------------- */
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const actions = {
-  /** Ask the backend to run the SC/RM Analysis Agent on filtered context. */
   async requestAnalysis(kind: 'alert' | 'finding', id: string) {
     const item = kind === 'alert' ? db.alerts.find((a) => a.id === id) : db.findings.find((f) => f.id === id);
     if (!item) return;
@@ -231,7 +588,13 @@ export const actions = {
     bump();
   },
 
-  async startEvidence(input: { hostId: string; reason: string; durationMin: number; dataTypes: string[]; linkedAlertId?: string }) {
+  async startEvidence(input: {
+    hostId: string;
+    reason: string;
+    durationMin: number;
+    dataTypes: string[];
+    linkedAlertId?: string;
+  }) {
     await wait(500);
     const now = Date.now();
     const session: EvidenceSession = {
@@ -290,7 +653,6 @@ export const actions = {
     }
   },
 
-  /** Expire sessions whose time has passed (the backend does this server-side). */
   expireSessions() {
     let changed = false;
     for (const s of db.evidence) {
@@ -331,7 +693,6 @@ export const actions = {
 
     bump();
 
-    // Simulate backend report compilation completing after 2.5s
     setTimeout(() => {
       const target = db.reports.find((r) => r.id === report.id);
       if (target && target.status === 'pending') {
@@ -357,7 +718,6 @@ export const actions = {
     r.requestedAt = new Date().toISOString();
     bump();
 
-    // Simulate backend report compilation retry completing after 2.5s
     setTimeout(() => {
       const target = db.reports.find((x) => x.id === id);
       if (target && target.status === 'pending') {
@@ -373,7 +733,3 @@ export const actions = {
     }, 2500);
   },
 };
-
-/** Lookup helper used by list rows (sync, sample store only). */
-export const hostName = (id: string) => db.hosts.find((h) => h.id === id)?.hostname ?? id;
-

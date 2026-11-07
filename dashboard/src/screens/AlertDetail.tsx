@@ -26,7 +26,7 @@ export function AlertDetailScreen() {
     const alert = await api.alert(id);
     if (!alert) return null;
     const [events, gaps, host, evidence] = await Promise.all([
-      api.events(alert.supportingEventIds),
+      api.alertEvidence(alert.id),
       api.gaps({ hostId: alert.hostId }),
       api.host(alert.hostId),
       api.evidence(),

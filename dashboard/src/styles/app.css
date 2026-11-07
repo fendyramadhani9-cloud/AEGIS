@@ -144,6 +144,16 @@ body {
   color: var(--color-accent);
 }
 
+.state-simulator-label.is-live {
+  border-color: var(--status-healthy-border);
+  background-color: var(--status-healthy-bg);
+  color: var(--status-healthy-fg);
+}
+
+.state-simulator-label.is-live .state-simulator-icon {
+  color: var(--status-healthy-fg);
+}
+
 @media (max-width: 480px) {
   .state-simulator-text {
     display: none;

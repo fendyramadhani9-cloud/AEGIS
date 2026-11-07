@@ -1,0 +1,206 @@
+[
+  {
+    "scenario_id": "RM-AUTH-001",
+    "description": "Single authentication failure followed by success (Batch 4 & 5 regression case)",
+    "alert": {
+      "alert_id": "ALT-001",
+      "rule_id": "RULE-AUTH-003",
+      "rule_name": "Multiple Failed Logins Followed by Success",
+      "severity": "High",
+      "timestamp": "2026-11-01T10:00:00Z"
+    },
+    "entities": {
+      "source_ip": "198.51.100.24",
+      "target_user": "admin",
+      "target_host": "srv-prod-auth"
+    },
+    "logs": [
+      {
+        "event_id": "EVT-AUTH-101",
+        "timestamp": "2026-11-01T10:00:05Z",
+        "event_type": "auth_failure",
+        "source_ip": "198.51.100.24",
+        "user": "admin"
+      }
+    ],
+    "tool_calls": [
+      {
+        "tool_call_id": "call-01",
+        "investigation_id": "INV-001",
+        "alert_id": "ALT-001",
+        "tool_name": "get_related_auth_events",
+        "parameters": {"limit": 10}
+      }
+    ],
+    "simulated_gatekeeper_db": [
+      {
+        "evidence_id": "EVT-AUTH-201",
+        "source_type": "authentication_log",
+        "source_ref": "auth_collector",
+        "host_id": "srv-prod-auth",
+        "observed_at": "2026-11-01T10:02:15Z",
+        "collected_at": "2026-11-01T10:02:20Z",
+        "event_type": "auth_success",
+        "data": {"source_ip": "198.51.100.24", "user": "admin"}
+      }
+    ],
+    "expected": {
+      "expected_status": "partial",
+      "expected_severity": "High",
+      "min_verified_evidence_count": 2,
+      "must_not_contain_claims": [
+        "multiple failed logins",
+        "beberapa login gagal",
+        "account takeover confirmed"
+      ]
+    }
+  },
+  {
+    "scenario_id": "RM-AUTH-002",
+    "description": "Genuine multiple failed logins followed by success",
+    "alert": {
+      "alert_id": "ALT-002",
+      "rule_id": "RULE-AUTH-003",
+      "rule_name": "Multiple Failed Logins Followed by Success",
+      "severity": "High",
+      "timestamp": "2026-11-01T10:00:00Z"
+    },
+    "entities": {
+      "source_ip": "198.51.100.24",
+      "target_user": "admin",
+      "target_host": "srv-prod-auth"
+    },
+    "logs": [
+      {
+        "event_id": "EVT-AUTH-101",
+        "timestamp": "2026-11-01T10:00:01Z",
+        "event_type": "auth_failure",
+        "source_ip": "198.51.100.24",
+        "user": "admin"
+      },
+      {
+        "event_id": "EVT-AUTH-102",
+        "timestamp": "2026-11-01T10:00:05Z",
+        "event_type": "auth_failure",
+        "source_ip": "198.51.100.24",
+        "user": "admin"
+      }
+    ],
+    "tool_calls": [
+      {
+        "tool_call_id": "call-02",
+        "investigation_id": "INV-002",
+        "alert_id": "ALT-002",
+        "tool_name": "get_related_auth_events",
+        "parameters": {"limit": 10}
+      }
+    ],
+    "simulated_gatekeeper_db": [
+      {
+        "evidence_id": "EVT-AUTH-201",
+        "source_type": "authentication_log",
+        "source_ref": "auth_collector",
+        "host_id": "srv-prod-auth",
+        "observed_at": "2026-11-01T10:02:15Z",
+        "collected_at": "2026-11-01T10:02:20Z",
+        "event_type": "auth_success",
+        "data": {"source_ip": "198.51.100.24", "user": "admin"}
+      }
+    ],
+    "expected": {
+      "expected_status": "completed",
+      "expected_severity": "High",
+      "min_verified_evidence_count": 3
+    }
+  },
+  {
+    "scenario_id": "RM-AUTH-003",
+    "description": "Normal single login during business hours",
+    "alert": {
+      "alert_id": "ALT-003",
+      "rule_id": "RULE-NORMAL-01",
+      "rule_name": "Standard User Login",
+      "severity": "Informational",
+      "timestamp": "2026-11-01T09:00:00Z"
+    },
+    "entities": {
+      "source_ip": "10.0.1.50",
+      "target_user": "operator_dias",
+      "target_host": "srv-prod-auth"
+    },
+    "logs": [
+      {
+        "event_id": "EVT-AUTH-001",
+        "timestamp": "2026-11-01T09:00:01Z",
+        "event_type": "auth_success",
+        "source_ip": "10.0.1.50",
+        "user": "operator_dias"
+      }
+    ],
+    "tool_calls": [],
+    "simulated_gatekeeper_db": [],
+    "expected": {
+      "expected_status": "completed",
+      "expected_severity": "Informational",
+      "min_verified_evidence_count": 1,
+      "must_not_contain_claims": [
+        "attack",
+        "brute-force",
+        "serangan"
+      ]
+    }
+  },
+  {
+    "scenario_id": "RM-AUTH-004",
+    "description": "Alert with missing telemetry evidence",
+    "alert": {
+      "alert_id": "ALT-004",
+      "rule_id": "RULE-ORPHAN",
+      "rule_name": "Alert Without Evidence Stream",
+      "severity": "Medium",
+      "timestamp": "2026-11-01T11:00:00Z"
+    },
+    "entities": {
+      "target_host": "srv-prod-auth"
+    },
+    "logs": [],
+    "tool_calls": [],
+    "simulated_gatekeeper_db": [],
+    "expected": {
+      "expected_status": "insufficient_data",
+      "expected_severity": "Medium",
+      "min_verified_evidence_count": 0
+    }
+  },
+  {
+    "scenario_id": "RM-LINUX-ADAPTER-001",
+    "description": "Raw Linux Telemetry stream processed via LinuxLogPipelineAdapter",
+    "alert": {
+      "alert_id": "ALT-LINUX-STREAM",
+      "rule_id": "RULE-SSH-BRUTE",
+      "rule_name": "Multiple Failed Logins Followed by Success",
+      "severity": "High",
+      "timestamp": "2026-11-01T10:00:00Z"
+    },
+    "entities": {
+      "target_host": "srv-linux-auth"
+    },
+    "raw_linux_logs": [
+      "Nov  1 10:00:01 srv-linux-auth sshd[12450]: Failed password for invalid user admin from 198.51.100.24 port 54321 ssh2",
+      "Nov  1 10:00:05 srv-linux-auth sshd[12452]: Failed password for admin from 198.51.100.24 port 54322 ssh2",
+      "Nov  1 10:02:15 srv-linux-auth sshd[12460]: Accepted password for admin from 198.51.100.24 port 54330 ssh2",
+      "Nov  1 10:02:16 srv-linux-auth sshd[12460]: pam_unix(sshd:session): session opened for user admin(uid=1000) by (uid=0)",
+      "type=SYSCALL msg=audit(1762002180.123:4501): arch=c000003e syscall=59 success=yes exit=0 comm=\"curl\" exe=\"/usr/bin/curl\"",
+      "ESTAB 0 0 10.0.0.15:22 198.51.100.24:54330",
+      "CORRUPTED TEXT LINE THAT ADAPTER SAFELY QUARANTINES"
+    ],
+    "tool_calls": [],
+    "simulated_gatekeeper_db": [],
+    "expected": {
+      "expected_status": "completed",
+      "expected_severity": "High",
+      "min_verified_evidence_count": 5
+    }
+  }
+]
+

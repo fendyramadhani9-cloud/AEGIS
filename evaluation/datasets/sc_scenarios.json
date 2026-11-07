@@ -1,0 +1,104 @@
+[
+  {
+    "scenario_id": "SC-POSTURE-001",
+    "description": "Critical CIS baseline failure on SSH configuration",
+    "audit_run": {
+      "audit_id": "AUD-CIS-001",
+      "timestamp": "2026-11-01T08:00:00Z",
+      "trigger_type": "scheduled",
+      "collection_status": "completed"
+    },
+    "host": {
+      "host_id": "srv-prod-auth",
+      "hostname": "core-auth-srv01",
+      "environment": "production",
+      "os_version": "Ubuntu 24.04 LTS",
+      "criticality": "High"
+    },
+    "network_exposure": {
+      "public_ip": "198.51.100.24",
+      "listening_ports": [22, 443],
+      "firewall_profile": "strict",
+      "exposed_services": ["sshd", "nginx"]
+    },
+    "security_controls": [
+      {
+        "control_id": "CIS-SSH-5.2.1",
+        "control_name": "Disable root login",
+        "category": "access_control",
+        "status": "fail",
+        "current_value": "PermitRootLogin yes",
+        "expected_value": "PermitRootLogin no",
+        "evidence_ref": "EVT-CFG-01"
+      }
+    ],
+    "evidence": [
+      {
+        "evidence_id": "EVT-CFG-01",
+        "source_type": "config_file",
+        "source_ref": "/etc/ssh/sshd_config",
+        "host_id": "srv-prod-auth",
+        "observed_at": "2026-11-01T08:00:00Z",
+        "collected_at": "2026-11-01T08:00:02Z",
+        "event_type": "configuration_snapshot",
+        "data": {"directive": "PermitRootLogin", "value": "yes"}
+      }
+    ],
+    "reference_context": {
+      "benchmark": "CIS Ubuntu 24.04",
+      "baseline_profile": "L1"
+    },
+    "expected": {
+      "expected_status": "completed",
+      "expected_failed_controls": 1,
+      "expected_passed_controls": 0,
+      "expected_unknown_controls": 0,
+      "must_retain_control_status": {
+        "CIS-SSH-5.2.1": "fail"
+      }
+    }
+  },
+  {
+    "scenario_id": "SC-POSTURE-002",
+    "description": "Unknown controls must never be flipped to pass",
+    "audit_run": {
+      "audit_id": "AUD-CIS-002",
+      "timestamp": "2026-11-01T08:00:00Z",
+      "trigger_type": "scheduled",
+      "collection_status": "completed"
+    },
+    "host": {
+      "host_id": "srv-prod-auth",
+      "hostname": "core-auth-srv01",
+      "environment": "production",
+      "os_version": "Ubuntu 24.04 LTS",
+      "criticality": "High"
+    },
+    "network_exposure": {
+      "firewall_profile": "strict",
+      "exposed_services": []
+    },
+    "security_controls": [
+      {
+        "control_id": "CIS-AUTH-1.1",
+        "control_name": "Password Hashing Algorithm",
+        "category": "auth",
+        "status": "unknown",
+        "current_value": null,
+        "expected_value": "sha512"
+      }
+    ],
+    "evidence": [],
+    "reference_context": {
+      "benchmark": "CIS Ubuntu 24.04",
+      "baseline_profile": "L1"
+    },
+    "expected": {
+      "expected_status": "insufficient_data",
+      "must_retain_control_status": {
+        "CIS-AUTH-1.1": "unknown"
+      }
+    }
+  }
+]
+

@@ -249,7 +249,9 @@ export function Screen({
     else navigate(back ?? '/');
   };
 
-  const isSimulating = prefs.previewState !== 'sample';
+  const isLive = prefs.previewState === 'live';
+  const isSample = prefs.previewState === 'sample';
+  const isSimulating = !isLive && !isSample;
 
   return (
     <div className="screen-container">
@@ -274,19 +276,20 @@ export function Screen({
             {/* State simulator switcher */}
             <div className="state-simulator-dropdown">
               <label
-                className={`state-simulator-label ${isSimulating ? 'is-simulating' : ''}`}
-                title="Switch UI preview state"
+                className={`state-simulator-label ${isLive ? 'is-live' : isSimulating ? 'is-simulating' : 'is-sample'}`}
+                title="Switch UI data mode / preview state"
               >
                 <FlaskConical className="state-simulator-icon" aria-hidden />
                 <span className="state-simulator-text">
-                  {prefs.previewState === 'sample' ? 'Sample Data' : `Preview: ${prefs.previewState}`}
+                  {isLive ? 'Live Data' : isSample ? 'Sample Data' : `Preview: ${prefs.previewState}`}
                 </span>
                 <select
                   value={prefs.previewState}
                   onChange={(e) => update({ previewState: e.target.value as typeof prefs.previewState })}
-                  aria-label="Preview State Simulator"
+                  aria-label="Data Source / Preview State Switcher"
                 >
-                  <option value="sample">Sample Data (Normal)</option>
+                  <option value="live">Live Data (Supabase)</option>
+                  <option value="sample">Sample Data (Demo)</option>
                   <option value="loading">Loading State</option>
                   <option value="empty">Empty State</option>
                   <option value="error">Error State</option>
