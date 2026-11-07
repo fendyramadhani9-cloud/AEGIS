@@ -13,9 +13,11 @@ import subprocess
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv("/home/ubuntu/aegis/.env")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT_DIR / ".env")
+sys.path.insert(0, str(ROOT_DIR))
 
-BASE_URL = "http://127.0.0.1/api"
+BASE_URL = os.getenv("AEGIS_API_BASE_URL", "http://127.0.0.1:8000/api")
 TOKEN = os.getenv("AGENT_INGEST_TOKEN", "aegis-agent-dev-secret-token")
 HOST_ID = os.getenv("AEGIS_HOST_ID", "host-fenn-ubuntu")
 
@@ -305,7 +307,7 @@ def verify_domain_6():
     print(f"[*] Collector Live RSS Memory: {mem_mb:.2f} MB (< 100 MB limit)")
     
     # Check cursor file permissions
-    cursor_path = Path("/home/ubuntu/aegis/.collector_cursor")
+    cursor_path = ROOT_DIR / ".collector_cursor"
     perm_octal = oct(stat.S_IMODE(cursor_path.stat().st_mode)) if cursor_path.exists() else None
     print(f"[*] Cursor file on disk: {cursor_path} -> mode {perm_octal}")
     
@@ -339,5 +341,7 @@ if __name__ == "__main__":
     print(f"OVERALL RESULT: {'ALL PASS (100%)' if all_pass else 'FAILURES DETECTED'}")
     print("=" * 60)
     
-    with open("/home/ubuntu/aegis/hardening_verification_report.json", "w") as f:
+    out_dir = ROOT_DIR / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(out_dir / "hardening_verification_report.json", "w") as f:
         json.dump(results, f, indent=2)

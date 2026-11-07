@@ -167,11 +167,73 @@ export interface OperatorAuditLog {
   id: string;
   ts: ISODate;
   actor: string;
-  action: 'start_evidence' | 'stop_evidence' | 'update_investigation' | 'request_report' | 'export_pdf';
-  targetType: 'evidence_session' | 'alert' | 'report' | 'host';
+  action: 'start_evidence' | 'stop_evidence' | 'update_investigation' | 'request_report' | 'export_pdf' | string;
+  targetType: 'evidence_session' | 'alert' | 'report' | 'host' | string;
   targetId: string;
   summary: string;
   details?: Record<string, unknown>;
+}
+
+/** Portable AI Investigation & Remediation Handoff Document (PRD §4). */
+export interface HandoffDocument {
+  alertId: string;
+  hostId: string;
+  hostname: string;
+  title: string;
+  severity: Severity;
+  ruleId: string;
+  generatedAt: ISODate;
+  filename: string;
+  markdown: string;
+  confirmedFacts: string[];
+  unverifiedHypotheses: string[];
+  missingTelemetry: string[];
+  investigationSteps: string[];
+  remediationPlan: string[];
+  serviceImpact: string;
+  rollbackInstructions: string[];
+  verificationInstructions: string[];
+}
+
+export interface VerificationCheck {
+  id: string;
+  label: string;
+  status: 'pass' | 'fail' | 'warn';
+  detail: string;
+}
+
+/** Continuous Monitoring & Automatic Recovery Verification Result (PRD §5). */
+export interface RecoveryVerification {
+  alertId: string;
+  hostId: string;
+  outcome: 'resolved' | 'still_active' | 'reopened' | 'unverified';
+  verifiedAt: ISODate;
+  observationWindowMin: number;
+  summary: string;
+  checks: VerificationCheck[];
+}
+
+export interface IncidentReplayStep {
+  step: number;
+  ts: ISODate;
+  phase: 'reconnaissance' | 'trigger' | 'detection' | 'investigation' | 'verification';
+  title: string;
+  detail: string;
+  source: string;
+  actorOrIp?: string;
+  eventId?: string;
+}
+
+/** Chronological Incident Replay (PRD §6). */
+export interface IncidentReplay {
+  alertId: string;
+  hostId: string;
+  hostname: string;
+  ruleId: string;
+  severity: Severity;
+  incidentStatus: string;
+  steps: IncidentReplayStep[];
+  telemetryLimitations: string[];
 }
 
 /** Ingestion pipeline health metrics per source (Feature 5). */

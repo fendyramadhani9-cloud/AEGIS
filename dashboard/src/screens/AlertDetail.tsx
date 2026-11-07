@@ -5,8 +5,11 @@ import { AiPanel } from '../components/AiPanel';
 import {
   AlertGroupingCard,
   GapBlock,
+  HandoffCard,
+  IncidentReplayCard,
   InvestigationWorkflowCard,
   ProvenanceCard,
+  RecoveryVerificationCard,
   RuleLogicCard,
 } from '../components/domain';
 import { EmptyState, QueryView, SkeletonBlock } from '../components/states';
@@ -25,11 +28,12 @@ export function AlertDetailScreen() {
   const q = useQuery(async () => {
     const alert = await api.alert(id);
     if (!alert) return null;
-    const [events, gaps, host, evidence] = await Promise.all([
+    const [events, gaps, host, evidence, replay] = await Promise.all([
       api.alertEvidence(alert.id),
       api.gaps({ hostId: alert.hostId }),
       api.host(alert.hostId),
       api.evidence(),
+      api.replay(alert.id),
     ]);
     const t = new Date(alert.detectedAt).getTime();
     const nearGaps = gaps.filter((g) => {
@@ -38,7 +42,7 @@ export function AlertDetailScreen() {
       return (g.source === alert.source || g.source === 'agent') && s <= t + WINDOW && e >= t - WINDOW;
     });
     const activeEvidence = evidence.find((e) => e.hostId === alert.hostId && e.status === 'active');
-    return { alert, events, nearGaps, host, activeEvidence };
+    return { alert, events, nearGaps, host, activeEvidence, replay };
   }, [id]);
 
   return (
@@ -46,7 +50,7 @@ export function AlertDetailScreen() {
       <QueryView query={q} loading={<SkeletonBlock height={240} />}>
         {(data) => {
           if (!data) return <EmptyState icon={CircleHelp} title="Alert not found" />;
-          const { alert, events, nearGaps, host, activeEvidence } = data;
+          const { alert, events, nearGaps, host, activeEvidence, replay } = data;
           const sev = severityMeta[alert.severity];
           const conf = alert.confidence ? confidenceMeta[alert.confidence] : undefined;
           const inv = alert.investigationStatus ? investigationStatusMeta[alert.investigationStatus] : undefined;
@@ -80,11 +84,20 @@ export function AlertDetailScreen() {
                 {/* 4. Manual Investigation Status Workflow */}
                 <InvestigationWorkflowCard alert={alert} onUpdated={() => q.retry()} />
 
+                {/* 8. AI Investigation & Remediation Handoff (.md) */}
+                <HandoffCard alertId={alert.id} />
+
+                {/* 9. Continuous Monitoring & Automatic Recovery Verification */}
+                <RecoveryVerificationCard alertId={alert.id} />
+
                 {/* 1. Evidence Provenance */}
                 {alert.provenance && <ProvenanceCard provenance={alert.provenance} />}
 
                 {/* 7. Transparent Rule Logic */}
                 {alert.ruleLogic && <RuleLogicCard ruleLogic={alert.ruleLogic} />}
+
+                {/* 10. Chronological Incident Replay */}
+                {replay && <IncidentReplayCard replay={replay} />}
 
                 <Section title="Why this alert fired">
                   <Group>

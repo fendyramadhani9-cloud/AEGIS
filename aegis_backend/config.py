@@ -36,9 +36,23 @@ class Settings:
         self.supabase_service_role_key: Optional[str] = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
         self.supabase_timeout: int = int(os.getenv("SUPABASE_TIMEOUT", "10"))
 
-        # LLM Provider Configuration
-        self.llm_provider: str = os.getenv("AEGIS_LLM_PROVIDER", "mock")
-        self.llm_api_key: Optional[str] = os.getenv("AEGIS_LLM_API_KEY")
+        # LLM Provider Configuration (with automatic fallback to backup keys AEGIS1..3)
+        self.llm_provider: str = os.getenv("AEGIS_LLM_PROVIDER", "mock").lower()
+        self.llm_api_key: Optional[str] = (
+            os.getenv("AEGIS_LLM_API_KEY")
+            or os.getenv("AEGIS1")
+            or os.getenv("AEGIS2")
+            or os.getenv("AEGIS3")
+        )
+        self.llm_model: str = os.getenv("AEGIS_LLM_MODEL", "gemini-2.5-flash")
+        self.llm_timeout: int = int(os.getenv("AEGIS_LLM_TIMEOUT", "30"))
+
+        # Configurable CORS Origins
+        raw_origins = os.getenv(
+            "AEGIS_CORS_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000",
+        )
+        self.cors_origins: list[str] = [o.strip() for o in raw_origins.split(",") if o.strip()]
 
     @property
     def is_supabase_configured(self) -> bool:

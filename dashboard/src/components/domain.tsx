@@ -6,11 +6,17 @@ import {
   ChevronDown,
   ChevronUp,
   CircleDashed,
+  ClipboardCheck,
+  Copy,
+  Download,
   FileCode,
+  History,
   Layers,
   MessageSquare,
   Radio,
+  RefreshCw,
   ShieldAlert,
+  ShieldCheck,
   Terminal,
   User,
 } from 'lucide-react';
@@ -20,14 +26,17 @@ import type {
   EvidenceProvenance,
   EvidenceSession,
   Finding,
+  HandoffDocument,
   Host,
+  IncidentReplay,
   InvestigationStatus,
   OperatorAuditLog,
   PipelineSourceHealth,
+  RecoveryVerification,
   RuleLogic,
   TelemetryGap,
 } from '../data/types';
-import { actions, hostName } from '../data/api';
+import { actions, api, hostName } from '../data/api';
 import {
   agentStatusMeta,
   confidenceMeta,
@@ -576,4 +585,279 @@ export function AuditLogList({ logs }: { logs: OperatorAuditLog[] }) {
     </Group>
   );
 }
+
+/* ---------------- 8. AI Investigation & Remediation Handoff Card (PRD §4) ---------------- */
+
+export function HandoffCard({ alertId }: { alertId: string }) {
+  const [handoff, setHandoff] = useState<HandoffDocument | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
+
+  const handleGenerate = async () => {
+    setLoading(true);
+    try {
+      const doc = await api.handoff(alertId);
+      setHandoff(doc);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!handoff) return;
+    await navigator.clipboard.writeText(handoff.markdown);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleDownload = () => {
+    if (!handoff) return;
+    const blob = new Blob([handoff.markdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = handoff.filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="provenance-card">
+      <div className="provenance-header">
+        <div className="provenance-title">
+          <FileCode className="provenance-icon" aria-hidden />
+          <span>AI Investigation & Remediation Handoff (.md)</span>
+        </div>
+        <Button variant="primary" size="sm" onClick={handleGenerate} disabled={loading}>
+          {loading ? 'Generating…' : handoff ? 'Regenerate Handoff' : 'Generate Handoff Prompt'}
+        </Button>
+      </div>
+
+      <p className="prose muted" style={{ fontSize: '0.82rem', marginTop: '0.35rem' }}>
+        Generates a portable, context-rich Markdown prompt separating confirmed facts from hypotheses, with read-only verification commands, service impact, and rollback instructions for external AI coding agents.
+      </p>
+
+      {handoff && (
+        <div style={{ marginTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <Button variant="secondary" size="sm" icon={copied ? ClipboardCheck : Copy} onClick={handleCopy}>
+              {copied ? 'Copied Markdown!' : 'Copy Prompt'}
+            </Button>
+            <Button variant="secondary" size="sm" icon={Download} onClick={handleDownload}>
+              Download {handoff.filename}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setShowRaw((v) => !v)}>
+              {showRaw ? 'Show Structured View' : 'Preview Raw .md'}
+            </Button>
+          </div>
+
+          {showRaw ? (
+            <pre
+              className="mono"
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border-subtle)',
+                overflowX: 'auto',
+                maxHeight: '340px',
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {handoff.markdown}
+            </pre>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.82rem' }}>
+              <div>
+                <strong style={{ color: 'var(--status-healthy-fg)' }}>Confirmed Facts ({handoff.confirmedFacts.length})</strong>
+                <ul style={{ margin: '0.25rem 0 0 1.1rem', padding: 0 }}>
+                  {handoff.confirmedFacts.map((f, i) => (
+                    <li key={i}>{f}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <strong style={{ color: 'var(--status-warning-fg)' }}>Unverified Hypotheses (Require Verification)</strong>
+                <ul style={{ margin: '0.25rem 0 0 1.1rem', padding: 0 }}>
+                  {handoff.unverifiedHypotheses.map((h, i) => (
+                    <li key={i}>{h}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <strong>Read-Only Investigation Commands</strong>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.25rem' }}>
+                  {handoff.investigationSteps.map((cmd, i) => (
+                    <code key={i} className="mono" style={{ padding: '0.25rem 0.5rem', background: 'var(--bg-elevated)', borderRadius: '4px' }}>
+                      {cmd}
+                    </code>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <strong>Safe Remediation Plan & Rollback (Requires Engineer Approval)</strong>
+                <ul style={{ margin: '0.25rem 0 0 1.1rem', padding: 0 }}>
+                  {handoff.remediationPlan.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
+                </ul>
+                <p className="muted" style={{ marginTop: '0.25rem' }}>
+                  <strong>Impact:</strong> {handoff.serviceImpact}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- 9. Automatic Recovery Verification Card (PRD §5) ---------------- */
+
+export function RecoveryVerificationCard({ alertId }: { alertId: string }) {
+  const { dateTime } = useTimeFormat();
+  const [result, setResult] = useState<RecoveryVerification | null>(() => api.verification(alertId));
+  const [verifying, setVerifying] = useState(false);
+
+  const handleVerify = async () => {
+    setVerifying(true);
+    try {
+      const res = await actions.verifyRecovery(alertId);
+      setResult(res);
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const outcomeTone =
+    result?.outcome === 'resolved'
+      ? 'healthy'
+      : result?.outcome === 'still_active' || result?.outcome === 'reopened'
+        ? 'critical'
+        : 'warning';
+
+  return (
+    <div className="provenance-card">
+      <div className="provenance-header">
+        <div className="provenance-title">
+          <ShieldCheck className="provenance-icon" aria-hidden />
+          <span>Continuous Monitoring & Auto-Recovery Verification</span>
+        </div>
+        <Button variant="secondary" size="sm" icon={RefreshCw} onClick={handleVerify} disabled={verifying}>
+          {verifying ? 'Verifying…' : 'Verify Recovery'}
+        </Button>
+      </div>
+
+      {!result ? (
+        <p className="prose muted" style={{ fontSize: '0.82rem', marginTop: '0.35rem' }}>
+          Re-evaluates the triggering rule, inspects post-alert host events, and verifies telemetry stream continuity. Offline agents or missing logs are never treated as proof of recovery.
+        </p>
+      ) : (
+        <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <Badge
+              meta={{
+                label: `Outcome: ${result.outcome.replace('_', ' ').toUpperCase()}`,
+                tone: outcomeTone,
+                icon: ShieldCheck,
+              }}
+            />
+            <span className="muted mono" style={{ fontSize: '0.75rem' }}>
+              Checked {dateTime(result.verifiedAt)}
+            </span>
+          </div>
+          <p className="prose" style={{ fontSize: '0.84rem' }}>{result.summary}</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+            {result.checks.map((c) => (
+              <div
+                key={c.id}
+                style={{
+                  padding: '0.45rem 0.65rem',
+                  borderRadius: '6px',
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-subtle)',
+                  fontSize: '0.8rem',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+                  <span>{c.label}</span>
+                  <span
+                    className="mono"
+                    style={{
+                      color:
+                        c.status === 'pass'
+                          ? 'var(--status-healthy-fg)'
+                          : c.status === 'fail'
+                            ? 'var(--status-critical-fg)'
+                            : 'var(--status-warning-fg)',
+                    }}
+                  >
+                    {c.status.toUpperCase()}
+                  </span>
+                </div>
+                <p className="muted" style={{ margin: '0.15rem 0 0', fontSize: '0.77rem' }}>{c.detail}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- 10. Incident Replay Card (PRD §6) ---------------- */
+
+export function IncidentReplayCard({ replay }: { replay: IncidentReplay }) {
+  const { time } = useTimeFormat();
+
+  return (
+    <div className="provenance-card">
+      <div className="provenance-header">
+        <div className="provenance-title">
+          <History className="provenance-icon" aria-hidden />
+          <span>Incident Replay (Chronological Reconstruction)</span>
+        </div>
+        <Tag>{replay.steps.length} steps</Tag>
+      </div>
+
+      <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+        {replay.steps.map((s) => (
+          <div
+            key={s.step}
+            style={{
+              display: 'flex',
+              gap: '0.65rem',
+              padding: '0.5rem 0.65rem',
+              borderRadius: '6px',
+              background: 'var(--bg-elevated)',
+              borderLeft:
+                s.phase === 'detection'
+                  ? '3px solid var(--status-critical-fg)'
+                  : s.phase === 'trigger'
+                    ? '3px solid var(--status-warning-fg)'
+                    : '3px solid var(--color-accent)',
+            }}
+          >
+            <div className="mono muted" style={{ fontSize: '0.75rem', minWidth: '64px' }}>
+              <div>#{s.step}</div>
+              <div>{time(s.ts, true)}</div>
+            </div>
+            <div style={{ flex: 1, fontSize: '0.82rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                <strong>{s.title}</strong>
+                <Tag>{s.phase}</Tag>
+                {s.eventId && <span className="mono muted" style={{ fontSize: '0.73rem' }}>{s.eventId}</span>}
+              </div>
+              <p className="muted" style={{ margin: '0.2rem 0 0', fontSize: '0.79rem' }}>{s.detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 

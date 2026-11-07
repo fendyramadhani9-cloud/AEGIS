@@ -7,8 +7,9 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv("/home/ubuntu/aegis/.env")
-sys.path.insert(0, "/home/ubuntu/aegis")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT_DIR / ".env")
+sys.path.insert(0, str(ROOT_DIR))
 
 from aegis_backend.repository import SupabaseRepository
 

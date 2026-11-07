@@ -24,15 +24,21 @@ import {
 } from './sample';
 import type {
   AgentStatus,
+  AiAnalysis,
   Alert,
   Confidence,
   EvidenceSession,
   Finding,
+  FindingStatus,
+  HandoffDocument,
   Host,
+  IncidentReplay,
+  InvestigationNote,
   InvestigationStatus,
   NormalizedEvent,
   OperatorAuditLog,
   PipelineSourceHealth,
+  RecoveryVerification,
   Report,
   ReportType,
   Severity,
@@ -70,6 +76,11 @@ const db = {
   auditLogs: structuredClone(sampleAuditLogs),
   pipelineHealth: structuredClone(samplePipelineHealth),
 };
+
+// Live-mode reactive state caches so operator actions update UI immediately
+const liveAiCache = new Map<string, AiAnalysis>();
+const liveInvestigationCache = new Map<string, { status: InvestigationStatus; notes: InvestigationNote[] }>();
+const liveVerificationCache = new Map<string, RecoveryVerification>();
 
 let version = 0;
 const listeners = new Set<() => void>();
@@ -163,7 +174,7 @@ function mapBackendHost(h: BackendHostItem): Host {
     id: h.id,
     hostname: h.hostname,
     os: h.os || 'Ubuntu Server',
-    agentVersion: h.agent_version || '1.0.0',
+    agentVersion: h.agent_version || '0.1.0',
     agentStatus: (h.agent_status as AgentStatus) || 'unknown',
     lastDataAt: h.last_data_at ?? null,
     lastScRunAt: h.last_sc_run_at ?? null,
@@ -175,14 +186,14 @@ function mapBackendHost(h: BackendHostItem): Host {
         lastEventAt: h.last_data_at ?? null,
       },
       {
-        id: 'nginx-access',
-        path: '/var/log/nginx/access.log',
-        status: 'not_configured',
-        lastEventAt: null,
+        id: 'auditd',
+        path: '/var/log/audit/audit.log',
+        status: h.agent_status === 'online' ? 'collecting' : 'not_configured',
+        lastEventAt: h.last_data_at ?? null,
       },
       {
-        id: 'nginx-error',
-        path: '/var/log/nginx/error.log',
+        id: 'nginx-access',
+        path: '/var/log/nginx/access.log',
         status: 'not_configured',
         lastEventAt: null,
       },
@@ -219,8 +230,44 @@ interface BackendEvidenceItem {
   details?: Record<string, unknown> | null;
 }
 
+const RULE_META_MAP: Record<string, { mitreId: string; mitreName: string; condition: string; rationale: string }> = {
+  'RULE-SSH-BRUTE': {
+    mitreId: 'T1110.001',
+    mitreName: 'Brute Force: Password Guessing',
+    condition: 'count(auth_failure) >= 3 within 300s grouped by (host_id, source_ip)',
+    rationale: 'Repeated rapid SSH authentication failures from a single source IP indicate automated credential stuffing or dictionary brute-force activity.',
+  },
+  'RULE-AUTH-003': {
+    mitreId: 'T1078 / T1110',
+    mitreName: 'Valid Accounts / Brute Force Compromise',
+    condition: 'auth_success preceded by >= 2 auth_failure events within 300s from same source_ip and user',
+    rationale: 'An authentication success immediately following multiple failed attempts from the same IP strongly suggests either a successful brute-force compromise or credential mistyping.',
+  },
+  'RULE-SUSP-SUDO': {
+    mitreId: 'T1548.003',
+    mitreName: 'Abuse Elevation Control Mechanism: Sudo',
+    condition: 'sudo_exec matching interactive root shell (/bin/bash, /bin/sh) or overly permissive chmod (777)',
+    rationale: 'Spawning an interactive root shell via sudo bypasses per-command audit logging, and world-writable permission changes expose system or web files to tampering.',
+  },
+};
 
-function mapBackendAlert(a: BackendAlertItem): Alert {
+function mapBackendAlert(a: BackendAlertItem, allAlerts?: BackendAlertItem[]): Alert {
+  const cachedAi = liveAiCache.get(a.id);
+  const cachedInv = liveInvestigationCache.get(a.id);
+  const ruleKey = Object.keys(RULE_META_MAP).find((k) => (a.rule_id || '').startsWith(k));
+  const meta = ruleKey
+    ? RULE_META_MAP[ruleKey]
+    : {
+        mitreId: 'T1078',
+        mitreName: 'Initial Access / Execution',
+        condition: `Deterministic rule match on ${a.rule_id}`,
+        rationale: a.reason,
+      };
+
+  // Compute deduplication / grouping across alerts sharing same rule & host
+  const sameRuleAlerts = (allAlerts || [a]).filter((x) => x.host_id === a.host_id && x.rule_id === a.rule_id);
+  const sortedTimes = sameRuleAlerts.map((x) => x.detected_at).sort();
+
   return {
     kind: 'alert',
     id: a.id,
@@ -228,30 +275,45 @@ function mapBackendAlert(a: BackendAlertItem): Alert {
     ruleVersion: a.rule_version || '1.0',
     title: a.title,
     severity: (a.severity as Severity) || 'medium',
-    confidence: 'high' as Confidence,
-    investigationStatus: 'new' as InvestigationStatus,
+    confidence: 'confirmed' as Confidence,
+    investigationStatus: cachedInv?.status ?? ('new' as InvestigationStatus),
+    investigationNotes: cachedInv?.notes ?? [],
     provenance: {
-      source: 'ssh-auth',
-      sourceLabel: 'SSH Authentication Logs',
-      logFilePath: '/var/log/auth.log',
-      collector: 'AEGIS RM Collector v1.0',
+      source: a.rule_id?.includes('SUDO') ? 'auditd' : 'ssh-auth',
+      sourceLabel: a.rule_id?.includes('SUDO') ? 'Sudo & Privilege Escalation Log' : 'SSH Authentication Journal',
+      logFilePath: '/var/log/auth.log (systemd-journald)',
+      collector: 'AEGIS Telemetry Collector v0.1 (Two-Phase Commit)',
       ingestedAt: a.created_at || a.detected_at,
-      parser: 'linux_auth_parser',
-      integrityHash: a.id,
+      parser: 'LinuxTelemetryParser (Regex + Sanitizer)',
+      integrityHash: `sha256:${a.id.toLowerCase()}`,
     },
+    grouping:
+      sameRuleAlerts.length > 1
+        ? {
+            groupKey: `${a.host_id}:${a.rule_id}`,
+            count: sameRuleAlerts.length,
+            firstSeenAt: sortedTimes[0] || a.detected_at,
+            lastSeenAt: sortedTimes[sortedTimes.length - 1] || a.detected_at,
+            targetEntity: hostName(a.host_id),
+            sourceEntity: a.rule_id,
+            sampleEventIds: sameRuleAlerts.map((x) => x.id),
+          }
+        : undefined,
     ruleLogic: {
       ruleId: a.rule_id,
       ruleName: a.title,
-      condition: a.reason,
-      observed: `Security event matching ${a.rule_id}`,
-      rationale: a.reason,
+      condition: meta.condition,
+      observed: a.reason,
+      mitreAttackId: meta.mitreId,
+      mitreAttackName: meta.mitreName,
+      rationale: meta.rationale,
     },
     hostId: a.host_id,
-    source: ('ssh-auth' as SourceId),
+    source: (a.rule_id?.includes('SUDO') ? 'auditd' : 'ssh-auth') as SourceId,
     detectedAt: a.detected_at,
     reason: a.reason,
     supportingEventIds: [],
-    ai: {
+    ai: cachedAi ?? {
       state: 'not_requested',
       role: 'RM Analysis Agent',
     },
@@ -274,6 +336,58 @@ function mapBackendSystemStatus(s: BackendSystemStatus): SystemStatus {
     aiProvider: s.ai_provider,
     aiProviderNote: s.ai_provider_note ?? undefined,
     checkedAt: s.checked_at ?? new Date().toISOString(),
+  };
+}
+
+interface BackendFindingItem {
+  id: string;
+  host_id: string;
+  check_id: string;
+  title: string;
+  status: string;
+  severity: string;
+  checked_at: string;
+  indicators: string[];
+  limits: string;
+  ai_state?: string;
+  ai_role?: string;
+  ai_generated_at?: string | null;
+  ai_summary?: string | null;
+  ai_evidence_refs?: string[];
+  ai_uncertainty?: string | null;
+  ai_next_steps?: string[];
+}
+
+function mapBackendFinding(f: BackendFindingItem): Finding {
+  const cachedAi = liveAiCache.get(f.id);
+  return {
+    kind: 'finding',
+    id: f.id,
+    checkId: f.check_id,
+    title: f.title,
+    status: (f.status as FindingStatus) || 'fail',
+    severity: (f.severity as Severity) || 'medium',
+    confidence: 'confirmed',
+    hostId: f.host_id,
+    checkedAt: f.checked_at,
+    indicators: f.indicators || [],
+    limits: f.limits,
+    ai:
+      cachedAi ??
+      (f.ai_state === 'ready'
+        ? {
+            state: 'ready',
+            role: 'SC Analysis Agent',
+            generatedAt: f.ai_generated_at ?? undefined,
+            summary: f.ai_summary ?? undefined,
+            evidenceRefs: f.ai_evidence_refs ?? [],
+            uncertainty: f.ai_uncertainty ?? undefined,
+            nextSteps: f.ai_next_steps ?? [],
+          }
+        : {
+            state: 'not_requested',
+            role: 'SC Analysis Agent',
+          }),
   };
 }
 
@@ -354,7 +468,7 @@ export const api = {
 
     const q = hostId ? `?host_id=${encodeURIComponent(hostId)}&limit=100` : '?limit=100';
     const res = await requestBackend<{ items: BackendAlertItem[]; total: number }>(`/api/alerts${q}`);
-    return res.items.map(mapBackendAlert).sort(byTimeDesc((a) => a.detectedAt));
+    return res.items.map((a) => mapBackendAlert(a, res.items)).sort(byTimeDesc((a) => a.detectedAt));
   },
 
   alert: async (id: string): Promise<Alert | null> => {
@@ -374,10 +488,11 @@ export const api = {
     }
   },
 
-  // Security Checker findings (endpoint pending backend implementation)
+  // Security Checker findings
   findings: async (hostId?: string): Promise<Finding[]> => {
     if (previewState === 'loading') return new Promise(() => {});
     if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return [];
     if (previewState === 'sample') {
       return structuredClone(
         db.findings
@@ -388,16 +503,34 @@ export const api = {
           }),
       );
     }
-    return [];
+
+    try {
+      const q = hostId ? `?host_id=${encodeURIComponent(hostId)}` : '';
+      const raw = await requestBackend<BackendFindingItem[]>(`/api/findings${q}`);
+      return raw.map(mapBackendFinding).sort((a, b) => {
+        const rank = (f: Finding) => (f.status === 'fail' ? 0 : f.status === 'not_checked' ? 1 : 2);
+        return rank(a) - rank(b) || SEV_ORDER[a.severity] - SEV_ORDER[b.severity];
+      });
+    } catch {
+      return [];
+    }
   },
 
   finding: async (id: string): Promise<Finding | null> => {
     if (previewState === 'loading') return new Promise(() => {});
     if (previewState === 'error') throw new ApiError('Simulated error state');
+    if (previewState === 'empty') return null;
     if (previewState === 'sample') {
       return structuredClone(db.findings.find((f) => f.id === id) ?? null);
     }
-    return null;
+
+    try {
+      const raw = await requestBackend<BackendFindingItem>(`/api/findings/${encodeURIComponent(id)}`);
+      return mapBackendFinding(raw);
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      return null;
+    }
   },
 
   alertEvidence: async (alertId: string): Promise<NormalizedEvent[]> => {
@@ -412,7 +545,7 @@ export const api = {
 
     try {
       const res = await requestBackend<{ alert_id: string; items: BackendEvidenceItem[]; total: number }>(
-        `/api/alerts/${encodeURIComponent(alertId)}/evidence`
+        `/api/alerts/${encodeURIComponent(alertId)}/evidence`,
       );
       return (res.items || []).map((ev) => ({
         id: ev.event_id,
@@ -467,7 +600,23 @@ export const api = {
       const rank = { alert: 0, gap: 1, event: 2 } as const;
       return items.sort((a, b) => b.ts.localeCompare(a.ts) || rank[a.kind] - rank[b.kind]);
     }
-    return [];
+
+    // Live mode: build unified chronological timeline from live alerts and their supporting evidence
+    const alerts = await api.alerts(opts.hostId);
+    const items: TimelineItem[] = alerts.map((a) => ({ kind: 'alert' as const, ts: a.detectedAt, alert: a }));
+    const topAlerts = alerts.slice(0, 6);
+    const evBatches = await Promise.all(topAlerts.map((a) => api.alertEvidence(a.id).catch(() => [])));
+    const seenEventIds = new Set<string>();
+    for (const batch of evBatches) {
+      for (const ev of batch) {
+        if (!seenEventIds.has(ev.id)) {
+          seenEventIds.add(ev.id);
+          items.push({ kind: 'event' as const, ts: ev.ts, event: ev });
+        }
+      }
+    }
+    const rank = { alert: 0, gap: 1, event: 2 } as const;
+    return items.sort((a, b) => b.ts.localeCompare(a.ts) || rank[a.kind] - rank[b.kind]);
   },
 
   evidence: async (): Promise<EvidenceSession[]> => {
@@ -477,7 +626,38 @@ export const api = {
     if (previewState === 'sample') {
       return structuredClone([...db.evidence].sort(byTimeDesc((s) => s.startedAt)));
     }
-    return [];
+    try {
+      const raw = await requestBackend<
+        Array<{
+          id: string;
+          host_id: string;
+          status: 'active' | 'expired' | 'stopped';
+          started_at: string;
+          expires_at: string;
+          ended_at?: string | null;
+          started_by: string;
+          reason: string;
+          data_types: string[];
+          item_count: number;
+          linked_alert_id?: string | null;
+        }>
+      >('/api/evidence');
+      return raw.map((s) => ({
+        id: s.id,
+        hostId: s.host_id,
+        status: s.status,
+        startedAt: s.started_at,
+        expiresAt: s.expires_at,
+        endedAt: s.ended_at ?? null,
+        startedBy: s.started_by,
+        reason: s.reason,
+        dataTypes: s.data_types,
+        itemCount: s.item_count,
+        linkedAlertId: s.linked_alert_id ?? undefined,
+      }));
+    } catch {
+      return structuredClone([...db.evidence].sort(byTimeDesc((s) => s.startedAt)));
+    }
   },
 
   evidenceOptions: async () => ({
@@ -489,14 +669,70 @@ export const api = {
     if (previewState === 'loading') return new Promise(() => {});
     if (previewState === 'error') throw new ApiError('Simulated error state');
     if (previewState === 'empty') return [];
-    return structuredClone([...db.auditLogs].sort(byTimeDesc((a) => a.ts)));
+    if (previewState === 'sample') {
+      return structuredClone([...db.auditLogs].sort(byTimeDesc((a) => a.ts)));
+    }
+    try {
+      const raw = await requestBackend<
+        Array<{
+          id: string;
+          ts: string;
+          actor: string;
+          action: string;
+          target_type: string;
+          target_id: string;
+          summary: string;
+          details?: Record<string, unknown>;
+        }>
+      >('/api/audit-logs');
+      return raw.map((a) => ({
+        id: a.id,
+        ts: a.ts,
+        actor: a.actor,
+        action: a.action,
+        targetType: a.target_type,
+        targetId: a.target_id,
+        summary: a.summary,
+        details: a.details,
+      }));
+    } catch {
+      return structuredClone([...db.auditLogs].sort(byTimeDesc((a) => a.ts)));
+    }
   },
 
   pipelineHealth: async (): Promise<PipelineSourceHealth[]> => {
     if (previewState === 'loading') return new Promise(() => {});
     if (previewState === 'error') throw new ApiError('Simulated error state');
     if (previewState === 'empty') return [];
-    return structuredClone(db.pipelineHealth);
+    if (previewState === 'sample') {
+      return structuredClone(db.pipelineHealth);
+    }
+    try {
+      const raw = await requestBackend<
+        Array<{
+          source: SourceId;
+          label: string;
+          active_hosts: number;
+          total_hosts: number;
+          last_received_at?: string | null;
+          events_per_min: number;
+          has_gap: boolean;
+          status: 'healthy' | 'delayed' | 'gap';
+        }>
+      >('/api/system/pipeline-health');
+      return raw.map((p) => ({
+        sourceId: p.source,
+        sourceName: p.label,
+        path: p.source === 'ssh-auth' ? '/var/log/auth.log' : p.source === 'auditd' ? '/var/log/audit/audit.log' : '/var/log/nginx/access.log',
+        status: p.status === 'healthy' ? 'healthy' : p.status === 'delayed' ? 'lagging' : 'stalled',
+        lastReceivedAt: p.last_received_at || new Date().toISOString(),
+        ingestionRatePerMin: p.events_per_min,
+        totalEventsToday: Math.round(p.events_per_min * 180),
+        activeGaps: p.has_gap ? 1 : 0,
+      }));
+    } catch {
+      return structuredClone(db.pipelineHealth);
+    }
   },
 
   reports: async (): Promise<Report[]> => {
@@ -506,7 +742,46 @@ export const api = {
     if (previewState === 'sample') {
       return structuredClone([...db.reports].sort(byTimeDesc((r) => r.requestedAt)));
     }
-    return [];
+    try {
+      const raw = await requestBackend<
+        Array<{
+          id: string;
+          type: ReportType;
+          title: string;
+          host_ids: string[];
+          period_start: string;
+          period_end: string;
+          status: 'pending' | 'completed' | 'failed';
+          requested_at: string;
+          completed_at?: string | null;
+          pages?: number | null;
+          size_kb?: number | null;
+          alert_count?: number | null;
+          finding_count?: number | null;
+          gap_count?: number | null;
+          error?: string | null;
+        }>
+      >('/api/reports');
+      return raw.map((r) => ({
+        id: r.id,
+        type: r.type,
+        title: r.title,
+        hostIds: r.host_ids,
+        periodStart: r.period_start,
+        periodEnd: r.period_end,
+        status: r.status,
+        requestedAt: r.requested_at,
+        completedAt: r.completed_at ?? undefined,
+        pages: r.pages ?? undefined,
+        sizeKb: r.size_kb ?? undefined,
+        alertCount: r.alert_count ?? undefined,
+        findingCount: r.finding_count ?? undefined,
+        gapCount: r.gap_count ?? undefined,
+        error: r.error ?? undefined,
+      }));
+    } catch {
+      return [];
+    }
   },
 
   report: async (id: string): Promise<Report | null> => {
@@ -516,7 +791,190 @@ export const api = {
     if (previewState === 'sample') {
       return structuredClone(db.reports.find((r) => r.id === id) ?? null);
     }
-    return null;
+    const all = await api.reports();
+    return all.find((r) => r.id === id) ?? null;
+  },
+
+  // Main Product Differentiator (PRD §4): AI Investigation & Remediation Handoff
+  handoff: async (alertId: string): Promise<HandoffDocument> => {
+    if (previewState === 'sample') {
+      const alert = db.alerts.find((a) => a.id === alertId) || db.alerts[0];
+      const host = db.hosts.find((h) => h.id === alert.hostId);
+      const events = db.events.filter((e) => alert.supportingEventIds.includes(e.id));
+      const nowIso = new Date().toISOString();
+      const confirmedFacts = [
+        `Host '${host?.hostname || alert.hostId}' (${host?.os || 'Ubuntu LTS'}) triggered deterministic rule '${alert.ruleId}' at ${alert.detectedAt}.`,
+        `Immutable Alert Severity: ${alert.severity.toUpperCase()} | Confidence: ${alert.confidence.toUpperCase()}.`,
+        `Trigger Reason: ${alert.reason}`,
+        ...events.map((ev) => `Evidence [${ev.id}] at ${ev.ts} (${ev.type}): ${ev.message}`),
+      ];
+      const unverifiedHypotheses = [
+        `Activity matching ${alert.ruleId} may indicate an unauthorized external intrusion or misconfigured automation script.`,
+        'Potential secondary persistence (authorized_keys, cron, sudoers) must be verified via read-only inspection.',
+      ];
+      const missingTelemetry = [
+        'Full packet capture (PCAP) is not enabled by default outside Emergency Evidence Mode.',
+      ];
+      const investigationSteps = [
+        "sudo journalctl -u ssh -u sshd --since '1 hour ago'",
+        "sudo ss -tnp state established",
+        "sudo last -n 20 -a",
+      ];
+      const remediationPlan = [
+        'Verify with the account owner or operator whether the activity was authorized.',
+        'Harden /etc/ssh/sshd_config (PasswordAuthentication no, PermitRootLogin no) and validate with sudo sshd -t.',
+      ];
+      const rollbackInstructions = [
+        'Restore /etc/ssh/sshd_config.bak and run sudo systemctl reload ssh if access issues occur.',
+      ];
+      const verificationInstructions = [
+        'Confirm zero new triggers for the rule over a 15-minute observation window with active agent heartbeat.',
+      ];
+      const md = `# AEGIS AI Investigation & Remediation Handoff Prompt\n\n- **Alert ID**: \`${alert.id}\`\n- **Host**: \`${host?.hostname || alert.hostId}\`\n- **Rule**: \`${alert.ruleId}\` (\`${alert.severity.toUpperCase()}\`)\n- **Reason**: ${alert.reason}\n\n## Confirmed Facts\n${confirmedFacts.map((f) => `- [FACT] ${f}`).join('\n')}\n\n## Unverified Hypotheses\n${unverifiedHypotheses.map((h) => `- [HYPOTHESIS] ${h}`).join('\n')}\n\n## Read-Only Investigation Commands\n${investigationSteps.map((c, i) => `${i + 1}. \`${c}\``).join('\n')}\n\n## Safe Remediation Plan (Requires Engineer Approval)\n${remediationPlan.map((r, i) => `${i + 1}. ${r}`).join('\n')}\n\n## Rollback Instructions\n${rollbackInstructions.map((r) => `- ${r}`).join('\n')}\n`;
+      return {
+        alertId: alert.id,
+        hostId: alert.hostId,
+        hostname: host?.hostname || alert.hostId,
+        title: alert.title,
+        severity: alert.severity,
+        ruleId: alert.ruleId,
+        generatedAt: nowIso,
+        filename: `AEGIS-Handoff-${alert.id}.md`,
+        markdown: md,
+        confirmedFacts,
+        unverifiedHypotheses,
+        missingTelemetry,
+        investigationSteps,
+        remediationPlan,
+        serviceImpact: 'Reloading sshd does not terminate active sessions.',
+        rollbackInstructions,
+        verificationInstructions,
+      };
+    }
+
+    const raw = await requestBackend<{
+      alert_id: string;
+      host_id: string;
+      hostname: string;
+      title: string;
+      severity: Severity;
+      rule_id: string;
+      generated_at: string;
+      filename: string;
+      markdown: string;
+      confirmed_facts: string[];
+      unverified_hypotheses: string[];
+      missing_telemetry: string[];
+      investigation_steps: string[];
+      remediation_plan: string[];
+      service_impact: string;
+      rollback_instructions: string[];
+      verification_instructions: string[];
+    }>(`/api/alerts/${encodeURIComponent(alertId)}/handoff`);
+
+    return {
+      alertId: raw.alert_id,
+      hostId: raw.host_id,
+      hostname: raw.hostname,
+      title: raw.title,
+      severity: raw.severity,
+      ruleId: raw.rule_id,
+      generatedAt: raw.generated_at,
+      filename: raw.filename,
+      markdown: raw.markdown,
+      confirmedFacts: raw.confirmed_facts,
+      unverifiedHypotheses: raw.unverified_hypotheses,
+      missingTelemetry: raw.missing_telemetry,
+      investigationSteps: raw.investigation_steps,
+      remediationPlan: raw.remediation_plan,
+      serviceImpact: raw.service_impact,
+      rollbackInstructions: raw.rollback_instructions,
+      verificationInstructions: raw.verification_instructions,
+    };
+  },
+
+  verification: (alertId: string): RecoveryVerification | null => {
+    return liveVerificationCache.get(alertId) ?? null;
+  },
+
+  // Chronological Incident Replay (PRD §6)
+  replay: async (alertId: string): Promise<IncidentReplay | null> => {
+    if (previewState === 'sample') {
+      const alert = db.alerts.find((a) => a.id === alertId);
+      if (!alert) return null;
+      const events = db.events.filter((e) => alert.supportingEventIds.includes(e.id));
+      const steps: IncidentReplay['steps'] = events.map((ev, i) => ({
+        step: i + 1,
+        ts: ev.ts,
+        phase: i === events.length - 1 ? 'trigger' : 'reconnaissance',
+        title: `Telemetry Event (${ev.type})`,
+        detail: ev.message,
+        source: ev.source,
+        eventId: ev.id,
+      }));
+      steps.push({
+        step: steps.length + 1,
+        ts: alert.detectedAt,
+        phase: 'detection',
+        title: `Deterministic Rule Triggered: ${alert.ruleId}`,
+        detail: `${alert.title} — ${alert.reason}`,
+        source: 'AEGIS Rules Engine',
+        eventId: alert.id,
+      });
+      return {
+        alertId: alert.id,
+        hostId: alert.hostId,
+        hostname: hostName(alert.hostId),
+        ruleId: alert.ruleId,
+        severity: alert.severity,
+        incidentStatus: alert.investigationStatus,
+        steps,
+        telemetryLimitations: ['Chronological reconstruction strictly uses stored telemetry records.'],
+      };
+    }
+
+    try {
+      const raw = await requestBackend<{
+        alert_id: string;
+        host_id: string;
+        hostname: string;
+        rule_id: string;
+        severity: Severity;
+        incident_status: string;
+        steps: Array<{
+          step: number;
+          ts: string;
+          phase: 'reconnaissance' | 'trigger' | 'detection' | 'investigation' | 'verification';
+          title: string;
+          detail: string;
+          source: string;
+          actor_or_ip?: string | null;
+          event_id?: string | null;
+        }>;
+        telemetry_limitations: string[];
+      }>(`/api/alerts/${encodeURIComponent(alertId)}/replay`);
+      return {
+        alertId: raw.alert_id,
+        hostId: raw.host_id,
+        hostname: raw.hostname,
+        ruleId: raw.rule_id,
+        severity: raw.severity,
+        incidentStatus: raw.incident_status,
+        steps: raw.steps.map((s) => ({
+          step: s.step,
+          ts: s.ts,
+          phase: s.phase,
+          title: s.title,
+          detail: s.detail,
+          source: s.source,
+          actorOrIp: s.actor_or_ip ?? undefined,
+          eventId: s.event_id ?? undefined,
+        })),
+        telemetryLimitations: raw.telemetry_limitations,
+      };
+    } catch {
+      return null;
+    }
   },
 };
 
@@ -525,32 +983,141 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const actions = {
   async requestAnalysis(kind: 'alert' | 'finding', id: string) {
-    const item = kind === 'alert' ? db.alerts.find((a) => a.id === id) : db.findings.find((f) => f.id === id);
-    if (!item) return;
-    item.ai = { state: 'pending', role: item.ai.role };
+    if (previewState === 'sample') {
+      const item = kind === 'alert' ? db.alerts.find((a) => a.id === id) : db.findings.find((f) => f.id === id);
+      if (!item) return;
+      item.ai = { state: 'pending', role: item.ai.role };
+      bump();
+      await wait(1200);
+      if (db.system.aiProvider === 'unavailable') {
+        item.ai = { state: 'failed', role: item.ai.role, error: 'AI provider unavailable. Detection data is unaffected.' };
+      } else {
+        const ref = kind === 'alert' ? (item as Alert).ruleId : (item as Finding).checkId;
+        item.ai = {
+          state: 'ready',
+          role: item.ai.role,
+          generatedAt: new Date().toISOString(),
+          summary:
+            kind === 'alert'
+              ? `Grounded RM analysis. ${(item as Alert).reason} Produced deterministically by rule ${ref}.`
+              : `Grounded SC analysis. Check ${ref} reported: ${(item as Finding).indicators.join('; ') || 'no indicators'}.`,
+          evidenceRefs: [kind === 'alert' ? `Rule ${ref}` : `Check ${ref} indicators`],
+          uncertainty:
+            kind === 'alert'
+              ? 'Only collected events were considered. Periods with telemetry gaps are unknown.'
+              : (item as Finding).limits,
+          nextSteps: ['Review the supporting evidence on this screen before acting.'],
+        };
+      }
+      bump();
+      return;
+    }
+
+    // Live mode: call FastAPI backend AI orchestrator
+    const role = kind === 'alert' ? 'RM Analysis Agent' : 'SC Analysis Agent';
+    liveAiCache.set(id, { state: 'pending', role });
     bump();
-    await wait(2600);
-    if (db.system.aiProvider === 'unavailable') {
-      item.ai = { state: 'failed', role: item.ai.role, error: 'AI provider unavailable. Detection data is unaffected.' };
-    } else {
-      const ref = kind === 'alert' ? (item as Alert).ruleId : (item as Finding).checkId;
-      item.ai = {
-        state: 'ready',
-        role: item.ai.role,
-        generatedAt: new Date().toISOString(),
-        summary:
-          kind === 'alert'
-            ? `Sample explanation. ${(item as Alert).reason} The alert was produced by rule ${ref}; this explanation only restates and contextualises the supporting events listed below.`
-            : `Sample explanation. Check ${ref} reported: ${(item as Finding).indicators.join('; ') || 'no indicators'}. The explanation is limited to what this check can observe.`,
-        evidenceRefs: [kind === 'alert' ? `Rule ${ref}` : `Check ${ref} indicators`],
-        uncertainty:
-          kind === 'alert'
-            ? 'Only collected events were considered. Periods with telemetry gaps are unknown.'
-            : (item as Finding).limits,
-        nextSteps: ['Review the supporting evidence on this screen before acting.'],
-      };
+
+    try {
+      const endpoint =
+        kind === 'alert'
+          ? `/api/alerts/${encodeURIComponent(id)}/analyze`
+          : `/api/findings/${encodeURIComponent(id)}/analyze`;
+      const res = await requestBackend<{
+        target_id: string;
+        state: 'ready' | 'failed';
+        role: 'RM Analysis Agent' | 'SC Analysis Agent';
+        generated_at?: string;
+        summary?: string;
+        evidence_refs?: string[];
+        uncertainty?: string;
+        next_steps?: string[];
+        error?: string;
+      }>(endpoint, { method: 'POST' });
+
+      liveAiCache.set(id, {
+        state: res.state,
+        role: res.role,
+        generatedAt: res.generated_at,
+        summary: res.summary,
+        evidenceRefs: res.evidence_refs,
+        uncertainty: res.uncertainty,
+        nextSteps: res.next_steps,
+        error: res.error,
+      });
+    } catch (e: unknown) {
+      liveAiCache.set(id, {
+        state: 'failed',
+        role,
+        error: e instanceof Error ? e.message : 'AI analysis request failed.',
+      });
     }
     bump();
+  },
+
+  async verifyRecovery(alertId: string): Promise<RecoveryVerification> {
+    if (previewState === 'sample') {
+      await wait(600);
+      const alert = db.alerts.find((a) => a.id === alertId);
+      const host = db.hosts.find((h) => h.id === alert?.hostId);
+      const isOnline = host?.agentStatus === 'online';
+      const result: RecoveryVerification = {
+        alertId,
+        hostId: alert?.hostId || 'host-01',
+        outcome: isOnline ? 'resolved' : 'unverified',
+        verifiedAt: new Date().toISOString(),
+        observationWindowMin: 15,
+        summary: isOnline
+          ? `Recovery VERIFIED: Host '${host?.hostname}' is online with continuous telemetry and rule '${alert?.ruleId}' has not re-triggered.`
+          : `Recovery UNVERIFIED: Host agent is '${host?.agentStatus}'. Missing telemetry is never interpreted as proof of recovery.`,
+        checks: [
+          {
+            id: 'chk-1',
+            label: 'Agent Heartbeat & Liveness',
+            status: isOnline ? 'pass' : 'fail',
+            detail: isOnline ? 'Agent online and actively streaming events.' : 'Agent is delayed or offline.',
+          },
+          {
+            id: 'chk-2',
+            label: 'Telemetry Stream Continuity',
+            status: isOnline ? 'pass' : 'fail',
+            detail: isOnline ? 'Zero open telemetry gaps.' : 'Visibility gap open on host.',
+          },
+          {
+            id: 'chk-3',
+            label: `Triggering Rule Re-evaluation (${alert?.ruleId})`,
+            status: 'pass',
+            detail: 'Zero subsequent matches in post-remediation window.',
+          },
+        ],
+      };
+      liveVerificationCache.set(alertId, result);
+      bump();
+      return result;
+    }
+
+    const raw = await requestBackend<{
+      alert_id: string;
+      host_id: string;
+      outcome: 'resolved' | 'still_active' | 'reopened' | 'unverified';
+      verified_at: string;
+      observation_window_min: number;
+      summary: string;
+      checks: Array<{ id: string; label: string; status: 'pass' | 'fail' | 'warn'; detail: string }>;
+    }>(`/api/alerts/${encodeURIComponent(alertId)}/verify`, { method: 'POST' });
+
+    const mapped: RecoveryVerification = {
+      alertId: raw.alert_id,
+      hostId: raw.host_id,
+      outcome: raw.outcome,
+      verifiedAt: raw.verified_at,
+      observationWindowMin: raw.observation_window_min,
+      summary: raw.summary,
+      checks: raw.checks,
+    };
+    liveVerificationCache.set(alertId, mapped);
+    bump();
+    return mapped;
   },
 
   async updateInvestigation(input: {
@@ -559,31 +1126,59 @@ export const actions = {
     note?: string;
     author?: string;
   }) {
-    await wait(300);
-    const alert = db.alerts.find((a) => a.id === input.alertId);
-    if (!alert) return;
-    const prevStatus = alert.investigationStatus;
-    alert.investigationStatus = input.status;
-    if (!alert.investigationNotes) alert.investigationNotes = [];
-    if (input.note && input.note.trim()) {
-      alert.investigationNotes.unshift({
-        id: `note-${Date.now()}`,
-        author: input.author || 'ops-admin',
+    if (previewState === 'sample') {
+      await wait(300);
+      const alert = db.alerts.find((a) => a.id === input.alertId);
+      if (!alert) return;
+      const prevStatus = alert.investigationStatus;
+      alert.investigationStatus = input.status;
+      if (!alert.investigationNotes) alert.investigationNotes = [];
+      if (input.note && input.note.trim()) {
+        alert.investigationNotes.unshift({
+          id: `note-${Date.now()}`,
+          author: input.author || 'ops-admin',
+          ts: new Date().toISOString(),
+          note: input.note.trim(),
+          statusTransition: input.status,
+        });
+      }
+
+      db.auditLogs.unshift({
+        id: `aud-${Date.now()}`,
         ts: new Date().toISOString(),
-        note: input.note.trim(),
-        statusTransition: input.status,
+        actor: input.author || 'ops-admin',
+        action: 'update_investigation',
+        targetType: 'alert',
+        targetId: alert.id,
+        summary: `Updated alert ${alert.id} status: ${prevStatus} → ${input.status}`,
+        details: { previousStatus: prevStatus, newStatus: input.status, note: input.note },
       });
+      bump();
+      return;
     }
 
-    db.auditLogs.unshift({
-      id: `aud-${Date.now()}`,
-      ts: new Date().toISOString(),
-      actor: input.author || 'ops-admin',
-      action: 'update_investigation',
-      targetType: 'alert',
-      targetId: alert.id,
-      summary: `Updated alert ${alert.id} status: ${prevStatus} → ${input.status}`,
-      details: { previousStatus: prevStatus, newStatus: input.status, note: input.note },
+    const res = await requestBackend<{
+      alert_id: string;
+      status: InvestigationStatus;
+      notes: Array<{ id: string; author: string; ts: string; note: string; status_transition?: InvestigationStatus }>;
+    }>(`/api/alerts/${encodeURIComponent(input.alertId)}/investigation`, {
+      method: 'POST',
+      body: JSON.stringify({
+        status: input.status,
+        note: input.note,
+        author: input.author || 'ops-admin',
+      }),
+    });
+
+    liveInvestigationCache.set(input.alertId, {
+      status: res.status,
+      notes: res.notes.map((n) => ({
+        id: n.id,
+        author: n.author,
+        ts: n.ts,
+        note: n.note,
+        statusTransition: n.status_transition,
+      })),
     });
     bump();
   },
@@ -595,7 +1190,51 @@ export const actions = {
     dataTypes: string[];
     linkedAlertId?: string;
   }) {
-    await wait(500);
+    if (previewState !== 'sample') {
+      try {
+        const raw = await requestBackend<{
+          id: string;
+          host_id: string;
+          status: 'active' | 'expired' | 'stopped';
+          started_at: string;
+          expires_at: string;
+          ended_at?: string | null;
+          started_by: string;
+          reason: string;
+          data_types: string[];
+          item_count: number;
+          linked_alert_id?: string | null;
+        }>('/api/evidence', {
+          method: 'POST',
+          body: JSON.stringify({
+            host_id: input.hostId,
+            reason: input.reason,
+            duration_min: input.durationMin,
+            data_types: input.dataTypes,
+            linked_alert_id: input.linkedAlertId,
+            actor: 'ops-admin',
+          }),
+        });
+        bump();
+        return {
+          id: raw.id,
+          hostId: raw.host_id,
+          status: raw.status,
+          startedAt: raw.started_at,
+          expiresAt: raw.expires_at,
+          endedAt: raw.ended_at ?? null,
+          startedBy: raw.started_by,
+          reason: raw.reason,
+          dataTypes: raw.data_types,
+          itemCount: raw.item_count,
+          linkedAlertId: raw.linked_alert_id ?? undefined,
+        };
+      } catch {
+        // Fallback to local store if offline
+      }
+    }
+
+    await wait(400);
     const now = Date.now();
     const session: EvidenceSession = {
       id: `ev-${String(db.evidence.length + 5).padStart(2, '0')}`,
@@ -633,7 +1272,16 @@ export const actions = {
   },
 
   async stopEvidence(id: string) {
-    await wait(400);
+    if (previewState !== 'sample') {
+      try {
+        await requestBackend(`/api/evidence/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+        bump();
+        return;
+      } catch {
+        // Fallback to local store
+      }
+    }
+    await wait(300);
     const s = db.evidence.find((e) => e.id === id);
     if (s && s.status === 'active') {
       s.status = 'stopped';
@@ -666,8 +1314,57 @@ export const actions = {
   },
 
   async requestReport(input: { type: ReportType; hostIds: string[]; periodStart: string; periodEnd: string }) {
+    if (previewState !== 'sample') {
+      try {
+        const raw = await requestBackend<{
+          id: string;
+          type: ReportType;
+          title: string;
+          host_ids: string[];
+          period_start: string;
+          period_end: string;
+          status: 'pending' | 'completed' | 'failed';
+          requested_at: string;
+          completed_at?: string | null;
+          pages?: number | null;
+          size_kb?: number | null;
+          alert_count?: number | null;
+          finding_count?: number | null;
+          gap_count?: number | null;
+        }>('/api/reports', {
+          method: 'POST',
+          body: JSON.stringify({
+            type: input.type,
+            host_ids: input.hostIds,
+            period_start: input.periodStart,
+            period_end: input.periodEnd,
+            actor: 'ops-admin',
+          }),
+        });
+        bump();
+        return {
+          id: raw.id,
+          type: raw.type,
+          title: raw.title,
+          hostIds: raw.host_ids,
+          periodStart: raw.period_start,
+          periodEnd: raw.period_end,
+          status: raw.status,
+          requestedAt: raw.requested_at,
+          completedAt: raw.completed_at ?? undefined,
+          pages: raw.pages ?? undefined,
+          sizeKb: raw.size_kb ?? undefined,
+          alertCount: raw.alert_count ?? undefined,
+          findingCount: raw.finding_count ?? undefined,
+          gapCount: raw.gap_count ?? undefined,
+        };
+      } catch {
+        // Fallback to local store
+      }
+    }
+
     await wait(400);
-    const names = input.hostIds.map((id) => db.hosts.find((h) => h.id === id)?.hostname ?? id);
+    const names = input.hostIds.map((id) => hostName(id));
     const report: Report = {
       id: `r-${String(312 + db.reports.length - 4).padStart(4, '0')}`,
       type: input.type,

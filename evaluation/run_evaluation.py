@@ -12,7 +12,7 @@ from evaluation.metrics import EvaluationMetrics
 from aegis_agent.providers import MockLLMProvider
 
 
-def run_evaluation_suite(output_report_path: str = "evaluation_report.json"):
+def run_evaluation_suite(output_report_path: str = "outputs/evaluation_report.json"):
     base_dir = Path(__file__).parent / "datasets"
 
     harness = EvaluationHarness(provider=MockLLMProvider())
@@ -77,7 +77,9 @@ def run_evaluation_suite(output_report_path: str = "evaluation_report.json"):
         "detailed_results": [r.model_dump() for r in results],
     }
 
-    with open(output_report_path, "w", encoding="utf-8") as f:
+    out_path = Path(output_report_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(report_payload, f, indent=2)
 
     print("=" * 60)

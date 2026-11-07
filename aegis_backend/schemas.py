@@ -173,3 +173,207 @@ class ErrorResponse(BaseModel):
     message: str
     code: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
+
+
+# ==========================================
+# 6. AI ANALYSIS, HANDOFF & RECOVERY VERIFICATION SCHEMAS
+# ==========================================
+
+class AiAnalysisResponse(BaseModel):
+    target_id: str
+    target_kind: str  # "alert" | "finding"
+    state: str  # "not_requested" | "pending" | "ready" | "failed"
+    role: str
+    generated_at: Optional[str] = None
+    summary: Optional[str] = None
+    evidence_refs: List[str] = Field(default_factory=list)
+    uncertainty: Optional[str] = None
+    next_steps: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
+class HandoffDocumentResponse(BaseModel):
+    alert_id: str
+    host_id: str
+    hostname: str
+    title: str
+    severity: str
+    rule_id: str
+    generated_at: str
+    filename: str
+    markdown: str
+    confirmed_facts: List[str]
+    unverified_hypotheses: List[str]
+    missing_telemetry: List[str]
+    investigation_steps: List[str]
+    remediation_plan: List[str]
+    service_impact: str
+    rollback_instructions: List[str]
+    verification_instructions: List[str]
+
+
+class VerificationCheckItem(BaseModel):
+    id: str
+    label: str
+    status: str  # "pass" | "fail" | "warn"
+    detail: str
+
+
+class RecoveryVerificationResponse(BaseModel):
+    alert_id: str
+    host_id: str
+    outcome: str  # "resolved" | "still_active" | "reopened" | "unverified"
+    verified_at: str
+    observation_window_min: int = 15
+    summary: str
+    checks: List[VerificationCheckItem]
+
+
+class InvestigationNoteItem(BaseModel):
+    id: str
+    author: str
+    ts: str
+    note: str
+    status_transition: Optional[str] = None
+
+
+class InvestigationUpdateRequest(BaseModel):
+    status: str = Field(
+        ...,
+        pattern="^(new|detected|investigating|handoff_ready|remediation_in_progress|verification|resolved|reopened|unverified|false_positive)$",
+    )
+    note: Optional[str] = Field(default=None, max_length=2000)
+    author: str = Field(default="ops-admin", min_length=1, max_length=100)
+
+
+class InvestigationStateResponse(BaseModel):
+    alert_id: str
+    status: str
+    notes: List[InvestigationNoteItem] = Field(default_factory=list)
+    updated_at: str
+
+
+class ReplayStepItem(BaseModel):
+    step: int
+    ts: str
+    phase: str  # "reconnaissance" | "trigger" | "detection" | "investigation" | "verification"
+    title: str
+    detail: str
+    source: str
+    actor_or_ip: Optional[str] = None
+    event_id: Optional[str] = None
+
+
+class IncidentReplayResponse(BaseModel):
+    alert_id: str
+    host_id: str
+    hostname: str
+    rule_id: str
+    severity: str
+    incident_status: str
+    steps: List[ReplayStepItem]
+    telemetry_limitations: List[str]
+
+
+# ==========================================
+# 7. OPERATIONAL DASHBOARD SCHEMAS
+# ==========================================
+
+class FindingItem(BaseModel):
+    id: str
+    host_id: str
+    check_id: str
+    title: str
+    status: str  # "fail" | "pass" | "not_checked"
+    severity: str
+    checked_at: str
+    indicators: List[str] = Field(default_factory=list)
+    limits: str
+    ai_state: str = "not_requested"
+    ai_role: str = "SC Analysis Agent"
+    ai_generated_at: Optional[str] = None
+    ai_summary: Optional[str] = None
+    ai_evidence_refs: List[str] = Field(default_factory=list)
+    ai_uncertainty: Optional[str] = None
+    ai_next_steps: List[str] = Field(default_factory=list)
+
+
+class TelemetryGapItem(BaseModel):
+    id: str
+    host_id: str
+    source: str
+    start: str
+    end: Optional[str] = None
+    reason: str
+
+
+class EvidenceSessionItem(BaseModel):
+    id: str
+    host_id: str
+    status: str  # "active" | "expired" | "stopped"
+    started_at: str
+    expires_at: str
+    ended_at: Optional[str] = None
+    started_by: str
+    reason: str
+    data_types: List[str]
+    item_count: int = 0
+    linked_alert_id: Optional[str] = None
+
+
+class StartEvidenceRequest(BaseModel):
+    host_id: str = Field(..., min_length=2, max_length=64)
+    reason: str = Field(..., min_length=3, max_length=1000)
+    duration_min: int = Field(..., ge=5, le=120)
+    data_types: List[str] = Field(..., min_length=1)
+    linked_alert_id: Optional[str] = None
+    actor: str = Field(default="ops-admin", max_length=100)
+
+
+class AuditLogItem(BaseModel):
+    id: str
+    ts: str
+    actor: str
+    action: str
+    target_type: str
+    target_id: str
+    summary: str
+    details: Optional[Dict[str, Any]] = None
+
+
+class PipelineSourceHealthItem(BaseModel):
+    source: str
+    label: str
+    active_hosts: int
+    total_hosts: int
+    last_received_at: Optional[str] = None
+    events_per_min: float = 0.0
+    has_gap: bool = False
+    status: str  # "healthy" | "delayed" | "gap"
+
+
+class CreateReportRequest(BaseModel):
+    type: str = Field(..., pattern="^(daily|incident)$")
+    host_ids: List[str] = Field(..., min_length=1)
+    period_start: str
+    period_end: str
+    actor: str = Field(default="ops-admin", max_length=100)
+
+
+class ReportItem(BaseModel):
+    id: str
+    type: str
+    title: str
+    host_ids: List[str]
+    period_start: str
+    period_end: str
+    status: str  # "pending" | "completed" | "failed"
+    requested_at: str
+    completed_at: Optional[str] = None
+    pages: Optional[int] = None
+    size_kb: Optional[int] = None
+    alert_count: Optional[int] = None
+    finding_count: Optional[int] = None
+    gap_count: Optional[int] = None
+    error: Optional[str] = None
+

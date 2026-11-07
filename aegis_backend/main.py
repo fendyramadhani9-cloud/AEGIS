@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 from aegis_backend.config import settings
 from aegis_backend.schemas import ErrorResponse
-from aegis_backend.routers import health, system, hosts, alerts, telemetry
+from aegis_backend.routers import health, system, hosts, alerts, telemetry, operations
 
 # Setup logging
 logging.basicConfig(
@@ -28,19 +28,28 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS Middleware (Allows frontend development on Vite default ports)
+# CORS Middleware (Configurable via AEGIS_CORS_ORIGINS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Attaches defensive HTTP security headers to all backend responses."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
+
 
 # Global Safe Exception Handler
 @app.exception_handler(Exception)
@@ -63,6 +72,7 @@ app.include_router(system.router)
 app.include_router(hosts.router)
 app.include_router(alerts.router)
 app.include_router(telemetry.router)
+app.include_router(operations.router)
 
 
 @app.get("/", include_in_schema=False)

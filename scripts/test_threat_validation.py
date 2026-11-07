@@ -9,11 +9,14 @@ import time
 import json
 import requests
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv("/home/ubuntu/aegis/.env")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT_DIR / ".env")
+sys.path.insert(0, str(ROOT_DIR))
 
-BASE_URL = "http://127.0.0.1/api"
+BASE_URL = os.getenv("AEGIS_API_BASE_URL", "http://127.0.0.1:8000/api")
 TOKEN = os.getenv("AGENT_INGEST_TOKEN", "aegis-agent-dev-secret-token")
 HOST_ID = os.getenv("AEGIS_HOST_ID", "host-fenn-ubuntu")
 HOSTNAME = "fenn"
@@ -240,5 +243,7 @@ if __name__ == "__main__":
     print(f"OVERALL THREAT DETECTION STATUS: {'ALL PASS (100%)' if all_pass else 'FAILURES DETECTED'}")
     print("=" * 65)
     
-    with open("/home/ubuntu/aegis/threat_detection_report.json", "w") as f:
+    out_dir = ROOT_DIR / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(out_dir / "threat_detection_report.json", "w") as f:
         json.dump(report, f, indent=2)

@@ -404,3 +404,86 @@ def test_no_secret_leakage_across_all_endpoints():
         if settings.llm_api_key:
             assert settings.llm_api_key not in body
 
+
+def test_security_headers_attached_to_responses():
+    """Verifies that defensive OWASP security headers and no-store cache control are present."""
+    res = client.get("/api/health")
+    assert res.status_code == 200
+    assert res.headers.get("X-Content-Type-Options") == "nosniff"
+    assert res.headers.get("X-Frame-Options") == "DENY"
+    assert res.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+    assert "no-store" in res.headers.get("Cache-Control", "")
+
+
+def test_handoff_generation_and_epistemic_separation():
+    """Verifies AI Investigation & Remediation Handoff Markdown generation (PRD §4)."""
+    res = client.get("/api/alerts/ALT-001/handoff")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["alert_id"] == "ALT-001"
+    assert data["filename"] == "AEGIS-Handoff-ALT-001.md"
+    assert "# AEGIS AI Investigation & Remediation Handoff Prompt" in data["markdown"]
+    assert "Confirmed Facts" in data["markdown"]
+    assert "Unverified Hypotheses" in data["markdown"]
+    assert len(data["confirmed_facts"]) >= 3
+    assert len(data["unverified_hypotheses"]) >= 1
+    assert len(data["investigation_steps"]) >= 1
+    assert len(data["remediation_plan"]) >= 1
+    assert len(data["rollback_instructions"]) >= 1
+
+
+def test_automatic_recovery_verification_and_offline_honesty():
+    """Verifies Automatic Recovery Verification (PRD §5) and ensures offline hosts return 'unverified'."""
+    # 1. Verify online host alert (with 1m observation window)
+    res_online = client.post("/api/alerts/ALT-001/verify?window_min=0")
+    assert res_online.status_code == 200
+    data_on = res_online.json()
+    assert data_on["alert_id"] == "ALT-001"
+    assert data_on["outcome"] in ("resolved", "unverified", "still_active")
+    assert len(data_on["checks"]) >= 3
+
+    # 2. Verify offline host alert -> MUST be 'unverified', never 'resolved'
+    repo = MockAegisRepository()
+    repo.alerts.append({
+        "id": "ALT-OFFLINE-01",
+        "host_id": "srv-db-01",  # offline host in MockAegisRepository
+        "rule_id": "RULE-SSH-BRUTE",
+        "rule_version": "1.0",
+        "title": "SSH Brute Force",
+        "severity": "high",
+        "detected_at": "2026-11-01T10:00:00+00:00",
+        "reason": "Repeated SSH failures",
+    })
+    set_repository(repo)
+    res_off = client.post("/api/alerts/ALT-OFFLINE-01/verify?window_min=1")
+    assert res_off.status_code == 200
+    assert res_off.json()["outcome"] == "unverified"
+
+
+def test_incident_replay_and_investigation_workflow():
+    """Verifies chronological incident replay and manual operator investigation workflow."""
+    # Update investigation status & add note
+    inv_res = client.post(
+        "/api/alerts/ALT-001/investigation",
+        json={"status": "investigating", "note": "Checking sshd logs on srv-prod-auth", "author": "sec-ops"},
+    )
+    assert inv_res.status_code == 200
+    inv_data = inv_res.json()
+    assert inv_data["status"] == "investigating"
+    assert len(inv_data["notes"]) >= 1
+    assert inv_data["notes"][0]["author"] == "sec-ops"
+
+    # Fetch incident replay
+    rep_res = client.get("/api/alerts/ALT-001/replay")
+    assert rep_res.status_code == 200
+    rep_data = rep_res.json()
+    assert rep_data["alert_id"] == "ALT-001"
+    assert any(s["phase"] == "detection" for s in rep_data["steps"])
+    assert any(s["phase"] == "investigation" for s in rep_data["steps"])
+
+    # Check operator audit log recorded the actions
+    aud_res = client.get("/api/audit-logs")
+    assert aud_res.status_code == 200
+    assert len(aud_res.json()) >= 1
+
+

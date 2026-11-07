@@ -3,7 +3,7 @@ from evaluation.run_evaluation import run_evaluation_suite
 
 
 def test_ai_evaluation_harness_suite():
-    report = run_evaluation_suite(output_report_path="test_eval_report.json")
+    report = run_evaluation_suite(output_report_path="outputs/test_eval_report.json")
 
     metrics = report["metrics"]
     assert metrics["total_scenarios_evaluated"] >= 7
