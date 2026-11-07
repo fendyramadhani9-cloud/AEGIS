@@ -27,7 +27,7 @@ export function AiPanel({
         <div>
           <h2 className="ai__title">AI explanation</h2>
           <p className="ai__role">
-            {ai.role}
+            {ai.role} · Key {ai.keySlot ?? (ai.role === 'RM Analysis Agent' ? 'AEGIS1' : ai.role === 'SC Analysis Agent' ? 'AEGIS2' : 'AEGIS3')}
             {ai.state === 'ready' && ai.generatedAt && <> · {when(ai.generatedAt)}</>}
           </p>
         </div>

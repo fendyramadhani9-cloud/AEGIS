@@ -25,7 +25,9 @@ import {
 import type {
   AgentStatus,
   AiAnalysis,
+  AiRoleKeyStatus,
   Alert,
+  AlertContext,
   Confidence,
   EvidenceSession,
   Finding,
@@ -42,6 +44,7 @@ import type {
   Report,
   ReportType,
   Severity,
+  SignedEvidenceBundle,
   SourceId,
   SystemStatus,
   TelemetryGap,
@@ -759,6 +762,8 @@ export const api = {
           alert_count?: number | null;
           finding_count?: number | null;
           gap_count?: number | null;
+          ai_executive_summary?: string | null;
+          ai_key_slot?: string | null;
           error?: string | null;
         }>
       >('/api/reports');
@@ -777,10 +782,237 @@ export const api = {
         alertCount: r.alert_count ?? undefined,
         findingCount: r.finding_count ?? undefined,
         gapCount: r.gap_count ?? undefined,
+        aiExecutiveSummary: r.ai_executive_summary ?? undefined,
+        aiKeySlot: r.ai_key_slot ?? 'AEGIS3',
         error: r.error ?? undefined,
       }));
     } catch {
       return [];
+    }
+  },
+
+  downloadReportPdfUrl: (reportId: string): string => {
+    return `${API_BASE_URL}/api/reports/${encodeURIComponent(reportId)}/pdf`;
+  },
+
+  aiRoles: async (): Promise<AiRoleKeyStatus[]> => {
+    const fallbackRoles: AiRoleKeyStatus[] = [
+      {
+        roleId: 'rm_agent',
+        roleName: 'RM Analysis Agent',
+        keySlot: 'AEGIS1',
+        keyMasked: 'AQ.A...bwg',
+        configured: true,
+        model: 'gemini-3.5-flash-lite',
+        purpose: 'Runtime Monitor Alert Investigation, Event Correlation & Handoff Synthesis',
+        failoverSlots: ['AEGIS2', 'AEGIS3'],
+      },
+      {
+        roleId: 'sc_agent',
+        roleName: 'SC Analysis Agent',
+        keySlot: 'AEGIS2',
+        keyMasked: 'AQ.A...27Q',
+        configured: true,
+        model: 'gemini-3.5-flash-lite',
+        purpose: 'Read-Only Security Checker Posture Evaluation & Hardening Guidance',
+        failoverSlots: ['AEGIS1', 'AEGIS3'],
+      },
+      {
+        roleId: 'reporting_agent',
+        roleName: 'Reporting Agent (Daily & Incident)',
+        keySlot: 'AEGIS3',
+        keyMasked: 'AQ.A...LGg',
+        configured: true,
+        model: 'gemini-3.5-flash-lite',
+        purpose: 'Dedicated Daily Security Briefing & Incident Forensic Report Generation',
+        failoverSlots: ['AEGIS2', 'AEGIS1'],
+      },
+    ];
+    if (previewState === 'sample') return fallbackRoles;
+    try {
+      const raw = await requestBackend<
+        Array<{
+          role_id: string;
+          role_name: string;
+          key_slot: string;
+          key_masked: string;
+          configured: boolean;
+          model: string;
+          purpose: string;
+          failover_slots: string[];
+        }>
+      >('/api/system/ai-roles');
+      return raw.map((r) => ({
+        roleId: r.role_id,
+        roleName: r.role_name,
+        keySlot: r.key_slot,
+        keyMasked: r.key_masked,
+        configured: r.configured,
+        model: r.model,
+        purpose: r.purpose,
+        failoverSlots: r.failover_slots,
+      }));
+    } catch {
+      return fallbackRoles;
+    }
+  },
+
+  alertContext: async (alertId: string): Promise<AlertContext | null> => {
+    if (previewState === 'sample') {
+      const alert = db.alerts.find((a) => a.id === alertId) || db.alerts[0];
+      return {
+        alertId: alert.id,
+        hostId: alert.hostId,
+        killChain: [
+          {
+            stage: 'Reconnaissance',
+            mitreTactic: 'TA0043 / TA0007',
+            status: 'not_observed',
+            alertIds: [],
+            summary: 'No firewall port scan or web probe alerts prior to credential attack.',
+          },
+          {
+            stage: 'Credential Access',
+            mitreTactic: 'TA0006 · Brute Force',
+            status: alert.ruleId.includes('BRUTE') ? 'current_trigger' : 'observed',
+            alertIds: [alert.id],
+            summary: `${alert.title} (${alert.ruleId})`,
+            timestamp: alert.detectedAt,
+          },
+          {
+            stage: 'Initial Access',
+            mitreTactic: 'TA0001 · Valid Accounts',
+            status: alert.ruleId.includes('AUTH') ? 'current_trigger' : 'not_observed',
+            alertIds: alert.ruleId.includes('AUTH') ? [alert.id] : [],
+            summary: alert.ruleId.includes('AUTH') ? alert.title : 'No subsequent session login recorded.',
+          },
+          {
+            stage: 'Privilege Escalation',
+            mitreTactic: 'TA0004 · Sudo / Exploit',
+            status: alert.ruleId.includes('SUDO') ? 'current_trigger' : 'not_observed',
+            alertIds: alert.ruleId.includes('SUDO') ? [alert.id] : [],
+            summary: alert.ruleId.includes('SUDO') ? alert.title : 'No anomalous sudo execution observed.',
+          },
+          {
+            stage: 'Persistence',
+            mitreTactic: 'TA0003 · Backdoor / Cron / Keys',
+            status: 'not_observed',
+            alertIds: [],
+            summary: 'No rogue useradd, cron persistence, or authorized_keys tampering observed.',
+          },
+          {
+            stage: 'Defense Evasion',
+            mitreTactic: 'TA0005 · Impair Defenses',
+            status: 'not_observed',
+            alertIds: [],
+            summary: 'All security daemons (ufw, auditd, ssh) remain active.',
+          },
+        ],
+        blastRadius: {
+          sourceIps: ['198.51.100.24'],
+          targetUsers: ['ubuntu', 'root'],
+          affectedFiles: ['/etc/ssh/sshd_config', '/var/www/html'],
+          executedCommands: [],
+          targetHost: alert.hostId,
+          relatedAlertIds: [],
+          impactScope: `Contained single-stage trigger (${alert.ruleId}) on host '${alert.hostId}'`,
+        },
+      };
+    }
+    try {
+      const raw = await requestBackend<{
+        alert_id: string;
+        host_id: string;
+        kill_chain: Array<{
+          stage: string;
+          mitre_tactic: string;
+          status: 'observed' | 'current_trigger' | 'not_observed';
+          alert_ids: string[];
+          summary: string;
+          timestamp?: string | null;
+        }>;
+        blast_radius: {
+          source_ips: string[];
+          target_users: string[];
+          affected_files: string[];
+          executed_commands: string[];
+          target_host: string;
+          related_alert_ids: string[];
+          impact_scope: string;
+        };
+      }>(`/api/alerts/${encodeURIComponent(alertId)}/context`);
+      return {
+        alertId: raw.alert_id,
+        hostId: raw.host_id,
+        killChain: raw.kill_chain.map((k) => ({
+          stage: k.stage,
+          mitreTactic: k.mitre_tactic,
+          status: k.status,
+          alertIds: k.alert_ids,
+          summary: k.summary,
+          timestamp: k.timestamp,
+        })),
+        blastRadius: {
+          sourceIps: raw.blast_radius.source_ips,
+          targetUsers: raw.blast_radius.target_users,
+          affectedFiles: raw.blast_radius.affected_files,
+          executedCommands: raw.blast_radius.executed_commands,
+          targetHost: raw.blast_radius.target_host,
+          relatedAlertIds: raw.blast_radius.related_alert_ids,
+          impactScope: raw.blast_radius.impact_scope,
+        },
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  evidenceBundle: async (alertId: string): Promise<SignedEvidenceBundle | null> => {
+    try {
+      const raw = await requestBackend<{
+        bundle_id: string;
+        alert_id: string;
+        host_id: string;
+        rule_id: string;
+        severity: string;
+        exported_at: string;
+        hash_algorithm: string;
+        manifest_sha256: string;
+        events: Array<{
+          event_id: string;
+          event_timestamp?: string | null;
+          source_id?: string | null;
+          event_type?: string | null;
+          citation_role: string;
+          source_ip?: string | null;
+          user_name?: string | null;
+          message: string;
+          sha256_hash: string;
+        }>;
+      }>(`/api/alerts/${encodeURIComponent(alertId)}/evidence-bundle`);
+      return {
+        bundleId: raw.bundle_id,
+        alertId: raw.alert_id,
+        hostId: raw.host_id,
+        ruleId: raw.rule_id,
+        severity: raw.severity,
+        exportedAt: raw.exported_at,
+        hashAlgorithm: raw.hash_algorithm,
+        manifestSha256: raw.manifest_sha256,
+        events: raw.events.map((e) => ({
+          eventId: e.event_id,
+          eventTimestamp: e.event_timestamp,
+          sourceId: e.source_id,
+          eventType: e.event_type,
+          citationRole: e.citation_role,
+          sourceIp: e.source_ip,
+          userName: e.user_name,
+          message: e.message,
+          sha256Hash: e.sha256_hash,
+        })),
+      };
+    } catch {
+      return null;
     }
   },
 
@@ -1027,6 +1259,7 @@ export const actions = {
         target_id: string;
         state: 'ready' | 'failed';
         role: 'RM Analysis Agent' | 'SC Analysis Agent';
+        key_slot?: string;
         generated_at?: string;
         summary?: string;
         evidence_refs?: string[];
@@ -1038,6 +1271,7 @@ export const actions = {
       liveAiCache.set(id, {
         state: res.state,
         role: res.role,
+        keySlot: res.key_slot ?? (kind === 'alert' ? 'AEGIS1' : 'AEGIS2'),
         generatedAt: res.generated_at,
         summary: res.summary,
         evidenceRefs: res.evidence_refs,
@@ -1104,6 +1338,12 @@ export const actions = {
       observation_window_min: number;
       summary: string;
       checks: Array<{ id: string; label: string; status: 'pass' | 'fail' | 'warn'; detail: string }>;
+      remediation_diff?: Array<{
+        target_resource: string;
+        before_state: string;
+        after_state: string;
+        status: 'verified_fixed' | 'unchanged_active' | 'pending_verification';
+      }>;
     }>(`/api/alerts/${encodeURIComponent(alertId)}/verify`, { method: 'POST' });
 
     const mapped: RecoveryVerification = {
@@ -1114,6 +1354,12 @@ export const actions = {
       observationWindowMin: raw.observation_window_min,
       summary: raw.summary,
       checks: raw.checks,
+      remediationDiff: (raw.remediation_diff || []).map((d) => ({
+        targetResource: d.target_resource,
+        beforeState: d.before_state,
+        afterState: d.after_state,
+        status: d.status,
+      })),
     };
     liveVerificationCache.set(alertId, mapped);
     bump();

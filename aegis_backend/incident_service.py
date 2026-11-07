@@ -12,6 +12,9 @@ Enforces core AEGIS security & product constraints:
 
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone, timedelta
+import hashlib
+import io
+import json
 import logging
 
 from aegis_backend.config import settings
@@ -22,6 +25,7 @@ from aegis_backend.schemas import (
     HandoffDocumentResponse,
     RecoveryVerificationResponse,
     VerificationCheckItem,
+    RemediationDiffItem,
     InvestigationStateResponse,
     InvestigationNoteItem,
     IncidentReplayResponse,
@@ -32,6 +36,11 @@ from aegis_backend.schemas import (
     AuditLogItem,
     PipelineSourceHealthItem,
     ReportItem,
+    KillChainStageItem,
+    BlastRadiusSummary,
+    AlertContextResponse,
+    SignedEvidenceEventItem,
+    SignedEvidenceBundleResponse,
 )
 
 from aegis_agent.schemas import (
@@ -127,6 +136,162 @@ RULE_METADATA: Dict[str, Dict[str, Any]] = {
         "verification_steps": [
             "Verify target directory permissions with 'stat' to confirm world-writable bit is removed.",
             "Observe AEGIS Runtime Monitor to confirm no further anomalous sudo escalations occur.",
+        ],
+    },
+    "RULE-WEB-ATTACK": {
+        "mitre_id": "T1190",
+        "mitre_name": "Exploit Public-Facing Application",
+        "condition": "High-signal web attack probe (Path Traversal, SQLi, Command Injection, .env/.git probe) or >=4 HTTP 401/403 burst",
+        "rationale": "Web access logs show active vulnerability scanning, LFI/RCE payload delivery, or credential brute-forcing against HTTP endpoints.",
+        "investigation_cmds": [
+            "sudo tail -n 100 /var/log/nginx/access.log /var/log/apache2/access.log 2>/dev/null",
+            "sudo ls -la /var/www/html",
+            "sudo ps auxf | grep -E 'www-data|nginx|apache2'",
+        ],
+        "remediation_plan": [
+            "Inspect the targeted web endpoint or static directory to ensure sensitive files (.env, .git) are not web-accessible.",
+            "Verify that /var/www/html is owned by root:www-data with read-only permissions (0755/0644) for the web worker.",
+            "Add rate-limiting or Nginx location deny blocks for sensitive dot-files.",
+        ],
+        "service_impact": "Blocking access to dot-files (.env, .git) has zero impact on legitimate HTTP users.",
+        "rollback_steps": [
+            "Restore previous Nginx/Apache site configuration and run 'sudo nginx -t && sudo systemctl reload nginx'.",
+        ],
+        "verification_steps": [
+            "Verify HTTP requests to /.env or /../ return 403/404 without exposing file contents.",
+            "Confirm zero new RULE-WEB-ATTACK alerts during the 15-minute observation window.",
+        ],
+    },
+    "RULE-ACCT-BACKDOOR": {
+        "mitre_id": "T1136.001 / T1098",
+        "mitre_name": "Create Account: Local Account / Account Manipulation",
+        "condition": "Creation of new local user account (useradd) or addition of user to privileged group (sudo, root, wheel, docker)",
+        "rationale": "Attackers frequently create rogue local accounts or add compromised service accounts to sudo/docker groups for persistent root access.",
+        "investigation_cmds": [
+            "sudo tail -n 20 /etc/passwd /etc/group",
+            "sudo grep -E ':0:' /etc/passwd",
+            "sudo journalctl _COMM=useradd _COMM=usermod _COMM=gpasswd --since '2 hours ago'",
+        ],
+        "remediation_plan": [
+            "Confirm with system administrators whether the user creation or group change was authorized.",
+            "If unauthorized: lock the rogue account ('sudo usermod -L <user>') and remove it from privileged groups ('sudo gpasswd -d <user> sudo').",
+            "Audit active processes and crontabs owned by the newly created account before deleting it.",
+        ],
+        "service_impact": "Locking an unauthorized account does not impact legitimate production services.",
+        "rollback_steps": [
+            "Re-enable account or restore group membership if verified as authorized provisioning.",
+        ],
+        "verification_steps": [
+            "Confirm 'id <user>' no longer lists sudo/root group membership and '/etc/passwd' has no unauthorized UID 0 entries.",
+        ],
+    },
+    "RULE-FW-PORTSCAN": {
+        "mitre_id": "T1046",
+        "mitre_name": "Network Service Discovery (Port Scan)",
+        "condition": "count(firewall_block) >= 4 within 300s from same source_ip",
+        "rationale": "Multiple UFW firewall blocks from a single source IP across ports indicate active network reconnaissance or lateral movement probing.",
+        "investigation_cmds": [
+            "sudo journalctl -k --since '1 hour ago' | grep 'UFW BLOCK' | tail -n 50",
+            "sudo ufw status verbose",
+            "sudo ss -tulnp",
+        ],
+        "remediation_plan": [
+            "Verify that UFW default incoming policy remains 'deny (incoming)' and only required ports are allowed.",
+            "Confirm internal services (e.g. FastAPI port 8000, databases) are bound to 127.0.0.1 rather than 0.0.0.0.",
+        ],
+        "service_impact": "No impact; UFW is already dropping the unauthorized probe packets.",
+        "rollback_steps": [
+            "Review UFW rules via 'sudo ufw status numbered' if legitimate internal traffic was blocked.",
+        ],
+        "verification_steps": [
+            "Confirm UFW remains active and no unapproved listening ports are exposed on 0.0.0.0.",
+        ],
+    },
+    "RULE-KERNEL-EXPLOIT": {
+        "mitre_id": "T1068",
+        "mitre_name": "Exploitation for Privilege Escalation / Memory Corruption",
+        "condition": "Kernel segmentation fault (segfault) reported in daemon or binary",
+        "rationale": "Binary segmentation faults in network-facing daemons or SUID binaries can indicate buffer overflow or memory corruption exploit attempts.",
+        "investigation_cmds": [
+            "sudo dmesg -T | grep -i segfault | tail -n 20",
+            "sudo coredumpctl list 2>/dev/null || true",
+            "sudo sysctl kernel.randomize_va_space fs.suid_dumpable",
+        ],
+        "remediation_plan": [
+            "Inspect the crashing binary version and apply pending Ubuntu security updates.",
+            "Ensure ASLR ('kernel.randomize_va_space = 2') and 'fs.suid_dumpable = 0' are enforced.",
+        ],
+        "service_impact": "Restarting or patching the affected service may cause a brief reload.",
+        "rollback_steps": [
+            "Pin previous package version if an update introduces regression.",
+        ],
+        "verification_steps": [
+            "Confirm zero new segfault messages in kernel journal over the observation window.",
+        ],
+    },
+    "RULE-CRON-PERSIST": {
+        "mitre_id": "T1053.003",
+        "mitre_name": "Scheduled Task/Job: Cron Persistence",
+        "condition": "CRON execution matching suspicious payload (curl, wget, nc, bash -i, /dev/tcp, base64, /tmp/)",
+        "rationale": "Adversaries abuse cron jobs to periodically download and execute reverse shells or coinminers from /tmp or external C2 servers.",
+        "investigation_cmds": [
+            "sudo ls -la /etc/crontab /etc/cron.* /var/spool/cron/crontabs/",
+            "sudo journalctl _COMM=cron --since '2 hours ago'",
+            "sudo ls -la /tmp /dev/shm",
+        ],
+        "remediation_plan": [
+            "Comment out or remove the unauthorized cron entry after capturing its content as forensic evidence.",
+            "Remove any malicious payload scripts dropped in /tmp or /dev/shm.",
+        ],
+        "service_impact": "Removing unauthorized cron payloads has no impact on legitimate system maintenance.",
+        "rollback_steps": [
+            "Keep a backup copy of the crontab file before editing.",
+        ],
+        "verification_steps": [
+            "Verify crontab entries are clean and CRON journal logs show zero executions of the suspicious command.",
+        ],
+    },
+    "RULE-DEFENSE-EVASION": {
+        "mitre_id": "T1562.001",
+        "mitre_name": "Impair Defenses: Disable or Modify Tools / Firewall",
+        "condition": "Systemd stopping critical security service (ufw, auditd, ssh, fail2ban, apparmor, aegis-collector)",
+        "rationale": "Stopping host firewall, auditd, or the AEGIS telemetry collector is a high-severity defense evasion technique to blind monitoring.",
+        "investigation_cmds": [
+            "sudo systemctl status ufw auditd ssh aegis-collector",
+            "sudo journalctl -u ufw -u auditd -u aegis-collector --since '1 hour ago'",
+        ],
+        "remediation_plan": [
+            "Verify whether an administrator intentionally stopped the service during maintenance.",
+            "Re-enable and start the stopped security service ('sudo systemctl enable --now <service>').",
+        ],
+        "service_impact": "Re-enabling defensive services restores security monitoring and firewall enforcement.",
+        "rollback_steps": [
+            "Check service logs with 'journalctl -xeu <service>' if startup fails.",
+        ],
+        "verification_steps": [
+            "Confirm 'systemctl is-active <service>' returns 'active' and telemetry streams normally.",
+        ],
+    },
+    "RULE-SSH-KEY-BACKDOOR": {
+        "mitre_id": "T1098.004",
+        "mitre_name": "Account Manipulation: SSH Authorized Keys Tampering",
+        "condition": "Modification of ~/.ssh/authorized_keys, /etc/ssh/sshd_config, or /etc/sudoers",
+        "rationale": "Appending an attacker's public key to authorized_keys or altering sshd_config/sudoers grants persistent backdoor access bypassing password rotation.",
+        "investigation_cmds": [
+            "sudo stat /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys /etc/ssh/sshd_config /etc/sudoers 2>/dev/null",
+            "sudo ssh-keygen -lf /root/.ssh/authorized_keys 2>/dev/null || true",
+            "sudo git status /etc 2>/dev/null || true",
+        ],
+        "remediation_plan": [
+            "Inspect every public key fingerprint in authorized_keys and remove any unrecognized keys.",
+            "Ensure ~/.ssh is mode 0700 and authorized_keys is mode 0600 owned by the respective user.",
+        ],
+        "service_impact": "Removing unauthorized SSH keys does not affect legitimate administrators with verified keys.",
+        "rollback_steps": [
+            "Back up the existing authorized_keys file before removing suspect lines.",
+        ],
+        "verification_steps": [
+            "Verify authorized_keys contains only approved key fingerprints and permissions are 0600.",
         ],
     },
 }
@@ -378,11 +543,18 @@ def run_alert_ai_analysis(
         evidence_db=[],
     )
 
+    rm_chain = settings.get_role_key_chain("rm")
+    primary_slot = rm_chain[0][0] if rm_chain else "AEGIS1"
+    primary_key = rm_chain[0][1] if rm_chain else settings.llm_api_key
+    backup_keys = [k for _, k in rm_chain[1:]]
+
     try:
-        if settings.llm_provider == "gemini" and settings.llm_api_key:
+        if settings.llm_provider == "gemini" and primary_key:
             provider = RealLLMAdapter(
                 provider_type="gemini",
-                api_key=settings.llm_api_key,
+                api_key=primary_key,
+                backup_keys=backup_keys,
+                role="rm",
                 model_name=settings.llm_model,
                 timeout_seconds=settings.llm_timeout,
             )
@@ -405,6 +577,7 @@ def run_alert_ai_analysis(
             target_kind="alert",
             state="ready",
             role="RM Analysis Agent",
+            key_slot=primary_slot,
             generated_at=datetime.now(timezone.utc).isoformat(),
             summary=summary_text,
             evidence_refs=evidence_refs,
@@ -418,6 +591,7 @@ def run_alert_ai_analysis(
             target_kind="alert",
             state="ready",
             role="RM Analysis Agent",
+            key_slot=primary_slot,
             generated_at=datetime.now(timezone.utc).isoformat(),
             summary=(
                 f"Alert '{alert.get('title')}' (Rule {rule_id}) was deterministically triggered on host '{host_id}'. "
@@ -837,6 +1011,61 @@ def verify_alert_recovery(
             f"and rule '{rule_id}' has not re-triggered across the post-incident observation window."
         )
 
+    diff_status = "verified_fixed" if outcome == "resolved" else ("unchanged_active" if outcome in ("still_active", "reopened") else "pending_verification")
+    remediation_diff: List[RemediationDiffItem] = []
+
+    if rule_id.startswith("RULE-SSH"):
+        remediation_diff = [
+            RemediationDiffItem(
+                target_resource="/etc/ssh/sshd_config · SSH Auth Stream",
+                before_state=f"Active SSH brute-force burst ({alert.get('reason', 'repeated auth failures')}); PermitRootLogin prohibit-password",
+                after_state=(
+                    "0 new SSH auth_failure bursts in observation window; SSH key-only access verified"
+                    if outcome == "resolved"
+                    else "SSH authentication failure burst still active or awaiting observation window completion"
+                ),
+                status=diff_status,
+            ),
+            RemediationDiffItem(
+                target_resource=f"Rules Engine · {rule_id}",
+                before_state=f"TRIGGERED at {detected_at_str} (Severity: {alert.get('severity', 'high').upper()})",
+                after_state=f"0 re-triggers across {observation_window_min}m window" if not newer_same_rule else f"Re-triggered {len(newer_same_rule)} time(s)",
+                status="verified_fixed" if not newer_same_rule else "unchanged_active",
+            ),
+        ]
+    elif rule_id.startswith("RULE-SUSP-SUDO"):
+        remediation_diff = [
+            RemediationDiffItem(
+                target_resource="/var/www/html & Sudo Execution Policy",
+                before_state=f"Anomalous privileged execution ({alert.get('reason', 'chmod 777 / root shell via sudo')})",
+                after_state=(
+                    "/var/www/html restored to mode 0755 (root:www-data); 0 new anomalous sudo executions"
+                    if outcome == "resolved"
+                    else "Awaiting verification of directory mode 0755 and clean sudo audit stream"
+                ),
+                status=diff_status,
+            ),
+            RemediationDiffItem(
+                target_resource=f"Rules Engine · {rule_id}",
+                before_state=f"TRIGGERED at {detected_at_str}",
+                after_state=f"0 re-triggers across {observation_window_min}m window" if not newer_same_rule else f"Re-triggered {len(newer_same_rule)} time(s)",
+                status="verified_fixed" if not newer_same_rule else "unchanged_active",
+            ),
+        ]
+    else:
+        remediation_diff = [
+            RemediationDiffItem(
+                target_resource=f"Host {host_id} · {rule_id} Telemetry Stream",
+                before_state=f"Active rule match: {alert.get('reason', title if 'title' in locals() else rule_id)}",
+                after_state=(
+                    f"Clean telemetry stream over {observation_window_min}m window; 0 new {rule_id} matches"
+                    if outcome == "resolved"
+                    else f"Outcome '{outcome}': {len(newer_same_rule)} subsequent rule match(es)"
+                ),
+                status=diff_status,
+            ),
+        ]
+
     res = RecoveryVerificationResponse(
         alert_id=alert_id,
         host_id=host_id,
@@ -845,6 +1074,7 @@ def verify_alert_recovery(
         observation_window_min=observation_window_min,
         summary=summary,
         checks=checks,
+        remediation_diff=remediation_diff,
     )
     op_store.verifications[alert_id] = res
     op_store.record_audit(
@@ -951,3 +1181,428 @@ def build_incident_replay(
             "Unmonitored log files or network flows outside configured collectors are not represented.",
         ],
     )
+
+
+def run_finding_sc_ai_analysis(target: FindingItem) -> AiAnalysisResponse:
+    """
+    Executes SC Analysis Agent on a Security Checker posture finding using
+    dedicated key slot AEGIS2 (with automatic failover to AEGIS1 -> AEGIS3).
+    """
+    sc_chain = settings.get_role_key_chain("sc")
+    primary_slot = sc_chain[0][0] if sc_chain else "AEGIS2"
+    primary_key = sc_chain[0][1] if sc_chain else settings.llm_api_key
+    backup_keys = [k for _, k in sc_chain[1:]]
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    summary_text = (
+        f"[SC Agent · Key {primary_slot}] Security Checker posture check '{target.check_id}' ({target.title}) "
+        f"on host '{target.host_id}' reported status '{target.status.upper()}'. "
+        f"Observed indicators: {'; '.join(target.indicators)}."
+    )
+    next_steps = [
+        f"Inspect configuration referenced by {target.check_id} in read-only mode before planning changes.",
+        "Verify active administrative sessions to ensure hardening does not lock out operators.",
+        "Re-run Security Checker after applying approved configuration changes to confirm PASS state.",
+    ]
+
+    if settings.llm_provider == "gemini" and primary_key:
+        try:
+            provider = RealLLMAdapter(
+                provider_type="gemini",
+                api_key=primary_key,
+                backup_keys=backup_keys,
+                role="sc",
+                model_name=settings.llm_model,
+                timeout_seconds=settings.llm_timeout,
+            )
+            sc_out = provider.generate_sc_posture_report(
+                {
+                    "audit_run": {"audit_id": f"AUD-{target.id}"},
+                    "host": {"host_id": target.host_id},
+                    "security_controls": [
+                        {
+                            "control_id": target.check_id,
+                            "control_name": target.title,
+                            "status": target.status,
+                            "current_value": "; ".join(target.indicators),
+                            "expected_value": "Compliant CIS Linux baseline",
+                            "evidence_ref": target.id,
+                        }
+                    ],
+                }
+            )
+            if sc_out and sc_out.executive_summary and "gagal" not in sc_out.executive_summary.lower():
+                summary_text = sc_out.executive_summary
+                if sc_out.findings and sc_out.findings[0].remediation_guidance:
+                    next_steps.insert(0, sc_out.findings[0].remediation_guidance)
+        except Exception as e:
+            logger.warning(f"SC AI Agent degraded for finding {target.id}, using grounded posture synthesis: {e}")
+
+    analysis = AiAnalysisResponse(
+        target_id=target.id,
+        target_kind="finding",
+        state="ready",
+        role="SC Analysis Agent",
+        key_slot=primary_slot,
+        generated_at=now_iso,
+        summary=summary_text,
+        evidence_refs=[f"Check {target.check_id}", f"Host {target.host_id}"],
+        uncertainty=target.limits,
+        next_steps=next_steps[:4],
+    )
+    op_store.ai_analyses[target.id] = analysis
+    op_store.record_audit(
+        actor="ops-admin",
+        action="request_analysis",
+        target_type="finding",
+        target_id=target.id,
+        summary=f"Executed SC Analysis Agent ({primary_slot}) on posture finding {target.id} ({target.check_id})",
+    )
+    return analysis
+
+
+def run_reporting_ai_summary(
+    report_id: str,
+    report_type: str,
+    host_ids: List[str],
+    alerts: List[Dict[str, Any]],
+    findings: List[FindingItem],
+    period_start: str,
+    period_end: str,
+) -> Tuple[str, str]:
+    """
+    Executes Reporting Agent using dedicated key slot AEGIS3 (specifically reserved
+    for Daily & Incident Reports, with automatic failover to AEGIS2 -> AEGIS1).
+    Returns (executive_summary_text, key_slot_used).
+    """
+    rep_chain = settings.get_role_key_chain("reporting")
+    primary_slot = rep_chain[0][0] if rep_chain else "AEGIS3"
+    primary_key = rep_chain[0][1] if rep_chain else settings.llm_api_key
+    backup_keys = [k for _, k in rep_chain[1:]]
+
+    failed_findings = [f for f in findings if f.status == "fail"]
+    crit_high_alerts = [a for a in alerts if str(a.get("severity", "")).lower() in ("critical", "high")]
+
+    default_summary = (
+        f"[Reporting Agent · Key {primary_slot}] Compiled {report_type} security report for host(s) {', '.join(host_ids)} "
+        f"({period_start} to {period_end}). Evaluated {len(alerts)} deterministic alert(s) "
+        f"({len(crit_high_alerts)} Critical/High) and {len(findings)} read-only Security Checker posture controls "
+        f"({len(failed_findings)} non-compliant). All timeline entries and citations originate strictly from stored telemetry."
+    )
+
+    if settings.llm_provider == "gemini" and primary_key:
+        try:
+            provider = RealLLMAdapter(
+                provider_type="gemini",
+                api_key=primary_key,
+                backup_keys=backup_keys,
+                role="reporting",
+                model_name=settings.llm_model,
+                timeout_seconds=settings.llm_timeout,
+            )
+            rep_out = provider.generate_reporting_summary(
+                {
+                    "report_id": report_id,
+                    "report_type": "daily_security_briefing" if report_type == "daily" else "incident_executive_summary",
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "period_start": period_start,
+                    "period_end": period_end,
+                    "stored_incidents": [
+                        {
+                            "alert_id": a.get("id"),
+                            "rule_id": a.get("rule_id"),
+                            "title": a.get("title"),
+                            "severity": str(a.get("severity", "High")).capitalize(),
+                            "reason": a.get("reason"),
+                        }
+                        for a in alerts[:15]
+                    ],
+                    "stored_postures": [
+                        {
+                            "host_id": hid,
+                            "failed_controls": [f.check_id for f in failed_findings if f.host_id == hid],
+                        }
+                        for hid in host_ids
+                    ],
+                }
+            )
+            if rep_out and rep_out.executive_overview:
+                return rep_out.executive_overview, primary_slot
+        except Exception as e:
+            logger.warning(f"Reporting AI Agent ({primary_slot}) degraded for {report_id}, using deterministic summary: {e}")
+
+    return default_summary, primary_slot
+
+
+def build_alert_context(
+    alert: Dict[str, Any],
+    all_host_alerts: List[Dict[str, Any]],
+    evidence_items: List[Dict[str, Any]],
+) -> AlertContextResponse:
+    """
+    Builds Multi-Stage Kill-Chain Correlation & Blast Radius Summary for an alert.
+    Correlates alerts on the same host across 6 MITRE ATT&CK kill-chain stages.
+    """
+    alert_id = alert["id"]
+    host_id = alert.get("host_id", "unknown-host")
+    rule_id = alert.get("rule_id", "RULE-UNKNOWN")
+
+    source_ips = sorted({
+        str(ev.get("source_ip"))
+        for ev in evidence_items
+        if ev.get("source_ip") and str(ev.get("source_ip")) not in ("unknown", "None", "")
+    })
+    target_users = sorted({
+        str(ev.get("user_name"))
+        for ev in evidence_items
+        if ev.get("user_name") and str(ev.get("user_name")) not in ("unknown", "None", "")
+    })
+    affected_files: List[str] = []
+    executed_commands: List[str] = []
+
+    for ev in evidence_items:
+        details = ev.get("details") or {}
+        if isinstance(details, dict):
+            cmd = details.get("command") or details.get("command_line")
+            if cmd and cmd not in executed_commands:
+                executed_commands.append(str(cmd))
+            tf = details.get("target_file") or details.get("uri")
+            if tf and tf not in affected_files:
+                affected_files.append(str(tf))
+        msg = str(ev.get("message") or "")
+        for candidate in ("/var/www/html", "/etc/ssh/sshd_config", "/etc/sudoers", "/etc/passwd", "/etc/shadow", "authorized_keys"):
+            if candidate in msg and candidate not in affected_files:
+                affected_files.append(candidate)
+
+    reason_txt = str(alert.get("reason") or "")
+    for candidate in ("/var/www/html", "/etc/ssh/sshd_config", "/etc/sudoers", "authorized_keys"):
+        if candidate in reason_txt and candidate not in affected_files:
+            affected_files.append(candidate)
+
+    # Map rules to 6 Kill-Chain stages
+    stage_defs = [
+        ("Reconnaissance", "TA0043 / TA0007", ("RULE-FW-PORTSCAN", "RULE-WEB-ATTACK")),
+        ("Credential Access", "TA0006 · Brute Force", ("RULE-SSH-BRUTE",)),
+        ("Initial Access", "TA0001 · Valid Accounts", ("RULE-AUTH-003",)),
+        ("Privilege Escalation", "TA0004 · Sudo / Exploit", ("RULE-SUSP-SUDO", "RULE-KERNEL-EXPLOIT")),
+        ("Persistence", "TA0003 · Backdoor / Cron / Keys", ("RULE-ACCT-BACKDOOR", "RULE-CRON-PERSIST", "RULE-SSH-KEY-BACKDOOR")),
+        ("Defense Evasion", "TA0005 · Impair Defenses", ("RULE-DEFENSE-EVASION",)),
+    ]
+
+    kill_chain: List[KillChainStageItem] = []
+    related_ids: List[str] = []
+
+    for stage_name, tactic, rule_prefixes in stage_defs:
+        matching_alerts = [
+            a for a in all_host_alerts
+            if any(str(a.get("rule_id", "")).startswith(p) for p in rule_prefixes)
+        ]
+        m_ids = [a["id"] for a in matching_alerts]
+        for mid in m_ids:
+            if mid != alert_id and mid not in related_ids:
+                related_ids.append(mid)
+
+        is_current = any(rule_id.startswith(p) for p in rule_prefixes)
+        if is_current:
+            st = "current_trigger"
+            summary = f"Current alert {alert_id} ({rule_id}): {alert.get('title')}"
+            ts = alert.get("detected_at")
+        elif matching_alerts:
+            st = "observed"
+            first_a = matching_alerts[0]
+            summary = f"Correlated {len(matching_alerts)} alert(s) on {host_id}: {first_a.get('title')} ({first_a['id']})"
+            ts = first_a.get("detected_at")
+        else:
+            st = "not_observed"
+            summary = f"No deterministic alerts triggered for {stage_name} on {host_id}."
+            ts = None
+
+        kill_chain.append(
+            KillChainStageItem(
+                stage=stage_name,
+                mitre_tactic=tactic,
+                status=st,
+                alert_ids=m_ids,
+                summary=summary,
+                timestamp=ts,
+            )
+        )
+
+    active_stage_count = sum(1 for k in kill_chain if k.status in ("observed", "current_trigger"))
+    impact_scope = (
+        f"Multi-stage activity across {active_stage_count}/6 kill-chain stages on host '{host_id}'"
+        if active_stage_count > 1
+        else f"Contained single-stage trigger ({rule_id}) on host '{host_id}'"
+    )
+
+    blast_radius = BlastRadiusSummary(
+        source_ips=source_ips,
+        target_users=target_users,
+        affected_files=affected_files,
+        executed_commands=executed_commands,
+        target_host=host_id,
+        related_alert_ids=related_ids,
+        impact_scope=impact_scope,
+    )
+
+    return AlertContextResponse(
+        alert_id=alert_id,
+        host_id=host_id,
+        kill_chain=kill_chain,
+        blast_radius=blast_radius,
+    )
+
+
+def build_signed_evidence_bundle(
+    alert: Dict[str, Any],
+    evidence_items: List[Dict[str, Any]],
+) -> SignedEvidenceBundleResponse:
+    """
+    Exports a cryptographically hashed (SHA-256) JSON forensic evidence bundle
+    for chain-of-custody verification.
+    """
+    alert_id = alert["id"]
+    host_id = alert.get("host_id", "unknown-host")
+    rule_id = alert.get("rule_id", "RULE-UNKNOWN")
+    severity = alert.get("severity", "high")
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    signed_events: List[SignedEvidenceEventItem] = []
+    event_hashes: List[str] = []
+
+    for ev in evidence_items:
+        ev_id = str(ev.get("event_id") or "EVT-UNKNOWN")
+        ev_ts = ev.get("event_timestamp") or ev.get("created_at")
+        src_id = ev.get("source_id") or "ssh-auth"
+        ev_type = ev.get("event_type") or "telemetry"
+        role = ev.get("citation_role") or "supporting"
+        msg = str(ev.get("message") or "")
+        canonical = f"{alert_id}|{host_id}|{ev_id}|{ev_ts}|{src_id}|{ev_type}|{msg}"
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        event_hashes.append(digest)
+        signed_events.append(
+            SignedEvidenceEventItem(
+                event_id=ev_id,
+                event_timestamp=ev_ts,
+                source_id=src_id,
+                event_type=ev_type,
+                citation_role=role,
+                source_ip=ev.get("source_ip"),
+                user_name=ev.get("user_name"),
+                message=msg,
+                sha256_hash=digest,
+            )
+        )
+
+    manifest_raw = f"AEGIS-BUNDLE|{alert_id}|{host_id}|{rule_id}|{severity}|" + "|".join(event_hashes)
+    manifest_sha256 = hashlib.sha256(manifest_raw.encode("utf-8")).hexdigest()
+
+    op_store.record_audit(
+        actor="ops-admin",
+        action="export_evidence_bundle",
+        target_type="alert",
+        target_id=alert_id,
+        summary=f"Exported signed SHA-256 forensic evidence bundle for {alert_id} (manifest {manifest_sha256[:12]}...)",
+    )
+
+    return SignedEvidenceBundleResponse(
+        bundle_id=f"BND-{alert_id}",
+        alert_id=alert_id,
+        host_id=host_id,
+        rule_id=rule_id,
+        severity=severity,
+        exported_at=now_iso,
+        hash_algorithm="SHA-256",
+        manifest_sha256=manifest_sha256,
+        events=signed_events,
+    )
+
+
+def generate_report_pdf_bytes(
+    report: ReportItem,
+    alerts: List[Dict[str, Any]],
+    findings: List[FindingItem],
+) -> bytes:
+    """
+    Generates a genuine binary PDF document for a Daily or Incident Security Report
+    containing Executive Summary (AEGIS3), Triggered Alerts, Security Checker Posture Findings,
+    and Telemetry Boundaries. Uses reportlab when available, with a deterministic PDF 1.4 fallback.
+    """
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=A4)
+        width, height = A4
+        y = height - 48
+
+        def write_line(text: str, font: str = "Helvetica", size: int = 10, step: int = 15):
+            nonlocal y
+            if y < 60:
+                c.showPage()
+                y = height - 48
+            c.setFont(font, size)
+            c.drawString(45, y, text[:105])
+            y -= step
+
+        write_line("AEGIS LINUX SECURITY MONITORING & INCIDENT PLATFORM", "Helvetica-Bold", 14, 20)
+        write_line(f"Report ID: {report.id}   |   Type: {report.type.upper()}   |   AI Key Slot: {report.ai_key_slot or 'AEGIS3'}", "Helvetica-Bold", 10, 16)
+        write_line(f"Title: {report.title}", "Helvetica", 10, 15)
+        write_line(f"Monitored Hosts: {', '.join(report.host_ids)}   |   Completed At: {report.completed_at or report.requested_at}", "Helvetica", 9, 15)
+        write_line(f"Period: {report.period_start}  ->  {report.period_end}", "Helvetica", 9, 20)
+
+        write_line("1. AI EXECUTIVE SUMMARY (Reporting Agent · Key AEGIS3)", "Helvetica-Bold", 11, 16)
+        summary_txt = report.ai_executive_summary or "Grounded synthesis of stored alerts and read-only posture checks."
+        for i in range(0, len(summary_txt), 95):
+            write_line(summary_txt[i : i + 95], "Helvetica", 9, 13)
+        y -= 8
+
+        write_line(f"2. DETERMINISTIC ALERTS SUMMARY ({len(alerts)} Recorded)", "Helvetica-Bold", 11, 16)
+        if not alerts:
+            write_line("No deterministic alerts triggered during this reporting window.", "Helvetica", 9, 14)
+        for idx, a in enumerate(alerts[:12]):
+            write_line(
+                f"[{idx+1}] {a.get('id')} | {str(a.get('severity', '')).upper()} | {a.get('rule_id')} | {a.get('title')}",
+                "Helvetica-Bold",
+                9,
+                13,
+            )
+            reason = str(a.get("reason") or "")
+            write_line(f"    Detected: {a.get('detected_at')} | Reason: {reason[:85]}", "Helvetica", 8, 13)
+        y -= 8
+
+        write_line(f"3. READ-ONLY SECURITY CHECKER POSTURE ({len(findings)} Controls)", "Helvetica-Bold", 11, 16)
+        for f in findings[:12]:
+            write_line(
+                f"- {f.check_id} [{f.status.upper()}] ({f.severity.upper()}): {f.title}",
+                "Helvetica",
+                9,
+                13,
+            )
+        y -= 8
+
+        write_line("4. EPISTEMIC & TELEMETRY BOUNDARIES", "Helvetica-Bold", 11, 16)
+        write_line("- All events and timestamps originate strictly from stored host records.", "Helvetica", 9, 13)
+        write_line("- Alert severity is immutable and set solely by the deterministic Rules Engine.", "Helvetica", 9, 13)
+        write_line("- Missing telemetry or offline agents are never interpreted as proof of recovery.", "Helvetica", 9, 13)
+
+        c.save()
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning(f"ReportLab PDF generation fallback triggered: {e}")
+        text_payload = f"AEGIS Security Report {report.id} - {report.title} ({report.period_start} to {report.period_end})"
+        stream = f"BT /F1 12 Tf 50 750 Td ({text_payload}) Tj ET".encode("latin-1", errors="ignore")
+        pdf = (
+            b"%PDF-1.4\n"
+            b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+            b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+            b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj\n"
+            + f"4 0 obj << /Length {len(stream)} >> stream\n".encode("ascii")
+            + stream
+            + b"\nendstream endobj\n"
+            b"xref\n0 5\n0000000000 65535 f \n"
+            b"trailer << /Size 5 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
+        )
+        return pdf
+

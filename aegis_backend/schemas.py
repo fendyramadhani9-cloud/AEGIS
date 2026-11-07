@@ -184,6 +184,7 @@ class AiAnalysisResponse(BaseModel):
     target_kind: str  # "alert" | "finding"
     state: str  # "not_requested" | "pending" | "ready" | "failed"
     role: str
+    key_slot: Optional[str] = None
     generated_at: Optional[str] = None
     summary: Optional[str] = None
     evidence_refs: List[str] = Field(default_factory=list)
@@ -219,6 +220,13 @@ class VerificationCheckItem(BaseModel):
     detail: str
 
 
+class RemediationDiffItem(BaseModel):
+    target_resource: str
+    before_state: str
+    after_state: str
+    status: str  # "verified_fixed" | "unchanged_active" | "pending_verification"
+
+
 class RecoveryVerificationResponse(BaseModel):
     alert_id: str
     host_id: str
@@ -227,6 +235,7 @@ class RecoveryVerificationResponse(BaseModel):
     observation_window_min: int = 15
     summary: str
     checks: List[VerificationCheckItem]
+    remediation_diff: List[RemediationDiffItem] = Field(default_factory=list)
 
 
 class InvestigationNoteItem(BaseModel):
@@ -375,5 +384,69 @@ class ReportItem(BaseModel):
     alert_count: Optional[int] = None
     finding_count: Optional[int] = None
     gap_count: Optional[int] = None
+    ai_executive_summary: Optional[str] = None
+    ai_key_slot: Optional[str] = "AEGIS3"
     error: Optional[str] = None
+
+
+class KillChainStageItem(BaseModel):
+    stage: str
+    mitre_tactic: str
+    status: str  # "observed" | "current_trigger" | "not_observed"
+    alert_ids: List[str] = Field(default_factory=list)
+    summary: str
+    timestamp: Optional[str] = None
+
+
+class BlastRadiusSummary(BaseModel):
+    source_ips: List[str] = Field(default_factory=list)
+    target_users: List[str] = Field(default_factory=list)
+    affected_files: List[str] = Field(default_factory=list)
+    executed_commands: List[str] = Field(default_factory=list)
+    target_host: str
+    related_alert_ids: List[str] = Field(default_factory=list)
+    impact_scope: str
+
+
+class AlertContextResponse(BaseModel):
+    alert_id: str
+    host_id: str
+    kill_chain: List[KillChainStageItem]
+    blast_radius: BlastRadiusSummary
+
+
+class SignedEvidenceEventItem(BaseModel):
+    event_id: str
+    event_timestamp: Optional[str] = None
+    source_id: Optional[str] = None
+    event_type: Optional[str] = None
+    citation_role: str
+    source_ip: Optional[str] = None
+    user_name: Optional[str] = None
+    message: str
+    sha256_hash: str
+
+
+class SignedEvidenceBundleResponse(BaseModel):
+    bundle_id: str
+    alert_id: str
+    host_id: str
+    rule_id: str
+    severity: str
+    exported_at: str
+    hash_algorithm: str = "SHA-256"
+    manifest_sha256: str
+    events: List[SignedEvidenceEventItem]
+
+
+class AiRoleKeyStatusItem(BaseModel):
+    role_id: str
+    role_name: str
+    key_slot: str
+    key_masked: str
+    configured: bool
+    model: str
+    purpose: str
+    failover_slots: List[str] = Field(default_factory=list)
+
 

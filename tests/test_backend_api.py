@@ -487,3 +487,65 @@ def test_incident_replay_and_investigation_workflow():
     assert len(aud_res.json()) >= 1
 
 
+def test_three_key_ai_roles_and_8_module_security_checker():
+    """Verifies the 3-Key AI Role Allocation (AEGIS1, AEGIS2, AEGIS3) and 8-Module Security Checker."""
+    roles_res = client.get("/api/system/ai-roles")
+    assert roles_res.status_code == 200
+    roles = roles_res.json()
+    assert len(roles) == 3
+    slot_map = {r["role_id"]: r["key_slot"] for r in roles}
+    assert slot_map["rm_agent"] == "AEGIS1"
+    assert slot_map["sc_agent"] == "AEGIS2"
+    assert slot_map["reporting_agent"] == "AEGIS3"
+
+    findings_res = client.get("/api/findings?host_id=srv-prod-auth")
+    assert findings_res.status_code == 200
+    findings = findings_res.json()
+    assert len(findings) == 8
+    check_ids = {f["check_id"] for f in findings}
+    assert "CIS-SSH-5.2.8" in check_ids
+    assert "CIS-PERM-6.1.2" in check_ids
+    assert "CIS-PRIV-5.3.4" in check_ids
+    assert "CIS-SUID-6.1.12" in check_ids
+    assert "CIS-NET-3.5.1" in check_ids
+    assert "CIS-SYSCTL-3.3.1" in check_ids
+    assert "CIS-PKG-1.9" in check_ids
+    assert "CIS-PERSIST-5.1.8" in check_ids
+
+
+def test_kill_chain_context_signed_evidence_bundle_and_pdf_report():
+    """Verifies Kill-Chain Context, Signed SHA-256 Evidence Bundle, and Binary PDF Report Export."""
+    ctx_res = client.get("/api/alerts/ALT-001/context")
+    assert ctx_res.status_code == 200
+    ctx = ctx_res.json()
+    assert ctx["alert_id"] == "ALT-001"
+    assert len(ctx["kill_chain"]) == 6
+    assert "blast_radius" in ctx
+    assert ctx["blast_radius"]["target_host"] == "srv-prod-auth"
+
+    bnd_res = client.get("/api/alerts/ALT-001/evidence-bundle")
+    assert bnd_res.status_code == 200
+    bnd = bnd_res.json()
+    assert bnd["hash_algorithm"] == "SHA-256"
+    assert len(bnd["manifest_sha256"]) == 64
+
+    rpt_res = client.post(
+        "/api/reports",
+        json={
+            "type": "daily",
+            "host_ids": ["srv-prod-auth"],
+            "period_start": "2026-11-06T00:00:00Z",
+            "period_end": "2026-11-07T00:00:00Z",
+        },
+    )
+    assert rpt_res.status_code == 200
+    rpt_data = rpt_res.json()
+    assert rpt_data["ai_key_slot"] == "AEGIS3"
+
+    pdf_res = client.get(f"/api/reports/{rpt_data['id']}/pdf")
+    assert pdf_res.status_code == 200
+    assert pdf_res.headers["content-type"] == "application/pdf"
+    assert pdf_res.content.startswith(b"%PDF-")
+
+
+

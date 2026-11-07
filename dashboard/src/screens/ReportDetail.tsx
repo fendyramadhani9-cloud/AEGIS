@@ -38,13 +38,34 @@ export function ReportDetailScreen() {
           );
           const matchedGaps = gaps.filter((g) => report.hostIds.includes(g.hostId));
 
-          const handleDownload = () => {
+          const handleDownload = async () => {
+            try {
+              const pdfUrl = api.downloadReportPdfUrl(report.id);
+              const res = await fetch(pdfUrl);
+              if (res.ok && res.headers.get('content-type')?.includes('application/pdf')) {
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `AEGIS-${report.id}-${report.type}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                toast(`Downloaded AEGIS-${report.id}-${report.type}.pdf`, 'success');
+                return;
+              }
+            } catch {
+              // Fallback to client-side PDF generator if offline
+            }
+
             const lines = [
               `AEGIS SECURITY MONITORING REPORT`,
               `Report ID: ${report.id}`,
               `Title: ${report.title}`,
               `Type: ${report.type.toUpperCase()}`,
               `Status: ${report.status.toUpperCase()}`,
+              `AI Key Slot: ${report.aiKeySlot ?? 'AEGIS3 (Dedicated Reporting Agent)'}`,
               `Generated At: ${report.completedAt ?? new Date().toISOString()}`,
               `Period: ${report.periodStart} to ${report.periodEnd}`,
               `Target Hosts: ${report.hostIds.map(hostName).join(', ')}`,
@@ -128,7 +149,7 @@ export function ReportDetailScreen() {
                     <KeyValues
                       items={[
                         ['Report ID', <Tag>{report.id}</Tag>],
-                        ['Compiled by', 'Reporting Agent (backend AI role)'],
+                        ['Compiled by', `Reporting Agent (Dedicated Key ${report.aiKeySlot ?? 'AEGIS3'})`],
                         ['Requested at', dateTime(report.requestedAt)],
                         [
                           'Completed at',
@@ -148,6 +169,14 @@ export function ReportDetailScreen() {
                     />
                   </Group>
                 </Section>
+
+                {report.aiExecutiveSummary && (
+                  <Section title={`AI Executive Summary (${report.aiKeySlot ?? 'AEGIS3'} · Reporting Agent)`}>
+                    <Group>
+                      <p className="prose">{report.aiExecutiveSummary}</p>
+                    </Group>
+                  </Section>
+                )}
               </div>
 
               {/* Right Column: In-Scope Evidence & Data Coverage */}

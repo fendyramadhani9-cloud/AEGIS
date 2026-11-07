@@ -83,15 +83,46 @@ def _build_safe_event_message(ev_type: str, user: Optional[str], src_ip: Optiona
         state = details.get("connection_state", "ESTAB")
         r_port = details.get("remote_port", "")
         return f"TCP network connection {state} with {ip}{f':{r_port}' if r_port else ''}."
+    if ev_type in ("sudo_execution", "sudo_auth_failure"):
+        cmd = details.get("command", "unknown")
+        return f"Sudo event ({ev_type}) for user '{u}': {cmd}"
+    if ev_type in ("account_created", "privilege_group_added", "password_changed"):
+        grp = details.get("group", "")
+        return f"Account management event ({ev_type}) for user '{u}'{f' (group: {grp})' if grp else ''}."
+    if ev_type == "firewall_block":
+        dport = details.get("dest_port", "unknown")
+        proto = details.get("protocol", "TCP")
+        return f"UFW blocked inbound {proto} packet from {ip} to port {dport}."
+    if ev_type == "kernel_segfault":
+        proc = details.get("process_name", "unknown")
+        lib = details.get("library", "unknown")
+        return f"Kernel segmentation fault in process '{proc}' ({lib})."
+    if ev_type == "cron_execution":
+        cmd = details.get("command", "unknown")
+        return f"Scheduled cron job executed under '{u}': {cmd}"
+    if ev_type == "service_stopped":
+        unit = details.get("unit") or details.get("unit_description") or "service"
+        return f"Systemd service '{unit}' stopped or deactivated."
+    if ev_type in ("web_attack_probe", "web_http_error"):
+        method = details.get("method", "GET")
+        uri = details.get("uri", "/")
+        sc = details.get("status_code", 0)
+        cat = details.get("attack_category", "http_error")
+        return f"Web {cat} from {ip}: {method} {uri} (HTTP {sc})."
+    if ev_type == "critical_file_modified":
+        target = details.get("target_file", "critical file")
+        return f"Critical security file '{target}' modified by user '{u}'."
     return f"Security telemetry event '{ev_type}' observed."
 
 
 def _resolve_source_id(details: Dict[str, Any], event_type: str) -> str:
     """Maps event details to valid source_id column in database."""
     service = str(details.get("service", "")).lower()
-    if service in ["sshd", "pam_unix"] or "auth" in event_type or "session" in event_type:
+    if event_type in ("web_attack_probe", "web_http_error") or service in ("nginx", "apache2"):
+        return "nginx-access"
+    if service in ["sshd", "pam_unix", "sudo", "useradd", "adduser", "usermod", "gpasswd", "passwd"] or "auth" in event_type or "session" in event_type or "sudo" in event_type or event_type in ("account_created", "privilege_group_added", "password_changed"):
         return "ssh-auth"
-    if "audit_msg_id" in details or "process" in event_type:
+    if "audit_msg_id" in details or "process" in event_type or event_type == "critical_file_modified":
         return "auditd"
     if "connection_state" in details or "network" in event_type:
         return "network-conn"

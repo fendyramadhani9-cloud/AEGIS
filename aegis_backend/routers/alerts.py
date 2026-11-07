@@ -16,6 +16,8 @@ from aegis_backend.schemas import (
     InvestigationUpdateRequest,
     InvestigationStateResponse,
     IncidentReplayResponse,
+    AlertContextResponse,
+    SignedEvidenceBundleResponse,
     ErrorResponse,
 )
 from aegis_backend.repository import BaseAegisRepository, get_repository
@@ -25,6 +27,8 @@ from aegis_backend.incident_service import (
     generate_handoff_document,
     verify_alert_recovery,
     build_incident_replay,
+    build_alert_context,
+    build_signed_evidence_bundle,
 )
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts"])
@@ -322,4 +326,47 @@ def update_alert_investigation(
         alert=alert,
         repo=repo,
     )
+
+
+@router.get(
+    "/{alert_id}/context",
+    response_model=AlertContextResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Get Multi-Stage Kill-Chain Correlation & Blast Radius Summary",
+)
+def get_alert_context(
+    alert_id: str,
+    repo: BaseAegisRepository = Depends(get_repository),
+):
+    alert = repo.get_alert_by_id(alert_id)
+    if not alert:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Alert with ID '{alert_id}' not found.",
+        )
+    host_id = alert.get("host_id", "")
+    all_host_alerts, _ = repo.list_alerts(limit=100, offset=0, host_id=host_id)
+    evidence_items = repo.get_alert_evidence(alert_id) or []
+    return build_alert_context(alert, all_host_alerts, evidence_items)
+
+
+@router.get(
+    "/{alert_id}/evidence-bundle",
+    response_model=SignedEvidenceBundleResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Export Signed SHA-256 Forensic Evidence Bundle (.json)",
+)
+def export_alert_evidence_bundle(
+    alert_id: str,
+    repo: BaseAegisRepository = Depends(get_repository),
+):
+    alert = repo.get_alert_by_id(alert_id)
+    if not alert:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Alert with ID '{alert_id}' not found.",
+        )
+    evidence_items = repo.get_alert_evidence(alert_id) or []
+    return build_signed_evidence_bundle(alert, evidence_items)
+
 

@@ -110,6 +110,7 @@ export type AiRole = 'SC Analysis Agent' | 'RM Analysis Agent' | 'Reporting Agen
 export interface AiAnalysis {
   state: AiState;
   role: AiRole;
+  keySlot?: string;
   generatedAt?: ISODate;
   summary?: string;
   evidenceRefs?: string[];
@@ -202,6 +203,13 @@ export interface VerificationCheck {
   detail: string;
 }
 
+export interface RemediationDiff {
+  targetResource: string;
+  beforeState: string;
+  afterState: string;
+  status: 'verified_fixed' | 'unchanged_active' | 'pending_verification';
+}
+
 /** Continuous Monitoring & Automatic Recovery Verification Result (PRD §5). */
 export interface RecoveryVerification {
   alertId: string;
@@ -211,6 +219,66 @@ export interface RecoveryVerification {
   observationWindowMin: number;
   summary: string;
   checks: VerificationCheck[];
+  remediationDiff?: RemediationDiff[];
+}
+
+export interface KillChainStage {
+  stage: string;
+  mitreTactic: string;
+  status: 'observed' | 'current_trigger' | 'not_observed';
+  alertIds: string[];
+  summary: string;
+  timestamp?: ISODate | null;
+}
+
+export interface BlastRadius {
+  sourceIps: string[];
+  targetUsers: string[];
+  affectedFiles: string[];
+  executedCommands: string[];
+  targetHost: string;
+  relatedAlertIds: string[];
+  impactScope: string;
+}
+
+export interface AlertContext {
+  alertId: string;
+  hostId: string;
+  killChain: KillChainStage[];
+  blastRadius: BlastRadius;
+}
+
+export interface SignedEvidenceBundle {
+  bundleId: string;
+  alertId: string;
+  hostId: string;
+  ruleId: string;
+  severity: string;
+  exportedAt: ISODate;
+  hashAlgorithm: string;
+  manifestSha256: string;
+  events: Array<{
+    eventId: string;
+    eventTimestamp?: string | null;
+    sourceId?: string | null;
+    eventType?: string | null;
+    citationRole: string;
+    sourceIp?: string | null;
+    userName?: string | null;
+    message: string;
+    sha256Hash: string;
+  }>;
+}
+
+export interface AiRoleKeyStatus {
+  roleId: string;
+  roleName: string;
+  keySlot: string;
+  keyMasked: string;
+  configured: boolean;
+  model: string;
+  purpose: string;
+  failoverSlots: string[];
 }
 
 export interface IncidentReplayStep {
@@ -282,6 +350,8 @@ export interface Report {
   alertCount?: number;
   findingCount?: number;
   gapCount?: number;
+  aiExecutiveSummary?: string;
+  aiKeySlot?: string;
   error?: string;
 }
 

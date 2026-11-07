@@ -1,19 +1,21 @@
 import { Link, useParams } from 'react-router-dom';
-import { CircleHelp, FileText, ListTree, Lock, Radio } from 'lucide-react';
+import { CircleHelp, Download, FileText, ListTree, Lock, Radio } from 'lucide-react';
 import { Screen } from '../components/AppShell';
 import { AiPanel } from '../components/AiPanel';
 import {
   AlertGroupingCard,
+  BlastRadiusCard,
   GapBlock,
   HandoffCard,
   IncidentReplayCard,
   InvestigationWorkflowCard,
+  KillChainCard,
   ProvenanceCard,
   RecoveryVerificationCard,
   RuleLogicCard,
 } from '../components/domain';
 import { EmptyState, QueryView, SkeletonBlock } from '../components/states';
-import { Badge, Group, KeyValues, LinkButton, LogLine, Section, Tag } from '../components/ui';
+import { Badge, Button, Group, KeyValues, LinkButton, LogLine, Section, Tag } from '../components/ui';
 import { actions, api } from '../data/api';
 import { useQuery } from '../lib/hooks';
 import { confidenceMeta, investigationStatusMeta, severityMeta, sourceLabel } from '../lib/status';
@@ -28,12 +30,13 @@ export function AlertDetailScreen() {
   const q = useQuery(async () => {
     const alert = await api.alert(id);
     if (!alert) return null;
-    const [events, gaps, host, evidence, replay] = await Promise.all([
+    const [events, gaps, host, evidence, replay, context] = await Promise.all([
       api.alertEvidence(alert.id),
       api.gaps({ hostId: alert.hostId }),
       api.host(alert.hostId),
       api.evidence(),
       api.replay(alert.id),
+      api.alertContext(alert.id),
     ]);
     const t = new Date(alert.detectedAt).getTime();
     const nearGaps = gaps.filter((g) => {
@@ -42,7 +45,7 @@ export function AlertDetailScreen() {
       return (g.source === alert.source || g.source === 'agent') && s <= t + WINDOW && e >= t - WINDOW;
     });
     const activeEvidence = evidence.find((e) => e.hostId === alert.hostId && e.status === 'active');
-    return { alert, events, nearGaps, host, activeEvidence, replay };
+    return { alert, events, nearGaps, host, activeEvidence, replay, context };
   }, [id]);
 
   return (
@@ -50,10 +53,31 @@ export function AlertDetailScreen() {
       <QueryView query={q} loading={<SkeletonBlock height={240} />}>
         {(data) => {
           if (!data) return <EmptyState icon={CircleHelp} title="Alert not found" />;
-          const { alert, events, nearGaps, host, activeEvidence, replay } = data;
+          const { alert, events, nearGaps, host, activeEvidence, replay, context } = data;
           const sev = severityMeta[alert.severity];
           const conf = alert.confidence ? confidenceMeta[alert.confidence] : undefined;
           const inv = alert.investigationStatus ? investigationStatusMeta[alert.investigationStatus] : undefined;
+
+          const handleExportEvidenceBundle = async () => {
+            const bundle = await api.evidenceBundle(alert.id);
+            const payload = bundle ?? {
+              bundleId: `BND-${alert.id}`,
+              alertId: alert.id,
+              hostId: alert.hostId,
+              ruleId: alert.ruleId,
+              severity: alert.severity,
+              exportedAt: new Date().toISOString(),
+              hashAlgorithm: 'SHA-256',
+              events,
+            };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `AEGIS-Evidence-Bundle-${alert.id}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+          };
 
           return (
             <div className="desktop-grid-2">
@@ -80,6 +104,10 @@ export function AlertDetailScreen() {
 
                 {/* 3. Deduplication & Alert Grouping Card */}
                 {alert.grouping && <AlertGroupingCard grouping={alert.grouping} />}
+
+                {/* 11. Multi-Stage Kill-Chain Correlation & Blast Radius */}
+                {context && <KillChainCard context={context} />}
+                {context && <BlastRadiusCard context={context} />}
 
                 {/* 4. Manual Investigation Status Workflow */}
                 <InvestigationWorkflowCard alert={alert} onUpdated={() => q.retry()} />
@@ -169,6 +197,9 @@ export function AlertDetailScreen() {
                     <LinkButton to={`/reports?new=incident&host=${alert.hostId}&alert=${alert.id}`} icon={FileText} block>
                       Request incident report
                     </LinkButton>
+                    <Button variant="secondary" icon={Download} block onClick={handleExportEvidenceBundle}>
+                      Export Signed Evidence Bundle (.json)
+                    </Button>
                   </div>
                 </Section>
               </div>

@@ -43,6 +43,20 @@ class RulesEngine:
         r"(?:chmod\s+(?:-[a-zA-Z0-9]+\s+)?(?:777|a\+[rwx]{3})|chown\s+(?:-[a-zA-Z0-9]+\s+)?root(?::root)?\s+/)\b",
         re.IGNORECASE,
     )
+    _RE_SUSPICIOUS_CRON = re.compile(
+        r"(?:curl|wget|nc\b|ncat|bash\s+-i|/dev/tcp/|base64\s+-d|chmod\s+(?:\+x|777)|/tmp/|/dev/shm/|python[23]?\s+-c)",
+        re.IGNORECASE,
+    )
+    _PRIVILEGED_GROUPS = {"sudo", "root", "wheel", "admin", "docker", "shadow", "adm"}
+    _CRITICAL_SERVICES = {
+        "ufw", "ufw.service",
+        "auditd", "auditd.service",
+        "ssh", "ssh.service", "sshd", "sshd.service",
+        "fail2ban", "fail2ban.service",
+        "apparmor", "apparmor.service",
+        "aegis-collector", "aegis-collector.service",
+        "rsyslog", "rsyslog.service",
+    }
 
     def __init__(
         self,
@@ -51,12 +65,20 @@ class RulesEngine:
         auth_success_window_sec: int = 600,     # 10 minutes
         sudo_auth_threshold: int = 3,
         sudo_auth_window_sec: int = 300,        # 5 minutes
+        fw_scan_threshold: int = 4,
+        fw_scan_window_sec: int = 300,          # 5 minutes
+        web_error_threshold: int = 4,
+        web_error_window_sec: int = 300,        # 5 minutes
     ):
         self.ssh_brute_threshold = ssh_brute_threshold
         self.ssh_brute_window_sec = ssh_brute_window_sec
         self.auth_success_window_sec = auth_success_window_sec
         self.sudo_auth_threshold = sudo_auth_threshold
         self.sudo_auth_window_sec = sudo_auth_window_sec
+        self.fw_scan_threshold = fw_scan_threshold
+        self.fw_scan_window_sec = fw_scan_window_sec
+        self.web_error_threshold = web_error_threshold
+        self.web_error_window_sec = web_error_window_sec
 
     def _parse_timestamp(self, ts_str: Optional[str]) -> datetime:
         """Parses ISO timestamp into timezone-aware UTC datetime."""
@@ -103,6 +125,31 @@ class RulesEngine:
         sudo_alerts, sudo_ev = self._evaluate_suspicious_sudo(sorted_events, generated_alert_ids)
         alerts.extend(sudo_alerts)
         alert_evidence.extend(sudo_ev)
+
+        # Step 5: Evaluate RULE-WEB-ATTACK (Web LFI/SQLi/RCE/Env probes & HTTP auth bursts)
+        web_alerts, web_ev = self._evaluate_web_attacks(sorted_events, generated_alert_ids)
+        alerts.extend(web_alerts)
+        alert_evidence.extend(web_ev)
+
+        # Step 6: Evaluate RULE-ACCT-BACKDOOR (Backdoor account creation & privileged group escalation)
+        acct_alerts, acct_ev = self._evaluate_account_backdoor(sorted_events, generated_alert_ids)
+        alerts.extend(acct_alerts)
+        alert_evidence.extend(acct_ev)
+
+        # Step 7: Evaluate RULE-FW-PORTSCAN & RULE-KERNEL-EXPLOIT (UFW port scan bursts & kernel segfaults)
+        fw_alerts, fw_ev = self._evaluate_firewall_and_kernel(sorted_events, generated_alert_ids)
+        alerts.extend(fw_alerts)
+        alert_evidence.extend(fw_ev)
+
+        # Step 8: Evaluate RULE-CRON-PERSIST & RULE-DEFENSE-EVASION (Cron persistence & stopping security daemons)
+        cron_alerts, cron_ev = self._evaluate_cron_and_systemd(sorted_events, generated_alert_ids)
+        alerts.extend(cron_alerts)
+        alert_evidence.extend(cron_ev)
+
+        # Step 9: Evaluate RULE-SSH-KEY-BACKDOOR (Critical file & SSH authorized_keys tampering)
+        tamper_alerts, tamper_ev = self._evaluate_critical_file_tamper(sorted_events, generated_alert_ids)
+        alerts.extend(tamper_alerts)
+        alert_evidence.extend(tamper_ev)
 
         return alerts, alert_evidence
 
@@ -440,3 +487,395 @@ class RulesEngine:
                             })
 
         return alerts, evidence_links
+
+    def _evaluate_web_attacks(
+        self,
+        events: List[Dict[str, Any]],
+        generated_ids: Set[str],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        RULE-WEB-ATTACK:
+        - High-signal web attack probes (path traversal, SQLi, command injection, sensitive file probe): High/Critical.
+        - Repeated HTTP 401/403 authentication errors (>=4 within 5m from same IP): Medium.
+        """
+        alerts: List[Dict[str, Any]] = []
+        evidence_links: List[Dict[str, Any]] = []
+
+        probe_events = [ev for ev in events if ev.get("event_type") == "web_attack_probe"]
+        for ev in probe_events:
+            h_id = ev.get("host_id", "")
+            src_ip = ev.get("source_ip") or "unknown"
+            details = ev.get("details", {}) or {}
+            category = details.get("attack_category", "web_probe")
+            uri = details.get("uri", "/")
+            status_code = details.get("status_code", 0)
+
+            fp_raw = f"{h_id}:RULE-WEB-ATTACK:PROBE:{ev['id']}"
+            alert_id = f"ALT-WEB-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+            if alert_id in generated_ids:
+                continue
+            generated_ids.add(alert_id)
+
+            severity = "critical" if category in {"command_injection", "sql_injection"} else "high"
+            now_iso = datetime.now(timezone.utc).isoformat()
+            alerts.append({
+                "id": alert_id,
+                "host_id": h_id,
+                "rule_id": "RULE-WEB-ATTACK",
+                "rule_version": "1.0",
+                "title": f"Web Application Attack Probe ({category.replace('_', ' ').title()})",
+                "severity": severity,
+                "detected_at": ev.get("event_timestamp") or now_iso,
+                "reason": (
+                    f"Detected high-signal web attack probe ({category}) from {src_ip} "
+                    f"targeting URI '{uri}' (HTTP {status_code})."
+                ),
+                "created_at": now_iso,
+            })
+            evidence_links.append({
+                "alert_id": alert_id,
+                "event_id": ev["id"],
+                "citation_role": "trigger",
+            })
+
+        http_errors = [
+            ev for ev in events
+            if ev.get("event_type") == "web_http_error"
+            and (ev.get("details") or {}).get("status_code") in (401, 403)
+        ]
+        if len(http_errors) >= self.web_error_threshold:
+            ip_groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+            for ev in http_errors:
+                src_ip = ev.get("source_ip")
+                if src_ip and src_ip not in ("unknown", ""):
+                    ip_groups.setdefault((ev.get("host_id", ""), src_ip), []).append(ev)
+
+            for (h_id, src_ip), cluster in ip_groups.items():
+                if len(cluster) < self.web_error_threshold:
+                    continue
+                t_start = self._parse_timestamp(cluster[0].get("event_timestamp"))
+                t_end = self._parse_timestamp(cluster[-1].get("event_timestamp"))
+                diff_sec = (t_end - t_start).total_seconds()
+                if 0 <= diff_sec <= self.web_error_window_sec:
+                    trigger_ev = cluster[-1]
+                    fp_raw = f"{h_id}:RULE-WEB-ATTACK:AUTH-BURST:{src_ip}:{cluster[0]['id']}"
+                    alert_id = f"ALT-WEB-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+                    if alert_id not in generated_ids:
+                        generated_ids.add(alert_id)
+                        now_iso = datetime.now(timezone.utc).isoformat()
+                        alerts.append({
+                            "id": alert_id,
+                            "host_id": h_id,
+                            "rule_id": "RULE-WEB-ATTACK",
+                            "rule_version": "1.0",
+                            "title": "Repeated Web HTTP 401/403 Access Denials",
+                            "severity": "medium",
+                            "detected_at": trigger_ev.get("event_timestamp") or now_iso,
+                            "reason": f"Observed {len(cluster)} HTTP 401/403 responses for source IP '{src_ip}' within {diff_sec:.0f}s.",
+                            "created_at": now_iso,
+                        })
+                        for ev in cluster:
+                            evidence_links.append({
+                                "alert_id": alert_id,
+                                "event_id": ev["id"],
+                                "citation_role": "trigger" if ev["id"] == trigger_ev["id"] else "supporting",
+                            })
+
+        return alerts, evidence_links
+
+    def _evaluate_account_backdoor(
+        self,
+        events: List[Dict[str, Any]],
+        generated_ids: Set[str],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        RULE-ACCT-BACKDOOR:
+        - Local user creation (useradd/adduser): High (Critical if UID=0).
+        - Adding user to privileged group (sudo, root, wheel, admin, docker): High.
+        """
+        alerts: List[Dict[str, Any]] = []
+        evidence_links: List[Dict[str, Any]] = []
+
+        for ev in events:
+            ev_type = ev.get("event_type")
+            h_id = ev.get("host_id", "")
+            user = ev.get("user_name") or "unknown"
+            details = ev.get("details", {}) or {}
+
+            if ev_type == "account_created":
+                uid = str(details.get("uid", ""))
+                fp_raw = f"{h_id}:RULE-ACCT-BACKDOOR:CREATE:{ev['id']}"
+                alert_id = f"ALT-ACCT-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+                if alert_id in generated_ids:
+                    continue
+                generated_ids.add(alert_id)
+
+                severity = "critical" if uid == "0" else "high"
+                now_iso = datetime.now(timezone.utc).isoformat()
+                alerts.append({
+                    "id": alert_id,
+                    "host_id": h_id,
+                    "rule_id": "RULE-ACCT-BACKDOOR",
+                    "rule_version": "1.0",
+                    "title": "Unauthorized Local User Account Creation",
+                    "severity": severity,
+                    "detected_at": ev.get("event_timestamp") or now_iso,
+                    "reason": f"New local account '{user}' (UID={uid or 'unassigned'}) created on host '{h_id}'.",
+                    "created_at": now_iso,
+                })
+                evidence_links.append({
+                    "alert_id": alert_id,
+                    "event_id": ev["id"],
+                    "citation_role": "trigger",
+                })
+
+            elif ev_type == "privilege_group_added":
+                group_name = str(details.get("group", "")).lower()
+                if group_name in self._PRIVILEGED_GROUPS:
+                    fp_raw = f"{h_id}:RULE-ACCT-BACKDOOR:GROUP:{ev['id']}"
+                    alert_id = f"ALT-ACCT-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+                    if alert_id in generated_ids:
+                        continue
+                    generated_ids.add(alert_id)
+
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    alerts.append({
+                        "id": alert_id,
+                        "host_id": h_id,
+                        "rule_id": "RULE-ACCT-BACKDOOR",
+                        "rule_version": "1.0",
+                        "title": f"Privilege Escalation via Group Membership ({group_name})",
+                        "severity": "high",
+                        "detected_at": ev.get("event_timestamp") or now_iso,
+                        "reason": f"User '{user}' was added to privileged group '{group_name}' on host '{h_id}'.",
+                        "created_at": now_iso,
+                    })
+                    evidence_links.append({
+                        "alert_id": alert_id,
+                        "event_id": ev["id"],
+                        "citation_role": "trigger",
+                    })
+
+        return alerts, evidence_links
+
+    def _evaluate_firewall_and_kernel(
+        self,
+        events: List[Dict[str, Any]],
+        generated_ids: Set[str],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        RULE-FW-PORTSCAN & RULE-KERNEL-EXPLOIT:
+        - >= 4 UFW firewall blocks from same source IP within 5 minutes: Medium (RULE-FW-PORTSCAN).
+        - Kernel segmentation fault in binary: High (RULE-KERNEL-EXPLOIT).
+        """
+        alerts: List[Dict[str, Any]] = []
+        evidence_links: List[Dict[str, Any]] = []
+
+        fw_blocks = [ev for ev in events if ev.get("event_type") == "firewall_block"]
+        if len(fw_blocks) >= self.fw_scan_threshold:
+            ip_groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+            for ev in fw_blocks:
+                src_ip = ev.get("source_ip")
+                if src_ip and src_ip not in ("unknown", ""):
+                    ip_groups.setdefault((ev.get("host_id", ""), src_ip), []).append(ev)
+
+            for (h_id, src_ip), cluster in ip_groups.items():
+                if len(cluster) < self.fw_scan_threshold:
+                    continue
+                t_start = self._parse_timestamp(cluster[0].get("event_timestamp"))
+                t_end = self._parse_timestamp(cluster[-1].get("event_timestamp"))
+                diff_sec = (t_end - t_start).total_seconds()
+                if 0 <= diff_sec <= self.fw_scan_window_sec:
+                    trigger_ev = cluster[-1]
+                    ports = sorted({
+                        str((ev.get("details") or {}).get("dest_port", ""))
+                        for ev in cluster
+                        if (ev.get("details") or {}).get("dest_port")
+                    })
+                    fp_raw = f"{h_id}:RULE-FW-PORTSCAN:{src_ip}:{cluster[0]['id']}"
+                    alert_id = f"ALT-FW-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+                    if alert_id not in generated_ids:
+                        generated_ids.add(alert_id)
+                        now_iso = datetime.now(timezone.utc).isoformat()
+                        port_desc = f" targeting ports {', '.join(ports[:6])}" if ports else ""
+                        alerts.append({
+                            "id": alert_id,
+                            "host_id": h_id,
+                            "rule_id": "RULE-FW-PORTSCAN",
+                            "rule_version": "1.0",
+                            "title": "Firewall Port Scan / Lateral Probe Blocked",
+                            "severity": "medium",
+                            "detected_at": trigger_ev.get("event_timestamp") or now_iso,
+                            "reason": f"UFW blocked {len(cluster)} inbound packets from '{src_ip}'{port_desc} within {diff_sec:.0f}s.",
+                            "created_at": now_iso,
+                        })
+                        for ev in cluster:
+                            evidence_links.append({
+                                "alert_id": alert_id,
+                                "event_id": ev["id"],
+                                "citation_role": "trigger" if ev["id"] == trigger_ev["id"] else "supporting",
+                            })
+
+        segfaults = [ev for ev in events if ev.get("event_type") == "kernel_segfault"]
+        for ev in segfaults:
+            h_id = ev.get("host_id", "")
+            details = ev.get("details", {}) or {}
+            proc = details.get("process_name", "unknown")
+            lib = details.get("library", "unknown")
+            fp_raw = f"{h_id}:RULE-KERNEL-EXPLOIT:{ev['id']}"
+            alert_id = f"ALT-KRN-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+            if alert_id in generated_ids:
+                continue
+            generated_ids.add(alert_id)
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            alerts.append({
+                "id": alert_id,
+                "host_id": h_id,
+                "rule_id": "RULE-KERNEL-EXPLOIT",
+                "rule_version": "1.0",
+                "title": "Kernel Segmentation Fault / Binary Crash Anomaly",
+                "severity": "high",
+                "detected_at": ev.get("event_timestamp") or now_iso,
+                "reason": f"Kernel reported segmentation fault in process '{proc}' (module '{lib}'), indicating potential memory corruption or exploit attempt.",
+                "created_at": now_iso,
+            })
+            evidence_links.append({
+                "alert_id": alert_id,
+                "event_id": ev["id"],
+                "citation_role": "trigger",
+            })
+
+        return alerts, evidence_links
+
+    def _evaluate_cron_and_systemd(
+        self,
+        events: List[Dict[str, Any]],
+        generated_ids: Set[str],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        RULE-CRON-PERSIST & RULE-DEFENSE-EVASION:
+        - Cron execution matching suspicious payload (curl/wget/nc/reverse-shell/tmp): High (RULE-CRON-PERSIST).
+        - Systemd stopping critical security service (ufw, auditd, ssh, fail2ban): Critical (RULE-DEFENSE-EVASION).
+        """
+        alerts: List[Dict[str, Any]] = []
+        evidence_links: List[Dict[str, Any]] = []
+
+        for ev in events:
+            ev_type = ev.get("event_type")
+            h_id = ev.get("host_id", "")
+            user = ev.get("user_name") or "unknown"
+            details = ev.get("details", {}) or {}
+
+            if ev_type == "cron_execution":
+                cmd = str(details.get("command", "")).strip()
+                if cmd and self._RE_SUSPICIOUS_CRON.search(cmd):
+                    fp_raw = f"{h_id}:RULE-CRON-PERSIST:{ev['id']}"
+                    alert_id = f"ALT-CRON-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+                    if alert_id in generated_ids:
+                        continue
+                    generated_ids.add(alert_id)
+
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    alerts.append({
+                        "id": alert_id,
+                        "host_id": h_id,
+                        "rule_id": "RULE-CRON-PERSIST",
+                        "rule_version": "1.0",
+                        "title": "Suspicious Scheduled Cron Persistence Execution",
+                        "severity": "high",
+                        "detected_at": ev.get("event_timestamp") or now_iso,
+                        "reason": f"Suspicious scheduled cron command executed under user '{user}': '{cmd}'.",
+                        "created_at": now_iso,
+                    })
+                    evidence_links.append({
+                        "alert_id": alert_id,
+                        "event_id": ev["id"],
+                        "citation_role": "trigger",
+                    })
+
+            elif ev_type == "service_stopped":
+                unit = str(details.get("unit", "")).lower().strip()
+                desc = str(details.get("unit_description", "")).lower()
+                is_critical_unit = (
+                    unit in self._CRITICAL_SERVICES
+                    or any(tok in desc for tok in ("firewall", "ufw", "audit", "openssh", "fail2ban", "apparmor", "aegis"))
+                )
+                if is_critical_unit:
+                    fp_raw = f"{h_id}:RULE-DEFENSE-EVASION:{ev['id']}"
+                    alert_id = f"ALT-SVC-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+                    if alert_id in generated_ids:
+                        continue
+                    generated_ids.add(alert_id)
+
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    target_unit = details.get("unit") or details.get("unit_description") or "security service"
+                    alerts.append({
+                        "id": alert_id,
+                        "host_id": h_id,
+                        "rule_id": "RULE-DEFENSE-EVASION",
+                        "rule_version": "1.0",
+                        "title": "Critical Security Service Stopped (Defense Evasion)",
+                        "severity": "critical",
+                        "detected_at": ev.get("event_timestamp") or now_iso,
+                        "reason": f"Critical defensive or monitoring service '{target_unit}' was stopped or deactivated on host '{h_id}'.",
+                        "created_at": now_iso,
+                    })
+                    evidence_links.append({
+                        "alert_id": alert_id,
+                        "event_id": ev["id"],
+                        "citation_role": "trigger",
+                    })
+
+        return alerts, evidence_links
+
+    def _evaluate_critical_file_tamper(
+        self,
+        events: List[Dict[str, Any]],
+        generated_ids: Set[str],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        RULE-SSH-KEY-BACKDOOR:
+        - Modification or tampering of SSH authorized_keys, /etc/ssh/sshd_config, or /etc/sudoers: Critical.
+        """
+        alerts: List[Dict[str, Any]] = []
+        evidence_links: List[Dict[str, Any]] = []
+
+        for ev in events:
+            if ev.get("event_type") != "critical_file_modified":
+                continue
+            h_id = ev.get("host_id", "")
+            user = ev.get("user_name") or "unknown"
+            details = ev.get("details", {}) or {}
+            target_file = details.get("target_file", "critical file")
+            cmd = details.get("command", "")
+
+            fp_raw = f"{h_id}:RULE-SSH-KEY-BACKDOOR:{ev['id']}"
+            alert_id = f"ALT-KEY-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+            if alert_id in generated_ids:
+                continue
+            generated_ids.add(alert_id)
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            alerts.append({
+                "id": alert_id,
+                "host_id": h_id,
+                "rule_id": "RULE-SSH-KEY-BACKDOOR",
+                "rule_version": "1.0",
+                "title": "Critical Security File / SSH Authorized Keys Tampering",
+                "severity": "critical",
+                "detected_at": ev.get("event_timestamp") or now_iso,
+                "reason": (
+                    f"Detected modification of sensitive security file '{target_file}' "
+                    f"by user '{user}'" + (f" via '{cmd}'." if cmd else ".")
+                ),
+                "created_at": now_iso,
+            })
+            evidence_links.append({
+                "alert_id": alert_id,
+                "event_id": ev["id"],
+                "citation_role": "trigger",
+            })
+
+        return alerts, evidence_links
+

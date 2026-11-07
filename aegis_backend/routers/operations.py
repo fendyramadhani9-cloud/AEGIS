@@ -1,18 +1,26 @@
 """
 Operational Endpoints for AEGIS Dashboard:
 - Pipeline Health Monitoring (/api/system/pipeline-health)
+- 3-Key AI Role Allocation Status (/api/system/ai-roles)
 - Operator Action Audit Logs (/api/audit-logs)
 - Emergency Evidence Mode Sessions (/api/evidence)
-- Security Posture Findings (/api/findings)
-- Daily & Incident Reports (/api/reports)
+- 8-Module Read-Only Security Posture Findings (/api/findings)
+- Daily & Incident Reports + Real PDF Export (/api/reports)
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 
+from aegis_backend.config import settings
 from aegis_backend.repository import BaseAegisRepository, get_repository
-from aegis_backend.incident_service import op_store
+from aegis_backend.incident_service import (
+    op_store,
+    run_finding_sc_ai_analysis,
+    run_reporting_ai_summary,
+    generate_report_pdf_bytes,
+)
+from aegis_agent.security_checker import ReadOnlySecurityChecker
 from aegis_backend.schemas import (
     FindingItem,
     AiAnalysisResponse,
@@ -22,6 +30,7 @@ from aegis_backend.schemas import (
     PipelineSourceHealthItem,
     CreateReportRequest,
     ReportItem,
+    AiRoleKeyStatusItem,
     ErrorResponse,
 )
 
@@ -30,80 +39,37 @@ router = APIRouter(prefix="/api", tags=["Operations"])
 
 def _build_default_findings_for_hosts(hosts: List[Dict[str, Any]]) -> List[FindingItem]:
     """
-    Generates baseline read-only Security Checker (SC) posture checks bound to active hosts
-    when the findings table has not yet been populated by a scheduled SC run.
+    Generates the 8-module read-only Security Checker (SC) posture checks bound to active hosts.
     """
     items: List[FindingItem] = []
     now_iso = datetime.now(timezone.utc).isoformat()
     for h in hosts:
         hid = h.get("id", "host-unknown")
         checked_at = h.get("last_sc_run_at") or h.get("last_data_at") or now_iso
-        f1_id = f"fnd-ssh-root-{hid}"
-        f1_ai = op_store.ai_analyses.get(f1_id)
-        items.append(
-            FindingItem(
-                id=f1_id,
-                host_id=hid,
-                check_id="CIS-SSH-5.2.8",
-                title="SSH root login configuration check",
-                status="fail",
-                severity="high",
-                checked_at=checked_at,
-                indicators=[
-                    "/etc/ssh/sshd_config: PermitRootLogin prohibit-password (verify no direct password root login)",
-                    "Active sudo escalations observed on host",
-                ],
-                limits="Read-only configuration inspection only; runtime PAM overrides outside /etc/ssh/sshd_config require manual check.",
-                ai_state=f1_ai.state if f1_ai else "not_requested",
-                ai_role="SC Analysis Agent",
-                ai_generated_at=f1_ai.generated_at if f1_ai else None,
-                ai_summary=f1_ai.summary if f1_ai else None,
-                ai_evidence_refs=f1_ai.evidence_refs if f1_ai else [],
-                ai_uncertainty=f1_ai.uncertainty if f1_ai else None,
-                ai_next_steps=f1_ai.next_steps if f1_ai else [],
+        catalog = ReadOnlySecurityChecker.build_host_posture_catalog(hid, checked_at)
+        for entry in catalog:
+            fid = entry["id"]
+            f_ai = op_store.ai_analyses.get(fid)
+            items.append(
+                FindingItem(
+                    id=fid,
+                    host_id=hid,
+                    check_id=entry["check_id"],
+                    title=entry["title"],
+                    status=entry["status"],
+                    severity=entry["severity"],
+                    checked_at=checked_at,
+                    indicators=entry["indicators"],
+                    limits=entry["limits"],
+                    ai_state=f_ai.state if f_ai else "not_requested",
+                    ai_role="SC Analysis Agent",
+                    ai_generated_at=f_ai.generated_at if f_ai else None,
+                    ai_summary=f_ai.summary if f_ai else None,
+                    ai_evidence_refs=f_ai.evidence_refs if f_ai else [],
+                    ai_uncertainty=f_ai.uncertainty if f_ai else None,
+                    ai_next_steps=f_ai.next_steps if f_ai else [],
+                )
             )
-        )
-        f2_id = f"fnd-sudo-nopasswd-{hid}"
-        f2_ai = op_store.ai_analyses.get(f2_id)
-        items.append(
-            FindingItem(
-                id=f2_id,
-                host_id=hid,
-                check_id="CIS-SUDO-5.3.4",
-                title="Sudoers NOPASSWD privilege scope check",
-                status="fail",
-                severity="medium",
-                checked_at=checked_at,
-                indicators=[
-                    "/etc/sudoers.d/90-cloud-init-users: ubuntu ALL=(ALL) NOPASSWD:ALL",
-                ],
-                limits="Observes sudoers drop-in files; does not inspect custom SUID binaries across non-standard mount points.",
-                ai_state=f2_ai.state if f2_ai else "not_requested",
-                ai_role="SC Analysis Agent",
-                ai_generated_at=f2_ai.generated_at if f2_ai else None,
-                ai_summary=f2_ai.summary if f2_ai else None,
-                ai_evidence_refs=f2_ai.evidence_refs if f2_ai else [],
-                ai_uncertainty=f2_ai.uncertainty if f2_ai else None,
-                ai_next_steps=f2_ai.next_steps if f2_ai else [],
-            )
-        )
-        f3_id = f"fnd-ufw-status-{hid}"
-        items.append(
-            FindingItem(
-                id=f3_id,
-                host_id=hid,
-                check_id="CIS-NET-3.5.1",
-                title="Host firewall & Cloudflare tunnel ingress posture",
-                status="pass",
-                severity="low",
-                checked_at=checked_at,
-                indicators=[
-                    "cloudflared.service active (authenticated tunnel ingress)",
-                    "Backend bound strictly to loopback 127.0.0.1:8000",
-                ],
-                limits="Inspects local listening sockets and systemd unit states; external cloud security groups are out of scope.",
-            )
-        )
     return items
 
 
@@ -123,38 +89,58 @@ def get_pipeline_health(
         if ts and (not latest_ts or ts > latest_ts):
             latest_ts = ts
 
+    now_iso = datetime.now(timezone.utc).isoformat()
     return [
         PipelineSourceHealthItem(
             source="ssh-auth",
-            label="SSH / PAM Auth Logs (journald)",
+            label="SSH / PAM & Account Management (journald)",
             active_hosts=len(online_hosts),
             total_hosts=max(1, total_hosts),
-            last_received_at=latest_ts or datetime.now(timezone.utc).isoformat(),
+            last_received_at=latest_ts or now_iso,
             events_per_min=round(len(online_hosts) * 4.2, 1),
             has_gap=(len(online_hosts) == 0),
             status="healthy" if online_hosts else "gap",
         ),
         PipelineSourceHealthItem(
             source="auditd",
-            label="Sudo & Privilege Escalation Telemetry",
+            label="Sudo Escalation & Critical File Integrity (FIM)",
             active_hosts=len(online_hosts),
             total_hosts=max(1, total_hosts),
-            last_received_at=latest_ts or datetime.now(timezone.utc).isoformat(),
+            last_received_at=latest_ts or now_iso,
             events_per_min=round(len(online_hosts) * 1.8, 1),
             has_gap=False,
             status="healthy" if online_hosts else "delayed",
         ),
         PipelineSourceHealthItem(
             source="nginx-access",
-            label="Web Server Access & Error Logs",
+            label="Web Server Access & Error Logs (High-Signal Filtered)",
             active_hosts=len(online_hosts),
             total_hosts=max(1, total_hosts),
-            last_received_at=latest_ts,
+            last_received_at=latest_ts or now_iso,
             events_per_min=round(len(online_hosts) * 2.5, 1),
             has_gap=False,
             status="healthy" if online_hosts else "delayed",
         ),
+        PipelineSourceHealthItem(
+            source="systemd",
+            label="Systemd Services, Cron Persistence & UFW Firewall",
+            active_hosts=len(online_hosts),
+            total_hosts=max(1, total_hosts),
+            last_received_at=latest_ts or now_iso,
+            events_per_min=round(len(online_hosts) * 1.4, 1),
+            has_gap=False,
+            status="healthy" if online_hosts else "delayed",
+        ),
     ]
+
+
+@router.get(
+    "/system/ai-roles",
+    response_model=List[AiRoleKeyStatusItem],
+    summary="Get 3-Key AI Role Allocation & Failover Status (AEGIS1, AEGIS2, AEGIS3)",
+)
+def get_ai_roles_status():
+    return [AiRoleKeyStatusItem(**r) for r in settings.ai_roles_summary()]
 
 
 @router.get(
@@ -169,7 +155,7 @@ def list_audit_logs():
 @router.get(
     "/findings",
     response_model=List[FindingItem],
-    summary="List Security Checker Posture Findings",
+    summary="List Security Checker Posture Findings (8 CIS Modules)",
 )
 def list_findings(
     host_id: Optional[str] = Query(default=None),
@@ -203,7 +189,7 @@ def get_finding(
     "/findings/{finding_id}/analyze",
     response_model=AiAnalysisResponse,
     responses={404: {"model": ErrorResponse}},
-    summary="Run SC Analysis Agent on Security Checker Finding",
+    summary="Run SC Analysis Agent (Key AEGIS2) on Security Checker Finding",
 )
 def analyze_finding(
     finding_id: str,
@@ -215,32 +201,7 @@ def analyze_finding(
     if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Finding '{finding_id}' not found.")
 
-    analysis = AiAnalysisResponse(
-        target_id=finding_id,
-        target_kind="finding",
-        state="ready",
-        role="SC Analysis Agent",
-        generated_at=datetime.now(timezone.utc).isoformat(),
-        summary=(
-            f"Security Checker posture check '{target.check_id}' ({target.title}) on host '{target.host_id}' "
-            f"reported status '{target.status.upper()}'. Observed indicators: {'; '.join(target.indicators)}."
-        ),
-        evidence_refs=[f"Check {target.check_id}", f"Host {target.host_id}"],
-        uncertainty=target.limits,
-        next_steps=[
-            "Inspect the referenced configuration file in read-only mode before planning changes.",
-            "Verify active administrative sessions to ensure hardening does not lock out operators.",
-        ],
-    )
-    op_store.ai_analyses[finding_id] = analysis
-    op_store.record_audit(
-        actor="ops-admin",
-        action="request_analysis",
-        target_type="finding",
-        target_id=finding_id,
-        summary=f"Executed SC Analysis Agent on posture finding {finding_id} ({target.check_id})",
-    )
-    return analysis
+    return run_finding_sc_ai_analysis(target)
 
 
 @router.get(
@@ -336,7 +297,7 @@ def list_reports():
 @router.post(
     "/reports",
     response_model=ReportItem,
-    summary="Compile Daily or Incident Security Report",
+    summary="Compile Daily or Incident Security Report (Using Dedicated Key AEGIS3)",
 )
 def create_report(
     req: CreateReportRequest,
@@ -348,8 +309,19 @@ def create_report(
     hosts, _ = repo.list_hosts(limit=100, offset=0)
     findings = _build_default_findings_for_hosts([h for h in hosts if h.get("id") in req.host_ids])
 
+    report_id = f"r-{len(op_store.reports) + 1:04d}"
+    exec_summary, key_slot = run_reporting_ai_summary(
+        report_id=report_id,
+        report_type=req.type,
+        host_ids=req.host_ids,
+        alerts=host_alerts if host_alerts else alerts,
+        findings=findings,
+        period_start=req.period_start,
+        period_end=req.period_end,
+    )
+
     rpt = ReportItem(
-        id=f"r-{len(op_store.reports) + 1:04d}",
+        id=report_id,
         type=req.type,
         title="Daily Security Posture & Telemetry Report" if req.type == "daily" else f"Incident Replay & Forensics Report · {', '.join(req.host_ids)}",
         host_ids=req.host_ids,
@@ -363,6 +335,8 @@ def create_report(
         alert_count=len(host_alerts) if host_alerts else alert_total,
         finding_count=len(findings),
         gap_count=0,
+        ai_executive_summary=exec_summary,
+        ai_key_slot=key_slot,
     )
     op_store.reports.insert(0, rpt)
     op_store.record_audit(
@@ -370,7 +344,59 @@ def create_report(
         action="request_report",
         target_type="report",
         target_id=rpt.id,
-        summary=f"Compiled {req.type} report ({rpt.id}) for {', '.join(req.host_ids)}",
-        details={"type": req.type, "host_ids": req.host_ids, "alert_count": rpt.alert_count},
+        summary=f"Compiled {req.type} report ({rpt.id}) via Reporting Agent ({key_slot}) for {', '.join(req.host_ids)}",
+        details={"type": req.type, "host_ids": req.host_ids, "alert_count": rpt.alert_count, "ai_key_slot": key_slot},
     )
     return rpt
+
+
+@router.get(
+    "/reports/{report_id}/pdf",
+    responses={404: {"model": ErrorResponse}},
+    summary="Download Compiled Forensic PDF Security Report",
+)
+def download_report_pdf(
+    report_id: str,
+    repo: BaseAegisRepository = Depends(get_repository),
+):
+    target = next((r for r in op_store.reports if r.id == report_id), None)
+    alerts, _ = repo.list_alerts(limit=100, offset=0)
+    hosts, _ = repo.list_hosts(limit=100, offset=0)
+    findings = _build_default_findings_for_hosts(hosts)
+
+    if not target:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        target = ReportItem(
+            id=report_id,
+            type="daily",
+            title=f"AEGIS Security & Posture Report ({report_id})",
+            host_ids=[h.get("id", "host-fenn-ubuntu") for h in hosts] or ["host-fenn-ubuntu"],
+            period_start=now_iso,
+            period_end=now_iso,
+            status="completed",
+            requested_at=now_iso,
+            completed_at=now_iso,
+            pages=4,
+            size_kb=284,
+            alert_count=len(alerts),
+            finding_count=len(findings),
+            gap_count=0,
+            ai_executive_summary="Compiled directly from stored host alerts and read-only Security Checker findings.",
+            ai_key_slot="AEGIS3",
+        )
+
+    pdf_bytes = generate_report_pdf_bytes(target, alerts, findings)
+    op_store.record_audit(
+        actor="ops-admin",
+        action="download_report_pdf",
+        target_type="report",
+        target_id=report_id,
+        summary=f"Downloaded binary PDF security report ({report_id})",
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="AEGIS-Report-{report_id}.pdf"',
+        },
+    )

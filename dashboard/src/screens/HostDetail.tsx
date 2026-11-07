@@ -155,11 +155,50 @@ export function HostDetailScreen() {
 
                 {tab === 'checks' &&
                   (findings.length ? (
-                    <Group>
-                      {findings.map((f) => (
-                        <FindingRow key={f.id} finding={f} showHost={false} />
-                      ))}
-                    </Group>
+                    <>
+                      <div className="provenance-card" style={{ marginBottom: '1rem' }}>
+                        <div className="provenance-header">
+                          <div className="provenance-title">
+                            <ShieldCheck className="provenance-icon" aria-hidden />
+                            <span>8-Module Read-Only Security Posture Compliance Breakdown</span>
+                          </div>
+                          <Tag>
+                            {findings.filter((f) => f.status === 'pass').length}/{findings.length} Passing (
+                            {Math.round((findings.filter((f) => f.status === 'pass').length / Math.max(1, findings.length)) * 100)}
+                            %)
+                          </Tag>
+                        </div>
+                        <div className="provenance-grid" style={{ marginTop: '0.65rem' }}>
+                          <div className="provenance-item">
+                            <span className="provenance-label">Compliant (PASS)</span>
+                            <span className="provenance-value mono" style={{ color: 'var(--status-healthy-fg)' }}>
+                              {findings.filter((f) => f.status === 'pass').length} module(s)
+                            </span>
+                          </div>
+                          <div className="provenance-item">
+                            <span className="provenance-label">Non-Compliant (FAIL)</span>
+                            <span className="provenance-value mono" style={{ color: 'var(--status-critical-fg)' }}>
+                              {findings.filter((f) => f.status === 'fail').length} module(s)
+                            </span>
+                          </div>
+                          <div className="provenance-item">
+                            <span className="provenance-label">Not Checked</span>
+                            <span className="provenance-value mono">
+                              {findings.filter((f) => f.status === 'not_checked').length} module(s)
+                            </span>
+                          </div>
+                          <div className="provenance-item">
+                            <span className="provenance-label">AI Posture Agent</span>
+                            <span className="provenance-value mono">SC Analysis Agent (Key AEGIS2)</span>
+                          </div>
+                        </div>
+                      </div>
+                      <Group>
+                        {findings.map((f) => (
+                          <FindingRow key={f.id} finding={f} showHost={false} />
+                        ))}
+                      </Group>
+                    </>
                   ) : (
                     <EmptyState icon={CircleHelp} title="No Security Checker results">
                       The Security Checker has not reported results for this host yet.

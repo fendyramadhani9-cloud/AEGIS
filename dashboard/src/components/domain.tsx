@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import type {
   Alert,
+  AlertContext,
   AlertGrouping,
   EvidenceProvenance,
   EvidenceSession,
@@ -802,6 +803,63 @@ export function RecoveryVerificationCard({ alertId }: { alertId: string }) {
               </div>
             ))}
           </div>
+
+          {result.remediationDiff && result.remediationDiff.length > 0 && (
+            <div style={{ marginTop: '0.4rem' }}>
+              <strong style={{ fontSize: '0.78rem', display: 'block', marginBottom: '0.35rem' }}>
+                Before vs. After Remediation Diff
+              </strong>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                {result.remediationDiff.map((diff, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      padding: '0.55rem 0.7rem',
+                      borderRadius: '6px',
+                      background: 'var(--bg-elevated)',
+                      border: '1px solid var(--border-subtle)',
+                      fontSize: '0.78rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem', fontWeight: 600 }}>
+                      <span className="mono">{diff.targetResource}</span>
+                      <Tag>{diff.status.replace('_', ' ')}</Tag>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                      <div
+                        style={{
+                          padding: '0.4rem 0.55rem',
+                          borderRadius: '4px',
+                          background: 'rgba(239, 68, 68, 0.08)',
+                          borderLeft: '3px solid var(--status-critical-fg)',
+                        }}
+                      >
+                        <div className="mono muted" style={{ fontSize: '0.7rem' }}>BEFORE (TRIGGER STATE)</div>
+                        <div style={{ marginTop: '0.15rem' }}>{diff.beforeState}</div>
+                      </div>
+                      <div
+                        style={{
+                          padding: '0.4rem 0.55rem',
+                          borderRadius: '4px',
+                          background:
+                            diff.status === 'verified_fixed'
+                              ? 'rgba(34, 197, 94, 0.08)'
+                              : 'rgba(245, 158, 11, 0.08)',
+                          borderLeft:
+                            diff.status === 'verified_fixed'
+                              ? '3px solid var(--status-healthy-fg)'
+                              : '3px solid var(--status-warning-fg)',
+                        }}
+                      >
+                        <div className="mono muted" style={{ fontSize: '0.7rem' }}>AFTER (POST-REMEDIATION)</div>
+                        <div style={{ marginTop: '0.15rem' }}>{diff.afterState}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -859,5 +917,144 @@ export function IncidentReplayCard({ replay }: { replay: IncidentReplay }) {
     </div>
   );
 }
+
+/* ---------------- 11. Multi-Stage Kill-Chain & Blast Radius Cards ---------------- */
+
+export function KillChainCard({ context }: { context: AlertContext }) {
+  const activeCount = context.killChain.filter((s) => s.status !== 'not_observed').length;
+
+  return (
+    <div className="provenance-card">
+      <div className="provenance-header">
+        <div className="provenance-title">
+          <Layers className="provenance-icon" aria-hidden />
+          <span>Multi-Stage Kill-Chain Correlation (MITRE ATT&CK)</span>
+        </div>
+        <Tag>{activeCount}/6 active stages</Tag>
+      </div>
+      <p className="prose muted" style={{ fontSize: '0.8rem', marginTop: '0.3rem' }}>
+        {context.blastRadius.impactScope}
+      </p>
+
+      <div style={{ marginTop: '0.7rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))', gap: '0.5rem' }}>
+        {context.killChain.map((st, idx) => {
+          const isCurrent = st.status === 'current_trigger';
+          const isObserved = st.status === 'observed';
+          return (
+            <div
+              key={st.stage}
+              style={{
+                padding: '0.55rem 0.65rem',
+                borderRadius: '6px',
+                background: 'var(--bg-elevated)',
+                border: isCurrent
+                  ? '1px solid var(--status-critical-fg)'
+                  : isObserved
+                    ? '1px solid var(--status-warning-fg)'
+                    : '1px solid var(--border-subtle)',
+                opacity: st.status === 'not_observed' ? 0.68 : 1,
+                fontSize: '0.78rem',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.25rem' }}>
+                <strong style={{ fontSize: '0.8rem' }}>
+                  {idx + 1}. {st.stage}
+                </strong>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 600,
+                    color: isCurrent
+                      ? 'var(--status-critical-fg)'
+                      : isObserved
+                        ? 'var(--status-warning-fg)'
+                        : 'var(--text-muted)',
+                  }}
+                >
+                  {isCurrent ? 'TRIGGER' : isObserved ? 'OBSERVED' : 'CLEAR'}
+                </span>
+              </div>
+              <div className="mono muted" style={{ fontSize: '0.7rem', marginTop: '0.15rem' }}>
+                {st.mitreTactic}
+              </div>
+              <p className="muted" style={{ margin: '0.3rem 0 0', fontSize: '0.75rem', lineHeight: 1.35 }}>
+                {st.summary}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function BlastRadiusCard({ context }: { context: AlertContext }) {
+  const br = context.blastRadius;
+  return (
+    <div className="provenance-card">
+      <div className="provenance-header">
+        <div className="provenance-title">
+          <ShieldAlert className="provenance-icon" aria-hidden />
+          <span>Blast Radius & Affected Entities</span>
+        </div>
+        <Tag>{br.targetHost}</Tag>
+      </div>
+
+      <div className="provenance-grid" style={{ marginTop: '0.65rem' }}>
+        <div className="provenance-item">
+          <span className="provenance-label">Source IPs</span>
+          <span className="provenance-value mono">
+            {br.sourceIps.length > 0 ? br.sourceIps.join(', ') : 'Local / Console'}
+          </span>
+        </div>
+        <div className="provenance-item">
+          <span className="provenance-label">Target Users</span>
+          <span className="provenance-value mono">
+            {br.targetUsers.length > 0 ? br.targetUsers.join(', ') : 'system'}
+          </span>
+        </div>
+        <div className="provenance-item">
+          <span className="provenance-label">Touched Files / URIs</span>
+          <span className="provenance-value mono">
+            {br.affectedFiles.length > 0 ? br.affectedFiles.join(', ') : 'Auth / Journal stream only'}
+          </span>
+        </div>
+        <div className="provenance-item">
+          <span className="provenance-label">Correlated Host Alerts</span>
+          <span className="provenance-value mono">
+            {br.relatedAlertIds.length > 0 ? `${br.relatedAlertIds.length} related (${br.relatedAlertIds.slice(0, 3).join(', ')})` : 'None (isolated)'}
+          </span>
+        </div>
+      </div>
+
+      {br.executedCommands.length > 0 && (
+        <div style={{ marginTop: '0.6rem', fontSize: '0.78rem' }}>
+          <span className="provenance-label" style={{ display: 'block', marginBottom: '0.25rem' }}>
+            Observed Privileged / Cron Commands
+          </span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            {br.executedCommands.slice(0, 4).map((cmd, idx) => (
+              <code
+                key={idx}
+                className="mono"
+                style={{
+                  padding: '0.25rem 0.5rem',
+                  borderRadius: '4px',
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-subtle)',
+                  fontSize: '0.75rem',
+                }}
+              >
+                {cmd}
+              </code>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 

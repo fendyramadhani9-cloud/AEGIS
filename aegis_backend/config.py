@@ -36,13 +36,25 @@ class Settings:
         self.supabase_service_role_key: Optional[str] = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
         self.supabase_timeout: int = int(os.getenv("SUPABASE_TIMEOUT", "10"))
 
-        # LLM Provider Configuration (with automatic fallback to backup keys AEGIS1..3)
+        # LLM Provider Configuration with Dedicated 3-Key Role Allocation (AEGIS1, AEGIS2, AEGIS3)
         self.llm_provider: str = os.getenv("AEGIS_LLM_PROVIDER", "mock").lower()
+        self.key_aegis1: Optional[str] = os.getenv("AEGIS1") or os.getenv("AEGIS_LLM_API_KEY")
+        self.key_aegis2: Optional[str] = os.getenv("AEGIS2") or self.key_aegis1
+        self.key_aegis3: Optional[str] = os.getenv("AEGIS3") or self.key_aegis1
+
+        # Primary key bindings per AI role:
+        # - AEGIS1 -> RM Analysis & Incident Investigation Agent
+        # - AEGIS2 -> SC Security Posture Analysis Agent
+        # - AEGIS3 -> Dedicated Daily & Incident Reporting Agent
+        self.llm_key_rm: Optional[str] = self.key_aegis1
+        self.llm_key_sc: Optional[str] = self.key_aegis2
+        self.llm_key_reporting: Optional[str] = self.key_aegis3
+
         self.llm_api_key: Optional[str] = (
             os.getenv("AEGIS_LLM_API_KEY")
-            or os.getenv("AEGIS1")
-            or os.getenv("AEGIS2")
-            or os.getenv("AEGIS3")
+            or self.key_aegis1
+            or self.key_aegis2
+            or self.key_aegis3
         )
         self.llm_model: str = os.getenv("AEGIS_LLM_MODEL", "gemini-2.5-flash")
         self.llm_timeout: int = int(os.getenv("AEGIS_LLM_TIMEOUT", "30"))
@@ -62,6 +74,64 @@ class Settings:
             and self.supabase_service_role_key
             and not self.supabase_service_role_key.startswith("your_")
         )
+
+    def get_role_key_chain(self, role: str) -> list[tuple[str, str]]:
+        """
+        Returns ordered (key_slot, api_key) failover chain for a specific AI role:
+        - 'rm': AEGIS1 (Primary) -> AEGIS2 (Backup) -> AEGIS3 (Backup)
+        - 'sc': AEGIS2 (Primary) -> AEGIS1 (Backup) -> AEGIS3 (Backup)
+        - 'reporting': AEGIS3 (Dedicated Primary for Daily/Incident Reports) -> AEGIS2 (Backup) -> AEGIS1 (Backup)
+        """
+        r = role.lower()
+        if r == "reporting":
+            raw_chain = [("AEGIS3", self.key_aegis3), ("AEGIS2", self.key_aegis2), ("AEGIS1", self.key_aegis1)]
+        elif r == "sc":
+            raw_chain = [("AEGIS2", self.key_aegis2), ("AEGIS1", self.key_aegis1), ("AEGIS3", self.key_aegis3)]
+        else:
+            raw_chain = [("AEGIS1", self.key_aegis1), ("AEGIS2", self.key_aegis2), ("AEGIS3", self.key_aegis3)]
+
+        seen = set()
+        chain: list[tuple[str, str]] = []
+        for slot, k in raw_chain:
+            if k and k not in seen:
+                seen.add(k)
+                chain.append((slot, k))
+        return chain
+
+    def ai_roles_summary(self) -> list[dict]:
+        """Returns safe, masked status of the 3 dedicated AI roles and their assigned API keys."""
+        return [
+            {
+                "role_id": "rm_agent",
+                "role_name": "RM Analysis Agent",
+                "key_slot": "AEGIS1",
+                "key_masked": mask_secret(self.key_aegis1),
+                "configured": bool(self.key_aegis1),
+                "model": self.llm_model,
+                "purpose": "Runtime Monitor Alert Investigation, Event Correlation & Handoff Synthesis",
+                "failover_slots": ["AEGIS2", "AEGIS3"],
+            },
+            {
+                "role_id": "sc_agent",
+                "role_name": "SC Analysis Agent",
+                "key_slot": "AEGIS2",
+                "key_masked": mask_secret(self.key_aegis2),
+                "configured": bool(self.key_aegis2),
+                "model": self.llm_model,
+                "purpose": "Read-Only Security Checker Posture Evaluation & Hardening Guidance",
+                "failover_slots": ["AEGIS1", "AEGIS3"],
+            },
+            {
+                "role_id": "reporting_agent",
+                "role_name": "Reporting Agent (Daily & Incident)",
+                "key_slot": "AEGIS3",
+                "key_masked": mask_secret(self.key_aegis3),
+                "configured": bool(self.key_aegis3),
+                "model": self.llm_model,
+                "purpose": "Dedicated Daily Security Briefing & Incident Forensic Report Generation",
+                "failover_slots": ["AEGIS2", "AEGIS1"],
+            },
+        ]
 
     def safe_summary(self) -> dict:
         """Provides a safe configuration summary for debugging without exposing secrets."""

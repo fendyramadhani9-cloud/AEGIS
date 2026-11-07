@@ -318,84 +318,101 @@ class RealLLMAdapter(BaseLLMProvider):
         base_url: Optional[str] = None,
         model_name: Optional[str] = None,
         timeout: int = 30,
+        timeout_seconds: Optional[int] = None,
+        backup_keys: Optional[List[str]] = None,
+        role: str = "rm",
         session: Optional[requests.Session] = None,
     ):
         self.provider_type = provider_type.lower()
-        self.api_key = api_key or os.getenv("AEGIS_LLM_API_KEY") or os.getenv("AEGIS1") or ""
+        self.role = role.lower()
+        k1 = os.getenv("AEGIS1") or os.getenv("AEGIS_LLM_API_KEY") or ""
+        k2 = os.getenv("AEGIS2") or k1
+        k3 = os.getenv("AEGIS3") or k1
+        default_role_key = k3 if self.role == "reporting" else (k2 if self.role == "sc" else k1)
+        self.api_key = api_key if api_key is not None else default_role_key
+        self.backup_keys = [k for k in (backup_keys or []) if k and k != self.api_key]
         self.base_url = base_url or os.getenv("AEGIS_LLM_BASE_URL", "")
         self.model_name = model_name or os.getenv("AEGIS_LLM_MODEL", "gemini-2.5-flash")
-        self.timeout = timeout
+        self.timeout = timeout_seconds if timeout_seconds is not None else timeout
         self.session = session or requests.Session()
 
     def _sanitize_error_message(self, message: str) -> str:
         """Strips out API key from error messages or stack traces."""
-        if self.api_key and self.api_key in message:
-            message = message.replace(self.api_key, "[REDACTED_API_KEY]")
+        for k in [self.api_key] + getattr(self, "backup_keys", []):
+            if k and k in message:
+                message = message.replace(k, "[REDACTED_API_KEY]")
         return message
 
     def _call_http(self, prompt: str, system_instruction: str) -> str:
         if not self.api_key:
             raise ValueError("AEGIS_LLM_API_KEY is not set. Please provide a valid API key.")
 
-        try:
-            if self.provider_type == "gemini":
-                # Official Google Gemini REST Endpoint
-                # https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
-                url = self.base_url or f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent"
-                headers = {
-                    "Content-Type": "application/json",
-                    "x-goog-api-key": self.api_key,
-                }
-                payload = {
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "systemInstruction": {"parts": [{"text": system_instruction}]},
-                    "generationConfig": {
-                        "responseMimeType": "application/json",
+        candidate_keys = [self.api_key] + getattr(self, "backup_keys", [])
+        last_error: Optional[Exception] = None
+
+        for idx, active_key in enumerate(candidate_keys):
+            try:
+                if self.provider_type == "gemini":
+                    url = self.base_url or f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent"
+                    headers = {
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": active_key,
+                    }
+                    payload = {
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "systemInstruction": {"parts": [{"text": system_instruction}]},
+                        "generationConfig": {
+                            "responseMimeType": "application/json",
+                            "temperature": 0.1,
+                        },
+                    }
+                    resp = self.session.post(url, headers=headers, json=payload, timeout=self.timeout)
+                    if resp.status_code != 200:
+                        sanitized_err = self._sanitize_error_message(resp.text)
+                        raise RuntimeError(f"Gemini API returned status {resp.status_code}: {sanitized_err}")
+
+                    result_json = resp.json()
+                    candidates = result_json.get("candidates", [])
+                    if not candidates:
+                        raise RuntimeError("Gemini API returned no candidates.")
+                    text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                    return text_content
+
+                else:
+                    base = self.base_url.rstrip("/") if self.base_url else "https://api.openai.com/v1"
+                    url = f"{base}/chat/completions"
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {active_key}",
+                    }
+                    payload = {
+                        "model": self.model_name,
+                        "messages": [
+                            {"role": "system", "content": system_instruction},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "response_format": {"type": "json_object"},
                         "temperature": 0.1,
-                    },
-                }
-                resp = self.session.post(url, headers=headers, json=payload, timeout=self.timeout)
-                if resp.status_code != 200:
-                    sanitized_err = self._sanitize_error_message(resp.text)
-                    raise RuntimeError(f"Gemini API returned status {resp.status_code}: {sanitized_err}")
+                    }
+                    resp = self.session.post(url, headers=headers, json=payload, timeout=self.timeout)
+                    if resp.status_code != 200:
+                        sanitized_err = self._sanitize_error_message(resp.text)
+                        raise RuntimeError(f"OpenAI-compatible API returned status {resp.status_code}: {sanitized_err}")
 
-                result_json = resp.json()
-                candidates = result_json.get("candidates", [])
-                if not candidates:
-                    raise RuntimeError("Gemini API returned no candidates.")
-                text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                return text_content
+                    result_json = resp.json()
+                    return result_json["choices"][0]["message"]["content"]
 
-            else:
-                # OpenAI-compatible format (OpenAI / Nine Router / Local Gateway)
-                base = self.base_url.rstrip("/") if self.base_url else "https://api.openai.com/v1"
-                url = f"{base}/chat/completions"
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.api_key}",
-                }
-                payload = {
-                    "model": self.model_name,
-                    "messages": [
-                        {"role": "system", "content": system_instruction},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.1,
-                }
-                resp = self.session.post(url, headers=headers, json=payload, timeout=self.timeout)
-                if resp.status_code != 200:
-                    sanitized_err = self._sanitize_error_message(resp.text)
-                    raise RuntimeError(f"OpenAI-compatible API returned status {resp.status_code}: {sanitized_err}")
+            except requests.exceptions.Timeout as e:
+                last_error = TimeoutError("LLM Provider request timed out.")
+                if idx == len(candidate_keys) - 1:
+                    raise last_error
+            except Exception as e:
+                sanitized = self._sanitize_error_message(str(e))
+                last_error = RuntimeError(f"LLM Provider invocation failed: {sanitized}")
+                if idx == len(candidate_keys) - 1:
+                    raise last_error
 
-                result_json = resp.json()
-                return result_json["choices"][0]["message"]["content"]
-
-        except requests.exceptions.Timeout:
-            raise TimeoutError("LLM Provider request timed out.")
-        except Exception as e:
-            sanitized = self._sanitize_error_message(str(e))
-            raise RuntimeError(f"LLM Provider invocation failed: {sanitized}")
+        raise last_error or RuntimeError("LLM Provider invocation failed.")
 
     def generate_investigation_report(
         self,
