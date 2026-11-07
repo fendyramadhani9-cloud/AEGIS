@@ -1,0 +1,65 @@
+services:
+  aegis-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aegis-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - AEGIS_STATE_FILE=/app/data/.aegis_operational_state.json
+      - AEGIS_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080
+    ports:
+      - "8000:8000"
+    volumes:
+      - aegis_state:/app/data
+    mem_limit: 192m
+    mem_reservation: 64m
+    cpus: 0.50
+
+  aegis-dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: aegis-dashboard
+    restart: unless-stopped
+    depends_on:
+      aegis-backend:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+    mem_limit: 64m
+    mem_reservation: 16m
+    cpus: 0.25
+
+  # Optional: Linux Host Telemetry Collector container (enable with: docker compose --profile collector up -d)
+  aegis-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aegis-collector
+    profiles:
+      - collector
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - AEGIS_API_URL=http://aegis-backend:8000/api
+      - AEGIS_CURSOR_FILE=/app/data/.collector_cursor
+      - AEGIS_LOG_FILES=/host_logs/nginx/access.log,/host_logs/apache2/access.log,/host_logs/audit/audit.log
+    command: ["python", "aegis_agent/collector.py"]
+    depends_on:
+      aegis-backend:
+        condition: service_healthy
+    volumes:
+      - aegis_state:/app/data
+      - /var/log:/host_logs:ro
+    mem_limit: 48m
+    mem_reservation: 16m
+    cpus: 0.20
+
+volumes:
+  aegis_state:

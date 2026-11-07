@@ -1,0 +1,25 @@
+# Git & VCS
+.git
+.gitignore
+
+# Python virtual environments & caches
+.venv
+venv
+__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache
+
+# Node / Frontend build caches
+node_modules
+dashboard/node_modules
+dashboard/dist
+dist
+*.tsbuildinfo
+
+# Local secrets & runtime state (passed via env_file / volume at runtime)
+.env
+.aegis_operational_state.json*
+.collector_cursor*
+outputs/
+*.log
