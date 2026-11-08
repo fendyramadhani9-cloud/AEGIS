@@ -23,7 +23,7 @@ from aegis_backend.source_attribution import classify_ip_source
 
 logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 class SqliteIncidentStore:
@@ -243,6 +243,67 @@ class SqliteIncidentStore:
                     conn.commit()
                 except Exception:
                     pass
+
+                # Version 2: Security Checker Persistent Runs and Findings
+                if current_ver < 2:
+                    logger.info("Applying SQLite schema migration v2 (security checker persistence) to %s", self.db_path)
+                    conn.executescript("""
+                        CREATE TABLE IF NOT EXISTS security_check_runs (
+                            id TEXT PRIMARY KEY,
+                            host_id TEXT NOT NULL,
+                            status TEXT NOT NULL DEFAULT 'completed',
+                            total_checks INTEGER NOT NULL DEFAULT 0,
+                            passed_checks INTEGER NOT NULL DEFAULT 0,
+                            failed_checks INTEGER NOT NULL DEFAULT 0,
+                            warning_checks INTEGER NOT NULL DEFAULT 0,
+                            error_checks INTEGER NOT NULL DEFAULT 0,
+                            checker_version TEXT NOT NULL DEFAULT '1.0.0',
+                            summary TEXT NOT NULL DEFAULT '{}',
+                            started_at TEXT NOT NULL,
+                            completed_at TEXT,
+                            created_at TEXT NOT NULL
+                        );
+
+                        CREATE INDEX IF NOT EXISTS idx_sc_runs_host_started ON security_check_runs(host_id, started_at DESC);
+                        CREATE INDEX IF NOT EXISTS idx_sc_runs_status ON security_check_runs(status);
+
+                        CREATE TABLE IF NOT EXISTS security_findings (
+                            id TEXT PRIMARY KEY,
+                            run_id TEXT NOT NULL REFERENCES security_check_runs(id) ON DELETE CASCADE,
+                            host_id TEXT NOT NULL,
+                            check_id TEXT NOT NULL,
+                            check_name TEXT NOT NULL,
+                            category TEXT NOT NULL,
+                            severity TEXT NOT NULL,
+                            status TEXT NOT NULL,
+                            actual_value TEXT,
+                            expected_value TEXT,
+                            description TEXT NOT NULL,
+                            security_impact TEXT,
+                            recommendation TEXT,
+                            evidence_summary TEXT,
+                            remediation_reference TEXT,
+                            checked_at TEXT NOT NULL,
+                            created_at TEXT NOT NULL,
+                            UNIQUE(run_id, check_id)
+                        );
+
+                        CREATE INDEX IF NOT EXISTS idx_sc_findings_host_checked ON security_findings(host_id, checked_at DESC);
+                        CREATE INDEX IF NOT EXISTS idx_sc_findings_run_id ON security_findings(run_id);
+                        CREATE INDEX IF NOT EXISTS idx_sc_findings_check_id ON security_findings(check_id);
+                        CREATE INDEX IF NOT EXISTS idx_sc_findings_category ON security_findings(category);
+                        CREATE INDEX IF NOT EXISTS idx_sc_findings_severity ON security_findings(severity);
+                        CREATE INDEX IF NOT EXISTS idx_sc_findings_status ON security_findings(status);
+                    """)
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    conn.execute(
+                        "INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?);",
+                        (2, now_iso, "Security checker persistent runs and findings schema"),
+                    )
+                    conn.commit()
+
+                conn.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION};")
+                conn.commit()
 
     # =========================================================================
     # INCIDENT OPERATIONS
@@ -761,3 +822,280 @@ class SqliteIncidentStore:
             out["unknown_items"] = [{"data_gap": str(x), "impact": "Forensic telemetry gap."} for x in parsed_u]
 
         return out
+
+    # =========================================================================
+    # SECURITY CHECKER PERSISTENT OPERATIONS
+    # =========================================================================
+
+    def upsert_security_check_run(
+        self,
+        run_data: Dict[str, Any],
+        findings: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Atomically persists security check run and findings with foreign key cascade."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        run_id = run_data["id"]
+        host_id = run_data["host_id"]
+
+        raw_summary = run_data.get("summary", {})
+        summary_str = json.dumps(raw_summary) if isinstance(raw_summary, (dict, list)) else str(raw_summary or "{}")
+
+        with self._lock:
+            with self._connection() as conn:
+                # 1. Upsert run
+                conn.execute("""
+                    INSERT INTO security_check_runs (
+                        id, host_id, status, total_checks, passed_checks,
+                        failed_checks, warning_checks, error_checks,
+                        checker_version, summary, started_at, completed_at, created_at
+                    ) VALUES (
+                        :id, :host_id, :status, :total_checks, :passed_checks,
+                        :failed_checks, :warning_checks, :error_checks,
+                        :checker_version, :summary, :started_at, :completed_at, :created_at
+                    )
+                    ON CONFLICT(id) DO UPDATE SET
+                        status = excluded.status,
+                        total_checks = excluded.total_checks,
+                        passed_checks = excluded.passed_checks,
+                        failed_checks = excluded.failed_checks,
+                        warning_checks = excluded.warning_checks,
+                        error_checks = excluded.error_checks,
+                        checker_version = excluded.checker_version,
+                        summary = excluded.summary,
+                        completed_at = excluded.completed_at;
+                """, {
+                    "id": run_id,
+                    "host_id": host_id,
+                    "status": run_data.get("status", "completed"),
+                    "total_checks": run_data.get("total_checks", 0),
+                    "passed_checks": run_data.get("passed_checks", 0),
+                    "failed_checks": run_data.get("failed_checks", 0),
+                    "warning_checks": run_data.get("warning_checks", 0),
+                    "error_checks": run_data.get("error_checks", 0),
+                    "checker_version": run_data.get("checker_version", "1.0.0"),
+                    "summary": summary_str,
+                    "started_at": run_data.get("started_at") or now_iso,
+                    "completed_at": run_data.get("completed_at"),
+                    "created_at": run_data.get("created_at") or now_iso,
+                })
+
+                # 2. Upsert findings
+                for f in findings:
+                    f_id = f.get("id") or f"FND-{host_id}-{f.get('check_id')}-{run_id}"
+                    conn.execute("""
+                        INSERT INTO security_findings (
+                            id, run_id, host_id, check_id, check_name, category,
+                            severity, status, actual_value, expected_value, description,
+                            security_impact, recommendation, evidence_summary,
+                            remediation_reference, checked_at, created_at
+                        ) VALUES (
+                            :id, :run_id, :host_id, :check_id, :check_name, :category,
+                            :severity, :status, :actual_value, :expected_value, :description,
+                            :security_impact, :recommendation, :evidence_summary,
+                            :remediation_reference, :checked_at, :created_at
+                        )
+                        ON CONFLICT(run_id, check_id) DO UPDATE SET
+                            severity = excluded.severity,
+                            status = excluded.status,
+                            actual_value = excluded.actual_value,
+                            expected_value = excluded.expected_value,
+                            description = excluded.description,
+                            security_impact = excluded.security_impact,
+                            recommendation = excluded.recommendation,
+                            evidence_summary = excluded.evidence_summary,
+                            remediation_reference = excluded.remediation_reference,
+                            checked_at = excluded.checked_at;
+                    """, {
+                        "id": f_id,
+                        "run_id": f.get("run_id") or run_id,
+                        "host_id": f.get("host_id") or host_id,
+                        "check_id": f.get("check_id", ""),
+                        "check_name": f.get("check_name", ""),
+                        "category": f.get("category", "system"),
+                        "severity": f.get("severity", "medium"),
+                        "status": f.get("status", "pass"),
+                        "actual_value": str(f.get("actual_value")) if f.get("actual_value") is not None else None,
+                        "expected_value": str(f.get("expected_value")) if f.get("expected_value") is not None else None,
+                        "description": f.get("description", ""),
+                        "security_impact": f.get("security_impact"),
+                        "recommendation": f.get("recommendation"),
+                        "evidence_summary": f.get("evidence_summary"),
+                        "remediation_reference": f.get("remediation_reference"),
+                        "checked_at": f.get("checked_at") or now_iso,
+                        "created_at": f.get("created_at") or now_iso,
+                    })
+
+                conn.commit()
+
+        logger.info("Persisted security check run %s (%d findings) to SQLite.", run_id, len(findings))
+        return run_data
+
+    def list_security_findings(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        category: Optional[str] = None,
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Returns paginated security findings matching query criteria."""
+        clauses = []
+        params: List[Any] = []
+
+        if host_id:
+            clauses.append("host_id = ?")
+            params.append(host_id)
+        if category:
+            clauses.append("category = ?")
+            params.append(category)
+        if severity:
+            clauses.append("severity = ?")
+            params.append(severity)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if search:
+            clauses.append("(check_name LIKE ? OR check_id LIKE ?)")
+            s_param = f"%{search}%"
+            params.extend([s_param, s_param])
+
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+        with self._lock:
+            with self._connection() as conn:
+                count_cur = conn.execute(f"SELECT COUNT(*) FROM security_findings {where_sql};", params)
+                total = count_cur.fetchone()[0]
+
+                data_params = list(params) + [limit, offset]
+                cur = conn.execute(
+                    f"SELECT * FROM security_findings {where_sql} ORDER BY checked_at DESC LIMIT ? OFFSET ?;",
+                    data_params,
+                )
+                rows = [dict(r) for r in cur.fetchall()]
+                return rows, total
+
+    def get_security_finding_by_id(self, finding_id: str) -> Optional[Dict[str, Any]]:
+        """Returns single security finding by ID."""
+        with self._lock:
+            with self._connection() as conn:
+                cur = conn.execute("SELECT * FROM security_findings WHERE id = ? LIMIT 1;", (finding_id,))
+                row = cur.fetchone()
+                return dict(row) if row else None
+
+    def list_security_runs(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Returns paginated execution runs."""
+        clauses = []
+        params: List[Any] = []
+
+        if host_id:
+            clauses.append("host_id = ?")
+            params.append(host_id)
+
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+        with self._lock:
+            with self._connection() as conn:
+                count_cur = conn.execute(f"SELECT COUNT(*) FROM security_check_runs {where_sql};", params)
+                total = count_cur.fetchone()[0]
+
+                data_params = list(params) + [limit, offset]
+                cur = conn.execute(
+                    f"SELECT * FROM security_check_runs {where_sql} ORDER BY started_at DESC LIMIT ? OFFSET ?;",
+                    data_params,
+                )
+                runs = []
+                for r in cur.fetchall():
+                    item = dict(r)
+                    if isinstance(item.get("summary"), str):
+                        try:
+                            item["summary"] = json.loads(item["summary"])
+                        except Exception:
+                            item["summary"] = {}
+                    runs.append(item)
+                return runs, total
+
+    def get_security_run_by_id(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """Returns security check run by ID."""
+        with self._lock:
+            with self._connection() as conn:
+                cur = conn.execute("SELECT * FROM security_check_runs WHERE id = ? LIMIT 1;", (run_id,))
+                row = cur.fetchone()
+                if not row:
+                    return None
+                item = dict(row)
+                if isinstance(item.get("summary"), str):
+                    try:
+                        item["summary"] = json.loads(item["summary"])
+                    except Exception:
+                        item["summary"] = {}
+                return item
+
+    def get_security_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        """Returns aggregated posture counters and last run timestamp."""
+        with self._lock:
+            with self._connection() as conn:
+                sql = """
+                    SELECT
+                        COUNT(*) as total_checks,
+                        COALESCE(SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END), 0) as passed,
+                        COALESCE(SUM(CASE WHEN status = 'fail' THEN 1 ELSE 0 END), 0) as failed,
+                        COALESCE(SUM(CASE WHEN status = 'warning' THEN 1 ELSE 0 END), 0) as warning,
+                        COALESCE(SUM(CASE WHEN status = 'not_applicable' THEN 1 ELSE 0 END), 0) as not_applicable,
+                        COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) as error,
+                        COALESCE(SUM(CASE WHEN status = 'fail' AND severity = 'critical' THEN 1 ELSE 0 END), 0) as critical_fails,
+                        COALESCE(SUM(CASE WHEN status = 'fail' AND severity = 'high' THEN 1 ELSE 0 END), 0) as high_fails,
+                        COALESCE(SUM(CASE WHEN status = 'fail' AND severity = 'medium' THEN 1 ELSE 0 END), 0) as medium_fails,
+                        COALESCE(SUM(CASE WHEN status = 'fail' AND severity = 'low' THEN 1 ELSE 0 END), 0) as low_fails
+                    FROM security_findings
+                """
+                params: List[Any] = []
+                if host_id:
+                    sql += " WHERE host_id = ?"
+                    params.append(host_id)
+
+                cur = conn.execute(sql, params)
+                row = cur.fetchone()
+
+                # Get latest run timestamp
+                run_sql = "SELECT completed_at, started_at FROM security_check_runs"
+                run_params: List[Any] = []
+                if host_id:
+                    run_sql += " WHERE host_id = ?"
+                    run_params.append(host_id)
+                run_sql += " ORDER BY started_at DESC LIMIT 1;"
+
+                run_cur = conn.execute(run_sql, run_params)
+                last_run = run_cur.fetchone()
+                last_checked_at = None
+                if last_run:
+                    last_checked_at = last_run["completed_at"] or last_run["started_at"]
+
+                # Distinct host count
+                host_cur = conn.execute("SELECT COUNT(DISTINCT host_id) FROM security_check_runs;")
+                total_hosts = host_cur.fetchone()[0] or 1
+
+                return {
+                    "total_checks": row["total_checks"] if row else 0,
+                    "passed": row["passed"] if row else 0,
+                    "failed": row["failed"] if row else 0,
+                    "warning": row["warning"] if row else 0,
+                    "not_applicable": row["not_applicable"] if row else 0,
+                    "error": row["error"] if row else 0,
+                    "total_hosts": total_hosts,
+                    "last_checked_at": last_checked_at,
+                    "critical_fails": row["critical_fails"] if row else 0,
+                    "high_fails": row["high_fails"] if row else 0,
+                    "medium_fails": row["medium_fails"] if row else 0,
+                    "low_fails": row["low_fails"] if row else 0,
+                }
+
+    def get_host_security_history(self, host_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        runs, _ = self.list_security_runs(limit=limit, offset=0, host_id=host_id)
+        return runs

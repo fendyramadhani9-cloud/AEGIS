@@ -503,6 +503,13 @@ class SupabaseRepository(BaseAegisRepository):
         run_data: Dict[str, Any],
         findings: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
+        """
+        Persists security check execution runs and findings.
+        Attempts Supabase Cloud table write first. If migration 003 is not deployed
+        (PGRST205 relation does not exist) or cloud is unreachable, falls back to
+        the persistent, disk-backed SQLite store.
+        If both fail, raises RuntimeError to prevent silent in-memory data loss.
+        """
         try:
             self.client.table("security_check_runs").upsert(
                 run_data,
@@ -521,17 +528,26 @@ class SupabaseRepository(BaseAegisRepository):
                     "last_sc_run_at": run_data["completed_at"]
                 }).eq("id", run_data["host_id"]).execute()
 
+            # Mirror to local SQLite store for resilient zero-loss local storage
+            try:
+                self.sqlite_store.upsert_security_check_run(run_data, findings)
+            except Exception as e_sq:
+                logger.warning("Local SQLite mirror write encountered error: %s", e_sq)
+
             return run_data
         except Exception as e:
             err_code = self._extract_postgrest_error_code(e)
-            logger.warning(f"Failed to persist security check run to Supabase: {e} (code: {err_code})")
-            if not hasattr(self, "_fallback_runs"):
-                self._fallback_runs = []
-                self._fallback_findings = []
-            self._fallback_runs.append(dict(run_data))
-            for f in findings:
-                self._fallback_findings.append(dict(f))
-            return run_data
+            logger.warning(
+                "Supabase security check run write unavailable (code: %s: %s). "
+                "Persisting to disk-backed SQLite storage.",
+                err_code,
+                e,
+            )
+            try:
+                return self.sqlite_store.upsert_security_check_run(run_data, findings)
+            except Exception as sqlite_err:
+                logger.critical("FATAL: Both Supabase and SQLite storage failed for security check run: %s", sqlite_err)
+                raise RuntimeError(f"Database write failed on both Supabase and SQLite: {sqlite_err}") from sqlite_err
 
     def list_security_findings(
         self,
@@ -560,39 +576,28 @@ class SupabaseRepository(BaseAegisRepository):
             total = res.count if res.count is not None else len(res.data or [])
             return res.data or [], total
         except Exception as e:
-            fallback = getattr(self, "_fallback_findings", [])
-            filtered = fallback
-            if host_id:
-                filtered = [f for f in filtered if f.get("host_id") == host_id]
-            if category:
-                filtered = [f for f in filtered if f.get("category") == category]
-            if severity:
-                filtered = [f for f in filtered if f.get("severity") == severity]
-            if status:
-                filtered = [f for f in filtered if f.get("status") == status]
-            if search:
-                s_lower = search.lower()
-                filtered = [f for f in filtered if s_lower in f.get("check_name", "").lower() or s_lower in f.get("check_id", "").lower()]
-            total = len(filtered)
-            paginated = filtered[offset : offset + limit]
-            return paginated, total
+            err_code = self._extract_postgrest_error_code(e)
+            logger.debug("Supabase security_findings unavailable (%s). Reading from persistent SQLite store.", err_code)
+            return self.sqlite_store.list_security_findings(
+                limit=limit,
+                offset=offset,
+                host_id=host_id,
+                category=category,
+                severity=severity,
+                status=status,
+                search=search,
+            )
 
     def get_security_finding_by_id(self, finding_id: str) -> Optional[Dict[str, Any]]:
         try:
             res = self.client.table("security_findings").select("*").eq("id", finding_id).limit(1).execute()
             if res.data and len(res.data) > 0:
                 return res.data[0]
-            fallback = getattr(self, "_fallback_findings", [])
-            for f in fallback:
-                if f.get("id") == finding_id:
-                    return f
-            return None
-        except Exception:
-            fallback = getattr(self, "_fallback_findings", [])
-            for f in fallback:
-                if f.get("id") == finding_id:
-                    return f
-            return None
+            return self.sqlite_store.get_security_finding_by_id(finding_id)
+        except Exception as e:
+            err_code = self._extract_postgrest_error_code(e)
+            logger.debug("Supabase finding lookup unavailable (%s). Reading from persistent SQLite store.", err_code)
+            return self.sqlite_store.get_security_finding_by_id(finding_id)
 
     def list_security_runs(
         self,
@@ -608,28 +613,21 @@ class SupabaseRepository(BaseAegisRepository):
             res = query.execute()
             total = res.count if res.count is not None else len(res.data or [])
             return res.data or [], total
-        except Exception:
-            fallback = getattr(self, "_fallback_runs", [])
-            filtered = [r for r in fallback if not host_id or r.get("host_id") == host_id]
-            total = len(filtered)
-            return filtered[offset : offset + limit], total
+        except Exception as e:
+            err_code = self._extract_postgrest_error_code(e)
+            logger.debug("Supabase security_check_runs unavailable (%s). Reading from persistent SQLite store.", err_code)
+            return self.sqlite_store.list_security_runs(limit=limit, offset=offset, host_id=host_id)
 
     def get_security_run_by_id(self, run_id: str) -> Optional[Dict[str, Any]]:
         try:
             res = self.client.table("security_check_runs").select("*").eq("id", run_id).limit(1).execute()
             if res.data and len(res.data) > 0:
                 return res.data[0]
-            fallback = getattr(self, "_fallback_runs", [])
-            for r in fallback:
-                if r.get("id") == run_id:
-                    return r
-            return None
-        except Exception:
-            fallback = getattr(self, "_fallback_runs", [])
-            for r in fallback:
-                if r.get("id") == run_id:
-                    return r
-            return None
+            return self.sqlite_store.get_security_run_by_id(run_id)
+        except Exception as e:
+            err_code = self._extract_postgrest_error_code(e)
+            logger.debug("Supabase security run lookup unavailable (%s). Reading from persistent SQLite store.", err_code)
+            return self.sqlite_store.get_security_run_by_id(run_id)
 
     def get_security_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
         findings, _ = self.list_security_findings(limit=1000, offset=0, host_id=host_id)

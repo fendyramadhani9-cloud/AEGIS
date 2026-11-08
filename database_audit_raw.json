@@ -1,0 +1,1413 @@
+{
+  "audit_timestamp": "2026-11-08T05:02:46.191398+00:00",
+  "sqlite": {
+    "exists": true,
+    "path": "D:\\AEGIS\\data\\aegis_incidents.db",
+    "file_size_bytes": 278528,
+    "pragmas": {
+      "journal_mode": "wal",
+      "synchronous": 2,
+      "foreign_keys": 0,
+      "busy_timeout": 5000,
+      "user_version": 2
+    },
+    "tables": {
+      "ai_analyses": {
+        "columns": [
+          {
+            "cid": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": true
+          },
+          {
+            "cid": 1,
+            "name": "incident_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 2,
+            "name": "alert_id",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 3,
+            "name": "host_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 4,
+            "name": "analysis_status",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 5,
+            "name": "threat_classification",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 6,
+            "name": "executive_summary",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 7,
+            "name": "attack_scenario",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 8,
+            "name": "risk_level",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 9,
+            "name": "risk_score",
+            "type": "INTEGER",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 10,
+            "name": "confidence_level",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 11,
+            "name": "confidence_reason",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 12,
+            "name": "facts_json",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": "'[]'",
+            "pk": false
+          },
+          {
+            "cid": 13,
+            "name": "inferences_json",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": "'[]'",
+            "pk": false
+          },
+          {
+            "cid": 14,
+            "name": "hypotheses_json",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": "'[]'",
+            "pk": false
+          },
+          {
+            "cid": 15,
+            "name": "unknowns_json",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": "'[]'",
+            "pk": false
+          },
+          {
+            "cid": 16,
+            "name": "observed_behaviors_json",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": "'[]'",
+            "pk": false
+          },
+          {
+            "cid": 17,
+            "name": "timeline_json",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": "'[]'",
+            "pk": false
+          },
+          {
+            "cid": 18,
+            "name": "supporting_evidence_json",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": "'[]'",
+            "pk": false
+          },
+          {
+            "cid": 19,
+            "name": "contradicting_evidence_json",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": "'[]'",
+            "pk": false
+          },
+          {
+            "cid": 20,
+            "name": "impact_assessment",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 21,
+            "name": "recommended_actions_json",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": "'[]'",
+            "pk": false
+          },
+          {
+            "cid": 22,
+            "name": "containment_recommendations_json",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": "'[]'",
+            "pk": false
+          },
+          {
+            "cid": 23,
+            "name": "investigation_notes",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 24,
+            "name": "provider",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 25,
+            "name": "model",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 26,
+            "name": "created_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 27,
+            "name": "completed_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          }
+        ],
+        "foreign_keys": [
+          {
+            "id": 0,
+            "seq": 0,
+            "table": "incidents",
+            "from": "incident_id",
+            "to": "id",
+            "on_update": "NO ACTION",
+            "on_delete": "CASCADE"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "idx_ai_analyses_inc",
+            "unique": false,
+            "columns": [
+              "incident_id"
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_ai_analyses_1",
+            "unique": true,
+            "columns": [
+              "id"
+            ]
+          }
+        ],
+        "row_count": 11
+      },
+      "incident_alerts": {
+        "columns": [
+          {
+            "cid": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": true
+          },
+          {
+            "cid": 1,
+            "name": "incident_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 2,
+            "name": "alert_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 3,
+            "name": "added_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          }
+        ],
+        "foreign_keys": [
+          {
+            "id": 0,
+            "seq": 0,
+            "table": "incidents",
+            "from": "incident_id",
+            "to": "id",
+            "on_update": "NO ACTION",
+            "on_delete": "CASCADE"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "idx_incident_alerts_alt",
+            "unique": false,
+            "columns": [
+              "alert_id"
+            ]
+          },
+          {
+            "name": "idx_incident_alerts_inc",
+            "unique": false,
+            "columns": [
+              "incident_id"
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_incident_alerts_2",
+            "unique": true,
+            "columns": [
+              "incident_id",
+              "alert_id"
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_incident_alerts_1",
+            "unique": true,
+            "columns": [
+              "id"
+            ]
+          }
+        ],
+        "row_count": 22
+      },
+      "incident_risk_factors": {
+        "columns": [
+          {
+            "cid": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": true
+          },
+          {
+            "cid": 1,
+            "name": "incident_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 2,
+            "name": "factor_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 3,
+            "name": "factor_name",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 4,
+            "name": "points",
+            "type": "INTEGER",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 5,
+            "name": "category",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 6,
+            "name": "description",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 7,
+            "name": "supporting_evidence_ids",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": "'[]'",
+            "pk": false
+          }
+        ],
+        "foreign_keys": [
+          {
+            "id": 0,
+            "seq": 0,
+            "table": "incidents",
+            "from": "incident_id",
+            "to": "id",
+            "on_update": "NO ACTION",
+            "on_delete": "CASCADE"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "idx_risk_factors_inc",
+            "unique": false,
+            "columns": [
+              "incident_id"
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_incident_risk_factors_1",
+            "unique": true,
+            "columns": [
+              "id"
+            ]
+          }
+        ],
+        "row_count": 40
+      },
+      "incident_status_history": {
+        "columns": [
+          {
+            "cid": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": true
+          },
+          {
+            "cid": 1,
+            "name": "incident_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 2,
+            "name": "old_status",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 3,
+            "name": "new_status",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 4,
+            "name": "note",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 5,
+            "name": "operator",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 6,
+            "name": "transitioned_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          }
+        ],
+        "foreign_keys": [
+          {
+            "id": 0,
+            "seq": 0,
+            "table": "incidents",
+            "from": "incident_id",
+            "to": "id",
+            "on_update": "NO ACTION",
+            "on_delete": "CASCADE"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "idx_status_history_inc",
+            "unique": false,
+            "columns": [
+              "incident_id"
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_incident_status_history_1",
+            "unique": true,
+            "columns": [
+              "id"
+            ]
+          }
+        ],
+        "row_count": 10
+      },
+      "incident_timeline": {
+        "columns": [
+          {
+            "cid": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": true
+          },
+          {
+            "cid": 1,
+            "name": "incident_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 2,
+            "name": "timestamp",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 3,
+            "name": "kind",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 4,
+            "name": "title",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 5,
+            "name": "description",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 6,
+            "name": "severity",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 7,
+            "name": "metadata_json",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": "'{}'",
+            "pk": false
+          }
+        ],
+        "foreign_keys": [
+          {
+            "id": 0,
+            "seq": 0,
+            "table": "incidents",
+            "from": "incident_id",
+            "to": "id",
+            "on_update": "NO ACTION",
+            "on_delete": "CASCADE"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "idx_timeline_ts",
+            "unique": false,
+            "columns": [
+              "timestamp"
+            ]
+          },
+          {
+            "name": "idx_timeline_inc",
+            "unique": false,
+            "columns": [
+              "incident_id"
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_incident_timeline_1",
+            "unique": true,
+            "columns": [
+              "id"
+            ]
+          }
+        ],
+        "row_count": 34
+      },
+      "incidents": {
+        "columns": [
+          {
+            "cid": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": true
+          },
+          {
+            "cid": 1,
+            "name": "host_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 2,
+            "name": "title",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 3,
+            "name": "severity",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 4,
+            "name": "risk_level",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 5,
+            "name": "risk_score",
+            "type": "INTEGER",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 6,
+            "name": "status",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": "'new'",
+            "pk": false
+          },
+          {
+            "cid": 7,
+            "name": "primary_alert_id",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 8,
+            "name": "alert_count",
+            "type": "INTEGER",
+            "notnull": false,
+            "dflt_value": "1",
+            "pk": false
+          },
+          {
+            "cid": 9,
+            "name": "source_ip",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 10,
+            "name": "target_user",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 11,
+            "name": "attack_scenario",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 12,
+            "name": "correlation_reason",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 13,
+            "name": "assigned_to",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 14,
+            "name": "first_seen_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 15,
+            "name": "last_seen_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 16,
+            "name": "created_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 17,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 18,
+            "name": "provenance",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": "'synthetic_benchmark'",
+            "pk": false
+          },
+          {
+            "cid": 19,
+            "name": "source_category",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": "'unknown'",
+            "pk": false
+          },
+          {
+            "cid": 20,
+            "name": "source_label",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 21,
+            "name": "threat_actor_context",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          }
+        ],
+        "foreign_keys": [],
+        "indexes": [
+          {
+            "name": "idx_incidents_risk",
+            "unique": false,
+            "columns": [
+              "risk_level"
+            ]
+          },
+          {
+            "name": "idx_incidents_status",
+            "unique": false,
+            "columns": [
+              "status"
+            ]
+          },
+          {
+            "name": "idx_incidents_host",
+            "unique": false,
+            "columns": [
+              "host_id"
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_incidents_1",
+            "unique": true,
+            "columns": [
+              "id"
+            ]
+          }
+        ],
+        "row_count": 13
+      },
+      "schema_migrations": {
+        "columns": [
+          {
+            "cid": 0,
+            "name": "version",
+            "type": "INTEGER",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": true
+          },
+          {
+            "cid": 1,
+            "name": "applied_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 2,
+            "name": "description",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          }
+        ],
+        "foreign_keys": [],
+        "indexes": [],
+        "row_count": 2
+      },
+      "security_check_runs": {
+        "columns": [
+          {
+            "cid": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": true
+          },
+          {
+            "cid": 1,
+            "name": "host_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 2,
+            "name": "status",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": "'completed'",
+            "pk": false
+          },
+          {
+            "cid": 3,
+            "name": "total_checks",
+            "type": "INTEGER",
+            "notnull": true,
+            "dflt_value": "0",
+            "pk": false
+          },
+          {
+            "cid": 4,
+            "name": "passed_checks",
+            "type": "INTEGER",
+            "notnull": true,
+            "dflt_value": "0",
+            "pk": false
+          },
+          {
+            "cid": 5,
+            "name": "failed_checks",
+            "type": "INTEGER",
+            "notnull": true,
+            "dflt_value": "0",
+            "pk": false
+          },
+          {
+            "cid": 6,
+            "name": "warning_checks",
+            "type": "INTEGER",
+            "notnull": true,
+            "dflt_value": "0",
+            "pk": false
+          },
+          {
+            "cid": 7,
+            "name": "error_checks",
+            "type": "INTEGER",
+            "notnull": true,
+            "dflt_value": "0",
+            "pk": false
+          },
+          {
+            "cid": 8,
+            "name": "checker_version",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": "'1.0.0'",
+            "pk": false
+          },
+          {
+            "cid": 9,
+            "name": "summary",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": "'{}'",
+            "pk": false
+          },
+          {
+            "cid": 10,
+            "name": "started_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 11,
+            "name": "completed_at",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 12,
+            "name": "created_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          }
+        ],
+        "foreign_keys": [],
+        "indexes": [
+          {
+            "name": "idx_sc_runs_status",
+            "unique": false,
+            "columns": [
+              "status"
+            ]
+          },
+          {
+            "name": "idx_sc_runs_host_started",
+            "unique": false,
+            "columns": [
+              "host_id",
+              "started_at"
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_security_check_runs_1",
+            "unique": true,
+            "columns": [
+              "id"
+            ]
+          }
+        ],
+        "row_count": 0
+      },
+      "security_findings": {
+        "columns": [
+          {
+            "cid": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": true
+          },
+          {
+            "cid": 1,
+            "name": "run_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 2,
+            "name": "host_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 3,
+            "name": "check_id",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 4,
+            "name": "check_name",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 5,
+            "name": "category",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 6,
+            "name": "severity",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 7,
+            "name": "status",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 8,
+            "name": "actual_value",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 9,
+            "name": "expected_value",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 10,
+            "name": "description",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 11,
+            "name": "security_impact",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 12,
+            "name": "recommendation",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 13,
+            "name": "evidence_summary",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 14,
+            "name": "remediation_reference",
+            "type": "TEXT",
+            "notnull": false,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 15,
+            "name": "checked_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          },
+          {
+            "cid": 16,
+            "name": "created_at",
+            "type": "TEXT",
+            "notnull": true,
+            "dflt_value": null,
+            "pk": false
+          }
+        ],
+        "foreign_keys": [
+          {
+            "id": 0,
+            "seq": 0,
+            "table": "security_check_runs",
+            "from": "run_id",
+            "to": "id",
+            "on_update": "NO ACTION",
+            "on_delete": "CASCADE"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "idx_sc_findings_status",
+            "unique": false,
+            "columns": [
+              "status"
+            ]
+          },
+          {
+            "name": "idx_sc_findings_severity",
+            "unique": false,
+            "columns": [
+              "severity"
+            ]
+          },
+          {
+            "name": "idx_sc_findings_category",
+            "unique": false,
+            "columns": [
+              "category"
+            ]
+          },
+          {
+            "name": "idx_sc_findings_check_id",
+            "unique": false,
+            "columns": [
+              "check_id"
+            ]
+          },
+          {
+            "name": "idx_sc_findings_run_id",
+            "unique": false,
+            "columns": [
+              "run_id"
+            ]
+          },
+          {
+            "name": "idx_sc_findings_host_checked",
+            "unique": false,
+            "columns": [
+              "host_id",
+              "checked_at"
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_security_findings_2",
+            "unique": true,
+            "columns": [
+              "run_id",
+              "check_id"
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_security_findings_1",
+            "unique": true,
+            "columns": [
+              "id"
+            ]
+          }
+        ],
+        "row_count": 0
+      }
+    },
+    "orphan_checks": {
+      "orphan_incident_alerts": 0,
+      "orphan_incident_timeline": 0,
+      "orphan_ai_analyses": 0,
+      "orphan_incident_risk_factors": 0
+    },
+    "schema_version": 2
+  },
+  "supabase": {
+    "connected": true,
+    "message": "Database connection verified successfully.",
+    "latency_ms": 829.37,
+    "tables": {
+      "hosts": {
+        "exists": true,
+        "count": 1,
+        "columns": [
+          "agent_status",
+          "agent_version",
+          "created_at",
+          "hostname",
+          "id",
+          "ip_address",
+          "is_archived",
+          "last_data_at",
+          "last_sc_run_at",
+          "os",
+          "updated_at"
+        ],
+        "error": null
+      },
+      "log_sources": {
+        "exists": true,
+        "count": 0,
+        "columns": [],
+        "error": null
+      },
+      "telemetry_gaps": {
+        "exists": true,
+        "count": 0,
+        "columns": [],
+        "error": null
+      },
+      "telemetry_events": {
+        "exists": true,
+        "count": 981,
+        "columns": [
+          "created_at",
+          "details",
+          "event_timestamp",
+          "event_type",
+          "host_id",
+          "id",
+          "message",
+          "source_id",
+          "source_ip",
+          "user_name"
+        ],
+        "error": null
+      },
+      "alerts": {
+        "exists": true,
+        "count": 13,
+        "columns": [
+          "created_at",
+          "detected_at",
+          "host_id",
+          "id",
+          "reason",
+          "rule_id",
+          "rule_version",
+          "severity",
+          "title"
+        ],
+        "error": null
+      },
+      "alert_evidence": {
+        "exists": true,
+        "count": 23,
+        "columns": [
+          "alert_id",
+          "citation_role",
+          "created_at",
+          "event_id"
+        ],
+        "error": null
+      },
+      "incidents": {
+        "exists": true,
+        "count": 0,
+        "columns": [],
+        "error": null
+      },
+      "investigations": {
+        "exists": true,
+        "count": 0,
+        "columns": [],
+        "error": null
+      },
+      "findings": {
+        "exists": true,
+        "count": 0,
+        "columns": [],
+        "error": null
+      },
+      "evidence_sessions": {
+        "exists": true,
+        "count": 0,
+        "columns": [],
+        "error": null
+      },
+      "reports": {
+        "exists": true,
+        "count": 0,
+        "columns": [],
+        "error": null
+      },
+      "report_hosts": {
+        "exists": true,
+        "count": 0,
+        "columns": [],
+        "error": null
+      },
+      "system_status": {
+        "exists": true,
+        "count": 1,
+        "columns": [
+          "ai_provider",
+          "ai_provider_note",
+          "checked_at",
+          "collector",
+          "id",
+          "rules_engine"
+        ],
+        "error": null
+      },
+      "security_check_runs": {
+        "exists": false,
+        "count": 0,
+        "columns": [],
+        "error": "Code: PGRST205 | {'message': \"Could not find the table 'public.security_check_runs' in the schema cache\", 'code': 'PGRST205', 'hint': None, 'details': None}"
+      },
+      "security_findings": {
+        "exists": false,
+        "count": 0,
+        "columns": [],
+        "error": "Code: PGRST205 | {'message': \"Could not find the table 'public.security_findings' in the schema cache\", 'code': 'PGRST205', 'hint': None, 'details': None}"
+      },
+      "incident_alerts": {
+        "exists": false,
+        "count": 0,
+        "columns": [],
+        "error": "Code: PGRST205 | {'message': \"Could not find the table 'public.incident_alerts' in the schema cache\", 'code': 'PGRST205', 'hint': None, 'details': None}"
+      },
+      "incident_timeline": {
+        "exists": false,
+        "count": 0,
+        "columns": [],
+        "error": "Code: PGRST205 | {'message': \"Could not find the table 'public.incident_timeline' in the schema cache\", 'code': 'PGRST205', 'hint': None, 'details': None}"
+      },
+      "ai_analyses": {
+        "exists": false,
+        "count": 0,
+        "columns": [],
+        "error": "Code: PGRST205 | {'message': \"Could not find the table 'public.ai_analyses' in the schema cache\", 'code': 'PGRST205', 'hint': None, 'details': None}"
+      },
+      "incident_status_history": {
+        "exists": false,
+        "count": 0,
+        "columns": [],
+        "error": "Code: PGRST205 | {'message': \"Could not find the table 'public.incident_status_history' in the schema cache\", 'code': 'PGRST205', 'hint': None, 'details': None}"
+      }
+    },
+    "rpc_functions": {
+      "fn_ingest_alert_with_evidence": {
+        "exists": false,
+        "error_code": "PGRST202",
+        "status": "Missing (PGRST202)"
+      },
+      "fn_sync_host_last_sc_run": {
+        "exists": false,
+        "error_code": "PGRST202",
+        "status": "Missing (PGRST202)"
+      }
+    }
+  }
+}

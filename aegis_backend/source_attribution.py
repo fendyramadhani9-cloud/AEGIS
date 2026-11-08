@@ -239,3 +239,4 @@ def format_contextual_attack_scenario(
         scenario = f"Correlated security detections on {host_id} involving {attr['attribution_narrative']}."
 
     return title, scenario
+
