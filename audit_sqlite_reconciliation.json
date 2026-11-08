@@ -1,0 +1,23 @@
+{
+  "db_path": "D:\\AEGIS\\data\\aegis_incidents.db",
+  "table_counts": {
+    "ai_analyses": 14,
+    "incident_alerts": 22,
+    "incident_risk_factors": 40,
+    "incident_status_history": 13,
+    "incident_timeline": 40,
+    "incidents": 13,
+    "schema_migrations": 2,
+    "security_check_runs": 0,
+    "security_findings": 0
+  },
+  "total_records": 144,
+  "orphaned_records": {
+    "incident_alerts_missing_incident": 0,
+    "incident_risk_factors_missing_incident": 0,
+    "incident_timeline_missing_incident": 0,
+    "ai_analyses_missing_incident": 0,
+    "incident_status_history_missing_incident": 0,
+    "security_findings_missing_run": 0
+  }
+}

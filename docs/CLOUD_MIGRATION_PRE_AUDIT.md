@@ -264,3 +264,4 @@ An audit of `aegis_backend/repository.py` and API routers was performed to map e
 2. **Host ID Compatibility:** The host ID used in all SQLite records (`host-fenn-ubuntu`) matches the active registered host in Supabase Cloud.
 3. **Data Loss Risk:** Low, provided that Migration 004 is updated to include the missing attribution columns (`provenance`, `source_category`, `source_label`, `threat_actor_context`, `correlation_reason`), the 4-tier AI reasoning fields (`facts`, `inferences`, `hypotheses`), and the `incident_risk_factors` table.
 4. **Safety Boundary:** Strict read-only maintained. Zero DDL executed on Supabase Cloud.
+

@@ -303,7 +303,67 @@ class SqliteIncidentStore:
                     conn.commit()
 
                 conn.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION};")
+
+                # Mirror status tracking table for Cloud-to-SQLite synchronization auditing
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS mirror_sync_log (
+                        id TEXT PRIMARY KEY,
+                        entity_type TEXT NOT NULL,
+                        entity_id TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        retry_count INTEGER NOT NULL DEFAULT 0,
+                        error_message TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                """)
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_mirror_status ON mirror_sync_log(status);")
                 conn.commit()
+
+    def log_mirror_attempt(
+        self,
+        entity_type: str,
+        entity_id: str,
+        action: str,
+        status: str,
+        retry_count: int = 0,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Records the status of a Cloud-to-SQLite mirror synchronization attempt."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        log_id = f"LOG-{entity_type}-{entity_id}"
+        with self._lock:
+            try:
+                with self._connection() as conn:
+                    conn.execute("""
+                        INSERT INTO mirror_sync_log (id, entity_type, entity_id, action, status, retry_count, error_message, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            status = excluded.status,
+                            retry_count = excluded.retry_count,
+                            error_message = excluded.error_message,
+                            updated_at = excluded.updated_at;
+                    """, (log_id, entity_type, entity_id, action, status, retry_count, error_message, now_iso, now_iso))
+                    conn.commit()
+            except Exception as e:
+                logger.warning("Failed to record mirror sync log: %s", e)
+
+    def get_mirror_sync_stats(self) -> Dict[str, Any]:
+        """Returns aggregated mirror status counts and last failed records."""
+        with self._lock:
+            with self._connection() as conn:
+                cur = conn.execute("SELECT status, count(*) FROM mirror_sync_log GROUP BY status;")
+                counts = {r[0]: r[1] for r in cur.fetchall()}
+                cur = conn.execute("SELECT entity_type, entity_id, error_message, updated_at FROM mirror_sync_log WHERE status != 'synced' ORDER BY updated_at DESC LIMIT 10;")
+                failures = [dict(r) for r in cur.fetchall()]
+                return {
+                    "total_logs": sum(counts.values()),
+                    "synced": counts.get("synced", 0),
+                    "failed": counts.get("failed", 0),
+                    "pending_retry": counts.get("pending_retry", 0),
+                    "recent_failures": failures,
+                }
 
     # =========================================================================
     # INCIDENT OPERATIONS

@@ -237,6 +237,11 @@ class BaseAegisRepository(ABC):
         """Returns aggregated incident lifecycle metrics and risk distribution."""
         pass
 
+    @abstractmethod
+    def get_mirror_sync_stats(self) -> Dict[str, Any]:
+        """Returns statistics and logs of Cloud-to-SQLite mirror synchronization."""
+        pass
+
 
 
 class SupabaseRepository(BaseAegisRepository):
@@ -254,6 +259,43 @@ class SupabaseRepository(BaseAegisRepository):
             if not settings.is_supabase_configured:
                 raise ValueError("Cannot initialize SupabaseRepository: Supabase credentials not configured in environment.")
             self.client: Client = create_client(settings.supabase_url, settings.supabase_service_role_key)
+
+    def _execute_mirror(self, entity_type: str, entity_id: str, action: str, mirror_fn) -> None:
+        """
+        Executes local SQLite mirroring with retry (up to 3 attempts with exponential backoff)
+        and deterministic tracking in mirror_sync_log. Prevents silent synchronization drift.
+        """
+        attempts = 0
+        max_retries = 3
+        last_err = None
+        while attempts < max_retries:
+            attempts += 1
+            try:
+                mirror_fn()
+                self.sqlite_store.log_mirror_attempt(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    action=action,
+                    status="synced",
+                    retry_count=attempts - 1,
+                )
+                return
+            except Exception as e:
+                last_err = e
+                time.sleep(0.05 * (2 ** (attempts - 1)))
+
+        logger.error(
+            "SQLite mirror sync failed for %s:%s after %d retries: %s",
+            entity_type, entity_id, max_retries, last_err,
+        )
+        self.sqlite_store.log_mirror_attempt(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action=action,
+            status="failed",
+            retry_count=max_retries,
+            error_message=str(last_err),
+        )
 
     def check_database_health(self) -> Tuple[bool, str, Optional[float]]:
         start_t = time.perf_counter()
@@ -528,11 +570,13 @@ class SupabaseRepository(BaseAegisRepository):
                     "last_sc_run_at": run_data["completed_at"]
                 }).eq("id", run_data["host_id"]).execute()
 
-            # Mirror to local SQLite store for resilient zero-loss local storage
-            try:
-                self.sqlite_store.upsert_security_check_run(run_data, findings)
-            except Exception as e_sq:
-                logger.warning("Local SQLite mirror write encountered error: %s", e_sq)
+            # Mirror to local SQLite store with retry and audit logging
+            self._execute_mirror(
+                "security_check_run",
+                run_data["id"],
+                "upsert",
+                lambda: self.sqlite_store.upsert_security_check_run(run_data, findings),
+            )
 
             return run_data
         except Exception as e:
@@ -825,10 +869,12 @@ class SupabaseRepository(BaseAegisRepository):
                         })
                     self.client.table("incident_risk_factors").upsert(rf_rows, on_conflict="incident_id,factor_id").execute()
 
-                try:
-                    self.sqlite_store.upsert_incident(incident_data, alert_ids, risk_factors)
-                except Exception as e_sq:
-                    logger.debug("Local SQLite mirror write skipped: %s", e_sq)
+                self._execute_mirror(
+                    "incident",
+                    incident_data["id"],
+                    "upsert",
+                    lambda: self.sqlite_store.upsert_incident(incident_data, alert_ids, risk_factors),
+                )
 
                 return incident_data
             except Exception as e:
@@ -880,10 +926,12 @@ class SupabaseRepository(BaseAegisRepository):
                     "created_at": now_iso,
                 }
                 self.client.table("incident_timeline").insert(tl_row).execute()
-                try:
-                    self.sqlite_store.update_incident_status(incident_id, status, note, operator)
-                except Exception as e_sq:
-                    logger.debug("Local SQLite mirror status update skipped: %s", e_sq)
+                self._execute_mirror(
+                    "incident_status",
+                    incident_id,
+                    "update_status",
+                    lambda: self.sqlite_store.update_incident_status(incident_id, status, note, operator),
+                )
                 return self.get_incident_by_id(incident_id)
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to update status: %s", e)
@@ -968,10 +1016,12 @@ class SupabaseRepository(BaseAegisRepository):
                     "completed_at": analysis_data.get("completed_at") or now_iso,
                 }
                 self.client.table("ai_analyses").upsert(row, on_conflict="id").execute()
-                try:
-                    self.sqlite_store.save_ai_analysis(analysis_data)
-                except Exception as e_sq:
-                    logger.debug("Local SQLite mirror save AI analysis skipped: %s", e_sq)
+                self._execute_mirror(
+                    "ai_analysis",
+                    analysis_data["id"],
+                    "save",
+                    lambda: self.sqlite_store.save_ai_analysis(analysis_data),
+                )
                 return analysis_data
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to save AI analysis: %s", e)
@@ -1091,6 +1141,10 @@ class SupabaseRepository(BaseAegisRepository):
                 raise RuntimeError(f"Cloud SSoT summary failed: {e}") from e
 
         return self.sqlite_store.get_incident_summary()
+
+    def get_mirror_sync_stats(self) -> Dict[str, Any]:
+        """Returns statistics and logs of Cloud-to-SQLite mirror synchronization."""
+        return self.sqlite_store.get_mirror_sync_stats()
 
 
 
@@ -1621,10 +1675,12 @@ class MockAegisRepository(BaseAegisRepository):
                         })
                     self.client.table("incident_risk_factors").upsert(rf_rows, on_conflict="incident_id,factor_id").execute()
 
-                try:
-                    self.sqlite_store.upsert_incident(incident_data, alert_ids, risk_factors)
-                except Exception as e_sq:
-                    logger.debug("Local SQLite mirror write skipped: %s", e_sq)
+                self._execute_mirror(
+                    "incident",
+                    incident_data["id"],
+                    "upsert",
+                    lambda: self.sqlite_store.upsert_incident(incident_data, alert_ids, risk_factors),
+                )
 
                 return incident_data
             except Exception as e:
@@ -1676,10 +1732,12 @@ class MockAegisRepository(BaseAegisRepository):
                     "created_at": now_iso,
                 }
                 self.client.table("incident_timeline").insert(tl_row).execute()
-                try:
-                    self.sqlite_store.update_incident_status(incident_id, status, note, operator)
-                except Exception as e_sq:
-                    logger.debug("Local SQLite mirror status update skipped: %s", e_sq)
+                self._execute_mirror(
+                    "incident_status",
+                    incident_id,
+                    "update_status",
+                    lambda: self.sqlite_store.update_incident_status(incident_id, status, note, operator),
+                )
                 return self.get_incident_by_id(incident_id)
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to update status: %s", e)
@@ -1764,10 +1822,12 @@ class MockAegisRepository(BaseAegisRepository):
                     "completed_at": analysis_data.get("completed_at") or now_iso,
                 }
                 self.client.table("ai_analyses").upsert(row, on_conflict="id").execute()
-                try:
-                    self.sqlite_store.save_ai_analysis(analysis_data)
-                except Exception as e_sq:
-                    logger.debug("Local SQLite mirror save AI analysis skipped: %s", e_sq)
+                self._execute_mirror(
+                    "ai_analysis",
+                    analysis_data["id"],
+                    "save",
+                    lambda: self.sqlite_store.save_ai_analysis(analysis_data),
+                )
                 return analysis_data
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to save AI analysis: %s", e)
@@ -1887,6 +1947,10 @@ class MockAegisRepository(BaseAegisRepository):
                 raise RuntimeError(f"Cloud SSoT summary failed: {e}") from e
 
         return self.sqlite_store.get_incident_summary()
+
+    def get_mirror_sync_stats(self) -> Dict[str, Any]:
+        """Returns statistics and logs of Cloud-to-SQLite mirror synchronization."""
+        return self.sqlite_store.get_mirror_sync_stats()
 
 
 

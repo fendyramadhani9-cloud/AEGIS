@@ -104,3 +104,4 @@ psql "postgresql://postgres:[SUPABASE_DB_PASSWORD]@db.hiwfbmwgnpnwaszltqwb.supab
 | **Accidental Incident Purge** | < 1 hour | < 2 minutes | Restore SQLite snapshot or query pre-restore snapshot file. |
 
 **Readiness Invariant:** If the pre-migration logical backup of Supabase Cloud cannot be taken or verified, all migration steps must immediately pause and register as **`BLOCKED`**.
+

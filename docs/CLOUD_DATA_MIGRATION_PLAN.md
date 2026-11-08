@@ -123,3 +123,4 @@ python scripts/migrate_sqlite_to_supabase.py \
   --execute-cloud \
   --output-report data/live_migration_report.json
 ```
+

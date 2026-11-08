@@ -272,3 +272,4 @@ CREATE INDEX IF NOT EXISTS idx_sc_findings_run_id ON public.security_findings(ru
   * RLS is enabled on all 11 tables.
   * Permissions are strictly revoked from `PUBLIC`, `anon`, and `authenticated`.
   * Permissions are granted exclusively to backend `service_role` and `postgres` superuser.
+

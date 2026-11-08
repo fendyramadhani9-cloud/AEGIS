@@ -66,3 +66,4 @@ with open("sqlite_deep_inspection.json", "w", encoding="utf-8") as f:
     json.dump(stats, f, indent=2)
 
 print("\n[+] Full deep inspection written to sqlite_deep_inspection.json")
+

@@ -56,13 +56,18 @@ flowchart TD
 ### Phase 1: Ingestion Freeze & Pre-Migration Safeguards ($T-15\text{ min}$ to $T-0$)
 
 1. **Notify System Operators**:
-   Announce scheduled maintenance window (Estimated downtime: 15 minutes).
+   Announce scheduled maintenance window.
+   > [!NOTE]
+   > **Downtime Estimate vs Guarantee**: Total planned maintenance window is **estimated at 25 minutes** (active daemon restart interruption: $< 5\text{ minutes}$). This duration is an operational benchmark based on test simulations, **NOT a contractual guarantee**. If unexpected blocks occur during pre-migration gates or data transfer exceeding 15 minutes, the abort threshold is triggered immediately.
 
 2. **Pause Ingestion & Background Agents on VM `fenn`**:
    ```bash
    sudo systemctl stop aegis-collector
    sudo systemctl stop aegis-backend
    ```
+   > [!IMPORTANT]
+   > **Zero Telemetry Loss Invariant (systemd-journald Buffering)**:
+   > Pausing `aegis-collector` does **NOT** cause loss of SSH, authentication, or sudo events on the Linux host. The operating system kernel and `systemd-journald` continuously buffer all security events to persistent journal storage (`/var/log/journal/`). The collector tracks its read offset in a persistent cursor state file. Upon service restart in Phase 4, the collector resumes from the exact saved cursor offset, ingesting all accumulated logs with zero telemetry loss.
 
 3. **Flush SQLite WAL and Create Immutable Pre-Cutover Backup**:
    ```bash
@@ -211,3 +216,4 @@ Immediately halt and execute `docs/CLOUD_MIGRATION_ROLLBACK.md` if ANY of the fo
 2. Data migration fails with foreign key violations or data corruption.
 3. `/api/incidents` returns HTTP 500 or fails to query Supabase PostgREST.
 4. Database roundtrip latency exceeds $1,500\text{ ms}$ sustained over 5 minutes.
+

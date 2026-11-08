@@ -208,3 +208,4 @@ To proceed with live execution on Supabase Cloud, please choose one of the follo
    - Authorize migration execution stage-by-stage.
 3. **Option C: Remain in Resilient Hybrid Mode**
    - Retain current production setup where SQLite serves incidents and AI analyses while Supabase Cloud handles telemetry and alerts.
+

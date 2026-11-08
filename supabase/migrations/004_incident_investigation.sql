@@ -50,6 +50,41 @@ EXCEPTION WHEN OTHERS THEN
     NULL;
 END $$;
 
+-- Update Trigger Function to support Multi-Alert Dynamic Severity & Host Isolation
+CREATE OR REPLACE FUNCTION public.fn_enforce_incident_severity_match()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_alert_id TEXT;
+    v_alert_severity VARCHAR(20);
+    v_alert_host_id TEXT;
+BEGIN
+    v_alert_id := COALESCE(NEW.primary_alert_id, NEW.alert_id);
+
+    -- If no parent alert assigned, allow incident creation
+    IF v_alert_id IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT severity, host_id INTO v_alert_severity, v_alert_host_id
+    FROM public.alerts WHERE id = v_alert_id;
+
+    IF v_alert_host_id IS NOT NULL THEN
+        -- Host isolation: incident host must strictly match parent Alert host
+        IF NEW.host_id != v_alert_host_id THEN
+            RAISE EXCEPTION 'AEGIS Violation: Incident host_id (%) must strictly match parent Alert host_id (%).',
+                NEW.host_id, v_alert_host_id;
+        END IF;
+    END IF;
+
+    -- Synchronize alert_id with primary_alert_id for backwards compatibility
+    IF NEW.alert_id IS NULL AND NEW.primary_alert_id IS NOT NULL THEN
+        NEW.alert_id := NEW.primary_alert_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Update status check constraint to support full AEGIS lifecycle
 ALTER TABLE public.incidents DROP CONSTRAINT IF EXISTS incidents_status_check;
 ALTER TABLE public.incidents DROP CONSTRAINT IF EXISTS chk_incidents_status;

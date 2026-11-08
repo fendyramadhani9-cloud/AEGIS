@@ -481,3 +481,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.critical("Fatal migration error: %s", e)
         sys.exit(1)
+
