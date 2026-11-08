@@ -22,6 +22,7 @@ import re
 import hashlib
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Set, Tuple
+from aegis_backend.config import settings
 from aegis_backend.risk_assessment import RiskAssessmentEngine, RiskAssessmentResult
 from aegis_backend.source_attribution import classify_ip_source, format_contextual_attack_scenario
 
@@ -88,7 +89,7 @@ class CorrelatedIncident:
             "first_seen_at": self.first_seen_at,
             "last_seen_at": self.last_seen_at,
             "risk_factors": [f.__dict__ for f in self.risk_result.risk_factors],
-            "storage_backend": "sqlite_local",
+            "storage_backend": "supabase_cloud" if getattr(settings, "database_mode", "hybrid") == "cloud_ssot" else "sqlite_local",
             "provenance": self.provenance,
         }
 

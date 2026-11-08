@@ -2113,12 +2113,23 @@ def get_repository() -> BaseAegisRepository:
     if _active_repository is not None:
         return _active_repository
 
+    if settings.database_mode == "cloud_ssot":
+        if not settings.is_supabase_configured:
+            logger.critical("FATAL [Cloud SSoT]: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured.")
+            raise RuntimeError("Cloud SSoT startup failed: Supabase credentials missing in environment.")
+        try:
+            _active_repository = SupabaseRepository()
+            return _active_repository
+        except Exception as e:
+            logger.critical("FATAL [Cloud SSoT]: Failed to initialize SupabaseRepository: %s", e)
+            raise RuntimeError(f"Cloud SSoT startup failed: {e}") from e
+
     if settings.is_supabase_configured:
         try:
             _active_repository = SupabaseRepository()
             return _active_repository
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to initialize SupabaseRepository in hybrid mode: %s. Falling back to mock.", e)
 
     _active_repository = MockAegisRepository()
     return _active_repository

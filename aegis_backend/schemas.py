@@ -296,7 +296,7 @@ class IncidentItem(BaseModel):
     last_seen_at: str
     created_at: str
     updated_at: Optional[str] = None
-    storage_backend: Optional[str] = "sqlite_local"
+    storage_backend: Optional[str] = "supabase_cloud"
     provenance: Optional[str] = "synthetic_benchmark"
     source_category: Optional[str] = "unknown"
     source_label: Optional[str] = None
@@ -367,7 +367,7 @@ class AIAnalysisItem(BaseModel):
     investigation_notes: Optional[str] = None
     provider: str
     model: str
-    storage_backend: str = "sqlite_local"
+    storage_backend: str = "supabase_cloud"
     created_at: str
     completed_at: Optional[str] = None
 

@@ -25,6 +25,15 @@ from aegis_backend.incident_context_builder import IncidentContext
 from aegis_backend.schemas import AIAnalysisItem
 from aegis_backend.source_attribution import classify_ip_source
 
+
+def _resolve_storage_backend() -> str:
+    """Dynamically resolves storage backend label based on active database mode."""
+    try:
+        from aegis_backend.config import settings
+        return "supabase_cloud" if getattr(settings, "database_mode", "hybrid") == "cloud_ssot" else "sqlite_local"
+    except Exception:
+        return "sqlite_local"
+
 logger = logging.getLogger("aegis_backend.ai_provider")
 
 
@@ -745,7 +754,7 @@ class MockAIProvider(BaseAIProvider):
             investigation_notes=notes,
             provider="mock-evaluator",
             model=self.model_name,
-            storage_backend="sqlite_local",
+            storage_backend=_resolve_storage_backend(),
             created_at=now_iso,
             completed_at=now_iso,
         )
@@ -932,7 +941,7 @@ class GeminiProvider(BaseAIProvider):
                     investigation_notes=f"Provider error: HTTP {resp.status_code}",
                     provider="gemini",
                     model=self.model_name,
-                    storage_backend="sqlite_local",
+                    storage_backend=_resolve_storage_backend(),
                     created_at=now_iso,
                     completed_at=now_iso,
                 )
@@ -972,7 +981,7 @@ class GeminiProvider(BaseAIProvider):
                 investigation_notes=f"Exception: {sanitized_err}",
                 provider="gemini",
                 model=self.model_name,
-                storage_backend="sqlite_local",
+                storage_backend=_resolve_storage_backend(),
                 created_at=now_iso,
                 completed_at=datetime.now(timezone.utc).isoformat(),
             )
@@ -1080,7 +1089,7 @@ class GeminiProvider(BaseAIProvider):
             investigation_notes=notes,
             provider="gemini",
             model=self.model_name,
-            storage_backend="sqlite_local",
+            storage_backend=_resolve_storage_backend(),
             created_at=now_iso,
             completed_at=datetime.now(timezone.utc).isoformat(),
         )
@@ -1187,7 +1196,7 @@ class OpenAICompatibleProvider(BaseAIProvider):
                 investigation_notes="OpenAI-compatible gateway analysis.",
                 provider="openai-compatible",
                 model=self.model_name,
-                storage_backend="sqlite_local",
+                storage_backend=_resolve_storage_backend(),
                 created_at=now_iso,
                 completed_at=datetime.now(timezone.utc).isoformat(),
             )
@@ -1217,7 +1226,7 @@ class OpenAICompatibleProvider(BaseAIProvider):
                 investigation_notes=str(e),
                 provider="openai-compatible",
                 model=self.model_name,
-                storage_backend="sqlite_local",
+                storage_backend=_resolve_storage_backend(),
                 created_at=now_iso,
                 completed_at=now_iso,
             )
@@ -1268,7 +1277,7 @@ class NullAIProvider(BaseAIProvider):
             investigation_notes="Deterministic fallback playbook applied. AI provider offline or unconfigured.",
             provider="none",
             model="none",
-            storage_backend="sqlite_local",
+            storage_backend=_resolve_storage_backend(),
             created_at=now_iso,
             completed_at=now_iso,
         )

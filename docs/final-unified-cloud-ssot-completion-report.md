@@ -296,3 +296,4 @@ Sesuai mandat tata kelola keamanan dan instruksi induk Project Owner:
 - Sistem saat ini di VM tetap aman berjalan pada mode Hybrid yang stabil.
 
 **Apri sekarang berhenti pada Approval Gate 2 untuk menyerahkan Paket Persetujuan Produksi kepada Project Owner.**
+
