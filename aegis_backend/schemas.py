@@ -298,6 +298,9 @@ class IncidentItem(BaseModel):
     updated_at: Optional[str] = None
     storage_backend: Optional[str] = "sqlite_local"
     provenance: Optional[str] = "synthetic_benchmark"
+    source_category: Optional[str] = "unknown"
+    source_label: Optional[str] = None
+    threat_actor_context: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

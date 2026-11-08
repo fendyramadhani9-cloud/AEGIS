@@ -11,7 +11,11 @@ Correlation Criteria:
    - Shared Target Username.
    - Verified Causal Progression (e.g. Brute Force -> Account Compromise -> Root Escalation).
    Unrelated administrator actions or independent attacks from separate source IPs are segregated.
-4. Explainable Correlation: Generates human-auditable correlation reasons for each group.
+4. Context-Aware Attribution (Prioritas 6.1):
+   - Never labels loopback (127.0.0.1) as an external/remote adversary.
+   - Explicitly notes identity discontinuity when distinct users appear on loopback.
+   - Labels controlled security test exercises accurately.
+5. Explainable Correlation: Generates human-auditable correlation reasons for each group.
 """
 
 import re
@@ -19,6 +23,7 @@ import hashlib
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Set, Tuple
 from aegis_backend.risk_assessment import RiskAssessmentEngine, RiskAssessmentResult
+from aegis_backend.source_attribution import classify_ip_source, format_contextual_attack_scenario
 
 
 class CorrelatedIncident:
@@ -39,6 +44,7 @@ class CorrelatedIncident:
         first_seen_at: Optional[str] = None,
         last_seen_at: Optional[str] = None,
         risk_result: Optional[RiskAssessmentResult] = None,
+        provenance: str = "genuine_host_telemetry",
     ):
         self.incident_id = incident_id
         self.host_id = host_id
@@ -53,26 +59,15 @@ class CorrelatedIncident:
         self.first_seen_at = first_seen_at or datetime.now(timezone.utc).isoformat()
         self.last_seen_at = last_seen_at or self.first_seen_at
         self.risk_result = risk_result or RiskAssessmentResult(risk_score=0, risk_level="low")
+        self.provenance = provenance
+
+        # Enrich network attribution
+        attr = classify_ip_source(source_ip)
+        self.source_category = attr["category"]
+        self.source_label = attr["label"]
+        self.threat_actor_context = attr["threat_actor_context"]
 
     def to_dict(self) -> Dict[str, Any]:
-        is_synthetic = (
-            "ALT-SEED-" in str(self.primary_alert_id)
-            or (self.source_ip and ("198.51.100." in self.source_ip or "203.0.113." in self.source_ip))
-            or "09e84aeac243e448" in str(self.primary_alert_id)
-        )
-        is_test = (
-            "127.0.0.1" in str(self.source_ip)
-            or "sec_test_user" in str(self.target_user)
-            or (self.target_user and "test" in str(self.target_user).lower())
-            or "controlled" in str(self.attack_scenario).lower()
-        )
-        if is_synthetic:
-            prov = "synthetic_benchmark"
-        elif is_test:
-            prov = "controlled_operational_test"
-        else:
-            prov = "genuine_host_telemetry"
-
         return {
             "id": self.incident_id,
             "host_id": self.host_id,
@@ -84,6 +79,9 @@ class CorrelatedIncident:
             "primary_alert_id": self.primary_alert_id,
             "alert_count": len(self.alerts),
             "source_ip": self.source_ip,
+            "source_category": self.source_category,
+            "source_label": self.source_label,
+            "threat_actor_context": self.threat_actor_context,
             "target_user": self.target_user,
             "attack_scenario": self.attack_scenario,
             "correlation_reason": self.correlation_reason,
@@ -91,7 +89,7 @@ class CorrelatedIncident:
             "last_seen_at": self.last_seen_at,
             "risk_factors": [f.__dict__ for f in self.risk_result.risk_factors],
             "storage_backend": "sqlite_local",
-            "provenance": prov,
+            "provenance": self.provenance,
         }
 
 
@@ -148,17 +146,12 @@ class IncidentCorrelator:
         """
         alert_ts = self._parse_ts(alert.get("detected_at"))
         latest_in_cluster = max(self._parse_ts(a.get("detected_at")) for a in cluster)
-        earliest_in_cluster = min(self._parse_ts(a.get("detected_at")) for a in cluster)
 
         # Check temporal window against latest activity
         delta = abs((alert_ts - latest_in_cluster).total_seconds())
         if delta > self.time_window_seconds:
             return False, None
 
-        alert_ips, alert_users = self._extract_entities(alert)
-        alert_rule = alert.get("rule_id", "")
-
-        # Extract IP and User entities
         alert_ips, alert_users = self._extract_entities(alert)
         alert_rule = alert.get("rule_id", "")
 
@@ -183,10 +176,12 @@ class IncidentCorrelator:
 
         # 1. Independent Brute-Force Attacks Isolation
         # If incoming alert is brute-force and cluster already has brute-force, require shared Source IP.
-        # Different IPs targeting common usernames (e.g. 'ubuntu', 'root') must remain distinct incidents.
         if alert_rule == "RULE-SSH-BRUTE" and "RULE-SSH-BRUTE" in cluster_rules:
             if shared_ips:
                 ip_str = ", ".join(sorted(shared_ips))
+                attr = classify_ip_source(list(shared_ips)[0])
+                if attr["is_loopback"]:
+                    return True, "Shared local loopback interface (127.0.0.1) in repeated authentication failure bursts."
                 return True, f"Shared Source IP pivot ({ip_str}) in continuing brute-force campaign."
             return False, None
 
@@ -194,6 +189,22 @@ class IncidentCorrelator:
         if ("RULE-SSH-BRUTE" in cluster_rules) and (alert_rule == "RULE-AUTH-003"):
             if shared_ips:
                 ip_str = ", ".join(sorted(shared_ips))
+                attr = classify_ip_source(list(shared_ips)[0])
+                if attr["is_loopback"]:
+                    if shared_users:
+                        user_str = ", ".join(sorted(shared_users))
+                        return True, f"Causal progression on local loopback (127.0.0.1): Repeated failed logins followed by successful login for user '{user_str}'."
+                    else:
+                        cluster_failed_users = ", ".join(sorted(cluster_users)) or "unspecified user"
+                        alert_auth_users = ", ".join(sorted(alert_users)) or "unspecified user"
+                        return True, (
+                            f"Temporal correlation on local loopback (127.0.0.1): "
+                            f"Authentication failures for '{cluster_failed_users}' followed by login for distinct user '{alert_auth_users}'; "
+                            f"separate user accounts indicate distinct local processes rather than single attacker continuation."
+                        )
+                if shared_users:
+                    user_str = ", ".join(sorted(shared_users))
+                    return True, f"Causal attack chain progression: Repeated failed logins followed by successful authentication for user '{user_str}'."
                 return True, f"Causal attack chain progression: Repeated failed logins followed by successful authentication from {ip_str}."
             if shared_users:
                 user_str = ", ".join(sorted(shared_users))
@@ -203,21 +214,27 @@ class IncidentCorrelator:
         # 3. Strict Causal Attack Progression: Accepted Login -> Suspicious Sudo Execution
         if alert_rule == "RULE-SUSP-SUDO":
             if has_auth_success:
-                # Require that sudo is executed by the user who just authenticated (or shared IP)
                 matching_users = alert_users & cluster_auth_users
+                is_test_cmd = "test" in str(alert.get("reason", "")).lower() or "controlled" in str(alert.get("reason", "")).lower()
+                is_loopback = any(classify_ip_source(ip)["is_loopback"] for ip in cluster_ips)
+
                 if matching_users:
                     user_str = ", ".join(sorted(matching_users))
+                    if is_test_cmd:
+                        return True, f"Controlled test execution: Authenticated session followed by simulated sudo command by user '{user_str}'."
                     return True, f"Causal attack chain progression: Successful authentication followed by privileged sudo execution by user '{user_str}'."
-                if shared_ips:
+                if shared_ips and not is_loopback:
                     ip_str = ", ".join(sorted(shared_ips))
                     return True, f"Causal attack chain progression: Activity from authenticated session origin {ip_str} followed by privileged sudo execution."
-            # If the cluster only has failed brute-force and NO accepted authentication,
-            # an unlinked sudo (even by 'ubuntu') must NOT be conflated with the brute force attacker!
+            # Unlinked sudo without accepted authentication in cluster is segregated
             return False, None
 
         # 4. Shared Source IP Pivot across other detections
         if shared_ips:
             ip_str = ", ".join(sorted(shared_ips))
+            attr = classify_ip_source(list(shared_ips)[0])
+            if attr["is_loopback"]:
+                return True, "Shared local loopback interface (127.0.0.1) across local detections."
             return True, f"Shared Source IP pivot ({ip_str}) with activity occurring within {int(delta)}s."
 
         # 5. Shared Target User Pivot (Only for authenticated sessions or explicit user pivots)
@@ -343,7 +360,6 @@ class IncidentCorrelator:
             posture_findings=posture_findings,
         )
 
-        # Synthesize Title and Attack Scenario
         has_brute = "RULE-SSH-BRUTE" in rule_ids
         has_auth = "RULE-AUTH-003" in rule_ids
         has_sudo = "RULE-SUSP-SUDO" in rule_ids
@@ -351,32 +367,34 @@ class IncidentCorrelator:
         primary_ip = sorted(list(source_ips))[0] if source_ips else None
         primary_user = sorted(list(users))[0] if users else None
 
-        if has_brute and has_auth and has_sudo:
-            title = f"Multi-Stage Brute-Force to Privileged Sudo Shell on {host_id}"
-            scenario = (
-                f"Adversary launched automated SSH authentication brute-force from {primary_ip or 'external IP'}, "
-                f"succeeded in authenticating as user '{primary_user or 'account'}', and executed privileged root shell via sudo."
-            )
-        elif has_auth and has_sudo:
-            title = f"Compromised Account Login Followed by Privileged Sudo on {host_id}"
-            scenario = (
-                f"Account '{primary_user or 'user'}' authenticated successfully after multiple failures, "
-                f"followed immediately by suspicious privileged commands via sudo."
-            )
-        elif has_brute and has_auth:
-            title = f"SSH Brute-Force with Successful Login on {host_id}"
-            scenario = (
-                f"Repeated SSH authentication failures from {primary_ip or 'remote IP'} culminated in a successful login."
-            )
-        elif has_sudo:
-            title = f"Suspicious Sudo Privileged Execution on {host_id}"
-            scenario = f"User '{primary_user or 'privileged user'}' executed potentially hazardous commands or root shells via sudo."
-        elif has_brute:
-            title = f"Repeated SSH Authentication Failures (Brute-Force) on {host_id}"
-            scenario = f"External source IP {primary_ip or 'unknown'} generated repeated authentication failures against SSH."
+        # Provenance classification
+        is_synthetic = (
+            "ALT-SEED-" in str(primary_alert.get("id", ""))
+            or (primary_ip and ("198.51.100." in primary_ip or "203.0.113." in primary_ip or "192.0.2." in primary_ip))
+            or "09e84aeac243e448" in str(primary_alert.get("id", ""))
+        )
+        is_test = (
+            primary_ip == "127.0.0.1"
+            or "sec_test_user" in str(primary_user)
+            or any("controlled" in str(a.get("reason", "")).lower() for a in cluster)
+        )
+        if is_synthetic:
+            prov = "synthetic_benchmark"
+        elif is_test:
+            prov = "controlled_operational_test"
         else:
-            title = f"Security Event Cluster ({len(cluster)} alerts) on {host_id}"
-            scenario = primary_alert.get("reason", "Multiple security alerts detected in close temporal proximity.")
+            prov = "genuine_host_telemetry"
+
+        # Synthesize Title and Attack Scenario using Context-Aware Attribution
+        title, scenario = format_contextual_attack_scenario(
+            provenance=prov,
+            source_ip=primary_ip,
+            target_user=primary_user,
+            has_brute=has_brute,
+            has_auth=has_auth,
+            has_sudo=has_sudo,
+            host_id=host_id,
+        )
 
         return CorrelatedIncident(
             incident_id=incident_id,
@@ -392,4 +410,5 @@ class IncidentCorrelator:
             first_seen_at=first_seen,
             last_seen_at=last_seen,
             risk_result=risk_result,
+            provenance=prov,
         )

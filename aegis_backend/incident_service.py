@@ -190,8 +190,14 @@ class IncidentService:
         # Call AI Provider
         analysis_result = self.ai_provider.analyze_incident(context)
 
+        # Enforce Risk Engine Single Source of Truth
+        # AI providers must NEVER overwrite the deterministic risk score
+        analysis_dict = analysis_result.model_dump()
+        analysis_dict["risk_score"] = incident_data.get("risk_score", analysis_dict.get("risk_score", 0))
+        analysis_dict["risk_level"] = incident_data.get("risk_level", analysis_dict.get("risk_level", "medium"))
+
         # Persist Analysis Result
-        saved = self.repo.save_ai_analysis(analysis_result.model_dump())
+        saved = self.repo.save_ai_analysis(analysis_dict)
         return AIAnalysisItem.model_validate(saved)
 
     def get_incident_timeline(self, incident_id: str) -> List[IncidentTimelineItem]:

@@ -227,6 +227,37 @@ export function IncidentDetailScreen() {
                         🧪 Provenance: Synthetic Benchmark
                       </span>
                     )}
+                    {incident.sourceCategory && (
+                      <span
+                        style={{
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          background:
+                            incident.sourceCategory === 'loopback'
+                              ? 'rgba(234, 179, 8, 0.15)'
+                              : incident.sourceCategory === 'reserved_benchmark'
+                              ? 'rgba(168, 85, 247, 0.15)'
+                              : 'rgba(59, 130, 246, 0.15)',
+                          color:
+                            incident.sourceCategory === 'loopback'
+                              ? '#fde047'
+                              : incident.sourceCategory === 'reserved_benchmark'
+                              ? '#c084fc'
+                              : '#93c5fd',
+                          border:
+                            incident.sourceCategory === 'loopback'
+                              ? '1px solid rgba(234, 179, 8, 0.35)'
+                              : incident.sourceCategory === 'reserved_benchmark'
+                              ? '1px solid rgba(168, 85, 247, 0.35)'
+                              : '1px solid rgba(59, 130, 246, 0.35)',
+                        }}
+                        title={incident.threatActorContext || incident.sourceLabel}
+                      >
+                        🌐 {incident.sourceLabel || incident.sourceCategory}
+                      </span>
+                    )}
                   </div>
 
                   {/* Status Change Button */}

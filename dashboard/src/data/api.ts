@@ -367,6 +367,11 @@ function mapBackendIncident(item: any): Incident {
     correlationReason: item.correlation_reason,
     storageBackend: item.storage_backend || 'sqlite_local',
     provenance: item.provenance || 'synthetic_benchmark',
+    sourceIp: item.source_ip,
+    targetUser: item.target_user,
+    sourceCategory: item.source_category,
+    sourceLabel: item.source_label,
+    threatActorContext: item.threat_actor_context,
     riskFactors: (item.risk_factors || []).map((f: any) => ({
       name: f.factor_name || f.name,
       factorId: f.factor_id,

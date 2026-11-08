@@ -19,6 +19,7 @@ import threading
 from contextlib import contextmanager
 from typing import List, Dict, Any, Optional, Tuple, Iterator
 from datetime import datetime, timezone
+from aegis_backend.source_attribution import classify_ip_source
 
 logger = logging.getLogger(__name__)
 
@@ -221,9 +222,24 @@ class SqliteIncidentStore:
                     )
                     conn.commit()
 
-                # Provenance schema evolution
+                # Provenance and Source Attribution schema evolution
                 try:
                     conn.execute("ALTER TABLE incidents ADD COLUMN provenance TEXT DEFAULT 'synthetic_benchmark';")
+                    conn.commit()
+                except Exception:
+                    pass
+                try:
+                    conn.execute("ALTER TABLE incidents ADD COLUMN source_category TEXT DEFAULT 'unknown';")
+                    conn.commit()
+                except Exception:
+                    pass
+                try:
+                    conn.execute("ALTER TABLE incidents ADD COLUMN source_label TEXT;")
+                    conn.commit()
+                except Exception:
+                    pass
+                try:
+                    conn.execute("ALTER TABLE incidents ADD COLUMN threat_actor_context TEXT;")
                     conn.commit()
                 except Exception:
                     pass
@@ -264,12 +280,14 @@ class SqliteIncidentStore:
                         id, host_id, title, severity, risk_level, risk_score,
                         status, primary_alert_id, alert_count, source_ip, target_user,
                         attack_scenario, correlation_reason, assigned_to,
-                        first_seen_at, last_seen_at, created_at, updated_at, provenance
+                        first_seen_at, last_seen_at, created_at, updated_at, provenance,
+                        source_category, source_label, threat_actor_context
                     ) VALUES (
                         :id, :host_id, :title, :severity, :risk_level, :risk_score,
                         :status, :primary_alert_id, :alert_count, :source_ip, :target_user,
                         :attack_scenario, :correlation_reason, :assigned_to,
-                        :first_seen_at, :last_seen_at, :created_at, :updated_at, :provenance
+                        :first_seen_at, :last_seen_at, :created_at, :updated_at, :provenance,
+                        :source_category, :source_label, :threat_actor_context
                     )
                     ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
@@ -284,7 +302,10 @@ class SqliteIncidentStore:
                         correlation_reason = excluded.correlation_reason,
                         last_seen_at = excluded.last_seen_at,
                         updated_at = excluded.updated_at,
-                        provenance = excluded.provenance;
+                        provenance = excluded.provenance,
+                        source_category = excluded.source_category,
+                        source_label = excluded.source_label,
+                        threat_actor_context = excluded.threat_actor_context;
                 """, {
                     "id": inc_id,
                     "host_id": incident_data.get("host_id", ""),
@@ -305,6 +326,9 @@ class SqliteIncidentStore:
                     "created_at": incident_data.get("created_at", now_iso),
                     "updated_at": now_iso,
                     "provenance": prov,
+                    "source_category": incident_data.get("source_category", "unknown"),
+                    "source_label": incident_data.get("source_label"),
+                    "threat_actor_context": incident_data.get("threat_actor_context"),
                 })
 
                 # 2. Insert alert relationships idempotently
@@ -350,6 +374,16 @@ class SqliteIncidentStore:
         stored = self.get_incident_by_id(inc_id)
         return stored or incident_data
 
+    def _enrich_incident_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data["storage_backend"] = "sqlite_local"
+        data["provenance"] = data.get("provenance") or "synthetic_benchmark"
+        if not data.get("source_category") or data.get("source_category") in ("unknown", None):
+            attr = classify_ip_source(data.get("source_ip"))
+            data["source_category"] = attr["category"]
+            data["source_label"] = attr["label"]
+            data["threat_actor_context"] = attr["threat_actor_context"]
+        return data
+
     def get_incident_by_id(self, incident_id: str) -> Optional[Dict[str, Any]]:
         """Retrieves a single incident by ID."""
         with self._lock:
@@ -358,10 +392,7 @@ class SqliteIncidentStore:
                 row = cur.fetchone()
                 if not row:
                     return None
-                data = dict(row)
-                data["storage_backend"] = "sqlite_local"
-                data["provenance"] = data.get("provenance") or "synthetic_benchmark"
-                return data
+                return self._enrich_incident_dict(dict(row))
 
     def list_incidents(
         self,
@@ -398,10 +429,7 @@ class SqliteIncidentStore:
                     LIMIT ? OFFSET ?;
                 """
                 cur = conn.execute(query, params + [limit, offset])
-                items = [dict(r) for r in cur.fetchall()]
-                for it in items:
-                    it["storage_backend"] = "sqlite_local"
-                    it["provenance"] = it.get("provenance") or "synthetic_benchmark"
+                items = [self._enrich_incident_dict(dict(r)) for r in cur.fetchall()]
                 return items, total
 
     def get_incident_summary(self) -> Dict[str, Any]:
@@ -572,6 +600,13 @@ class SqliteIncidentStore:
 
         with self._lock:
             with self._connection() as conn:
+                # Enforce Single Source of Truth for Risk Score:
+                # Always bind analysis risk_score and risk_level to the incident's official Risk Engine values
+                cur_inc = conn.execute("SELECT risk_score, risk_level FROM incidents WHERE id = ?;", (inc_id,))
+                inc_row = cur_inc.fetchone()
+                official_score = inc_row["risk_score"] if inc_row else analysis_data.get("risk_score", 0)
+                official_level = inc_row["risk_level"] if inc_row else analysis_data.get("risk_level", "medium")
+
                 conn.execute("""
                     INSERT INTO ai_analyses (
                         id, incident_id, alert_id, host_id, analysis_status,
@@ -621,8 +656,8 @@ class SqliteIncidentStore:
                     "threat_classification": analysis_data.get("threat_classification", "Unclassified Anomaly"),
                     "executive_summary": analysis_data.get("executive_summary", ""),
                     "attack_scenario": analysis_data.get("attack_scenario", ""),
-                    "risk_level": analysis_data.get("risk_level", "medium"),
-                    "risk_score": analysis_data.get("risk_score", 0),
+                    "risk_level": official_level,
+                    "risk_score": official_score,
                     "confidence_level": analysis_data.get("confidence_level", "medium"),
                     "confidence_reason": analysis_data.get("confidence_reason", ""),
                     "facts_json": json.dumps(analysis_data.get("facts", analysis_data.get("observed_behaviors", []))),

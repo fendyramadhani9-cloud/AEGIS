@@ -7,10 +7,12 @@ Guarantees:
 2. Sanitization Boundary: Masks secrets, tokens, and credentials via TelemetrySanitizer.
 3. Prompt Injection Defense: Treats raw telemetry logs as untrusted forensic artifacts.
 4. Security Checker Posture Integration: Enriches context with host configuration findings.
+5. Source Attribution & Provenance: Explicitly binds network classification and data provenance.
 """
 
 from typing import List, Dict, Any, Set, Optional
 from aegis_backend.sanitizer import TelemetrySanitizer
+from aegis_backend.source_attribution import classify_ip_source
 
 
 class IncidentContext:
@@ -28,6 +30,9 @@ class IncidentContext:
         source_ip: Optional[str] = None,
         target_user: Optional[str] = None,
         attack_scenario: Optional[str] = None,
+        risk_score: int = 0,
+        risk_level: str = "low",
+        provenance: str = "genuine_host_telemetry",
     ):
         self.incident_id = incident_id
         self.host_id = host_id
@@ -39,6 +44,10 @@ class IncidentContext:
         self.source_ip = source_ip
         self.target_user = target_user
         self.attack_scenario = attack_scenario
+        self.risk_score = risk_score
+        self.risk_level = risk_level
+        self.provenance = provenance
+        self.source_attribution = classify_ip_source(self.source_ip)
         self.allowed_evidence_ids: Set[str] = {
             ev.get("event_id") or ev.get("id") for ev in evidence_items if (ev.get("event_id") or ev.get("id"))
         }
@@ -49,6 +58,10 @@ class IncidentContext:
             "host_id": self.host_id,
             "title": self.title,
             "severity": self.severity,
+            "official_risk_score": self.risk_score,
+            "official_risk_level": self.risk_level,
+            "provenance": self.provenance,
+            "source_attribution": classify_ip_source(self.source_ip),
             "alerts": self.alerts,
             "evidence": self.evidence_items,
             "posture": self.posture_findings,
@@ -121,5 +134,7 @@ class IncidentContextBuilder:
             source_ip=incident.get("source_ip"),
             target_user=incident.get("target_user"),
             attack_scenario=incident.get("attack_scenario"),
+            risk_score=incident.get("risk_score", 0),
+            risk_level=incident.get("risk_level", incident.get("severity", "medium")),
+            provenance=incident.get("provenance", "genuine_host_telemetry"),
         )
-
