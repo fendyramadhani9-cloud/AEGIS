@@ -1157,14 +1157,15 @@ class SupabaseRepository(BaseAegisRepository):
             raise RuntimeError("Database error on get incidents summary.")
         if settings.database_mode == "cloud_ssot":
             try:
-                query = self.client.table("incidents").select("id, status, risk_level, risk_score, created_at")
+                query = self.client.table("incidents").select("id, host_id, status, risk_level, risk_score, created_at, updated_at")
                 if host_id:
                     query = query.eq("host_id", host_id)
                 res = query.execute()
                 incs = res.data or []
                 total = len(incs)
-                open_c = sum(1 for i in incs if i.get("status") in ("new", "investigating", "confirmed", "open"))
+                new_cnt = sum(1 for i in incs if i.get("status") == "new")
                 investigating = sum(1 for i in incs if i.get("status") == "investigating")
+                confirmed = sum(1 for i in incs if i.get("status") == "confirmed")
                 contained = sum(1 for i in incs if i.get("status") == "contained")
                 resolved = sum(1 for i in incs if i.get("status") in ("resolved", "closed"))
                 fp = sum(1 for i in incs if i.get("status") == "false_positive")
@@ -1172,20 +1173,25 @@ class SupabaseRepository(BaseAegisRepository):
                 high = sum(1 for i in incs if i.get("risk_level") == "high")
                 med = sum(1 for i in incs if i.get("risk_level") == "medium")
                 low = sum(1 for i in incs if i.get("risk_level") == "low")
-                avg_risk = round(sum(i.get("risk_score", 50) for i in incs) / max(total, 1), 1)
+                hosts = len(set(i["host_id"] for i in incs if i.get("host_id")))
+                latest = max([i.get("updated_at") or i.get("created_at") for i in incs if i.get("updated_at") or i.get("created_at")], default=None)
 
                 return {
                     "total_incidents": total,
-                    "open_incidents": open_c,
-                    "investigating_incidents": investigating,
-                    "contained_incidents": contained,
-                    "resolved_incidents": resolved,
+                    "new_incidents": new_cnt,
+                    "open_incidents": new_cnt + investigating,
+                    "investigating": investigating,
+                    "confirmed": confirmed,
+                    "resolved": resolved,
                     "false_positives": fp,
-                    "critical_incidents": crit,
-                    "high_incidents": high,
-                    "medium_incidents": med,
-                    "low_incidents": low,
-                    "avg_risk_score": avg_risk,
+                    "contained": contained,
+                    "critical_risk": crit,
+                    "high_risk": high,
+                    "medium_risk": med,
+                    "low_risk": low,
+                    "total_hosts_affected": hosts,
+                    "latest_incident_at": latest,
+                    "storage_backend": "supabase_cloud",
                 }
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to get incidents summary: %s", e)
@@ -2213,14 +2219,15 @@ class MockAegisRepository(BaseAegisRepository):
             raise RuntimeError("Database error on get incidents summary.")
         if settings.database_mode == "cloud_ssot":
             try:
-                query = self.client.table("incidents").select("id, status, risk_level, risk_score, created_at")
+                query = self.client.table("incidents").select("id, host_id, status, risk_level, risk_score, created_at, updated_at")
                 if host_id:
                     query = query.eq("host_id", host_id)
                 res = query.execute()
                 incs = res.data or []
                 total = len(incs)
-                open_c = sum(1 for i in incs if i.get("status") in ("new", "investigating", "confirmed", "open"))
+                new_cnt = sum(1 for i in incs if i.get("status") == "new")
                 investigating = sum(1 for i in incs if i.get("status") == "investigating")
+                confirmed = sum(1 for i in incs if i.get("status") == "confirmed")
                 contained = sum(1 for i in incs if i.get("status") == "contained")
                 resolved = sum(1 for i in incs if i.get("status") in ("resolved", "closed"))
                 fp = sum(1 for i in incs if i.get("status") == "false_positive")
@@ -2228,20 +2235,25 @@ class MockAegisRepository(BaseAegisRepository):
                 high = sum(1 for i in incs if i.get("risk_level") == "high")
                 med = sum(1 for i in incs if i.get("risk_level") == "medium")
                 low = sum(1 for i in incs if i.get("risk_level") == "low")
-                avg_risk = round(sum(i.get("risk_score", 50) for i in incs) / max(total, 1), 1)
+                hosts = len(set(i["host_id"] for i in incs if i.get("host_id")))
+                latest = max([i.get("updated_at") or i.get("created_at") for i in incs if i.get("updated_at") or i.get("created_at")], default=None)
 
                 return {
                     "total_incidents": total,
-                    "open_incidents": open_c,
-                    "investigating_incidents": investigating,
-                    "contained_incidents": contained,
-                    "resolved_incidents": resolved,
+                    "new_incidents": new_cnt,
+                    "open_incidents": new_cnt + investigating,
+                    "investigating": investigating,
+                    "confirmed": confirmed,
+                    "resolved": resolved,
                     "false_positives": fp,
-                    "critical_incidents": crit,
-                    "high_incidents": high,
-                    "medium_incidents": med,
-                    "low_incidents": low,
-                    "avg_risk_score": avg_risk,
+                    "contained": contained,
+                    "critical_risk": crit,
+                    "high_risk": high,
+                    "medium_risk": med,
+                    "low_risk": low,
+                    "total_hosts_affected": hosts,
+                    "latest_incident_at": latest,
+                    "storage_backend": "supabase_cloud",
                 }
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to get incidents summary: %s", e)
