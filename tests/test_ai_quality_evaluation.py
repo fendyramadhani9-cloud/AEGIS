@@ -448,3 +448,4 @@ def test_four_tier_taxonomy_separation_and_evidence_validity():
     for h in validated.hypotheses:
         assert h["status"] == "unverified"
         assert len(h["investigation_step"]) > 0
+

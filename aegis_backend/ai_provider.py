@@ -121,24 +121,175 @@ MULTIPLE_FAILURE_PATTERNS = [
     re.compile(r"\bfailed\s+logins\b", re.IGNORECASE),
 ]
 
+NEGATION_PATTERNS = [
+    re.compile(r"\b(no|zero|neither|nor|without|never|not|cannot|lacks?)\b.{0,40}\b(evidence|indication|signs?|proof|finding|activity|trace|record)s?\b", re.IGNORECASE),
+    re.compile(r"\b(no|without)\s+(observed|detected|confirmed|evident|actionable)\b", re.IGNORECASE),
+    re.compile(r"\b(was|were|is|are|did|does|have|has)\s+not\s+(observe|detect|find|confirm|indicate|show|contain|occur)", re.IGNORECASE),
+    re.compile(r"\bno\s+evidence\s+of\b", re.IGNORECASE),
+    re.compile(r"\bno\s+(signs?|indication)\s+of\b", re.IGNORECASE),
+    re.compile(r"\babsence\s+of\b", re.IGNORECASE),
+    re.compile(r"\bnot\s+(found|observed|detected)\b", re.IGNORECASE),
+    re.compile(r"\b(tidak|belum|bukan|tanpa)\s+(ada|ditemukan|terdapat|terlihat|terdeteksi|adanya)\b", re.IGNORECASE),
+    re.compile(r"\b(tidak|belum)\s+ada\s+(bukti|indikasi|tanda|rekaman)\b", re.IGNORECASE),
+    re.compile(r"\b(ketiadaan|nihil)\s+(bukti|indikasi|aktivitas)\b", re.IGNORECASE),
+    re.compile(r"\btanpa\s+adanya\s+bukti\b", re.IGNORECASE),
+    re.compile(r"\btidak\s+(terjadi|ditemukan|terdeteksi)\b", re.IGNORECASE),
+]
+
+INQUIRY_PATTERNS = [
+    re.compile(r"\b(investigate|determine|check|verify|inspect|assess|evaluate|monitor|review|examine)\s+(whether|if|for|potential|possible)\b", re.IGNORECASE),
+    re.compile(r"\b(whether|if)\s+(any\s+)?(lateral\s+movement|exfiltration|persistence|c2)\b", re.IGNORECASE),
+    re.compile(r"\bpotential\s+(for|risk\s+of)\b", re.IGNORECASE),
+    re.compile(r"\b(periksa|tinjau|investigasi|pastikan|cek|evaluasi|pantau)\s+(apakah|adanya|potensi|jika)\b", re.IGNORECASE),
+    re.compile(r"\bapakah\s+(terjadi|terdapat|ada)\b", re.IGNORECASE),
+]
+
+TECHNIQUE_ASSERTIONS = {
+    "privilege_escalation": {
+        "statement_patterns": [
+            re.compile(r"\b(privilege\s+escalat(ion|ed)?|escalat(ed|ion)\s+to\s+root|sudo\s+execution|executed\s+(commands?\s+as\s+root|via\s+sudo)|elevated\s+privileges?)\b", re.IGNORECASE),
+            re.compile(r"\b(eskalasi\s+priviles?e|menjalankan\s+sudo|perintah\s+root|eksekusi\s+sudo)\b", re.IGNORECASE),
+        ],
+        "evidence_markers": ("sudo", "command=", "uid=0", "session opened for user root", "pkexec", "su:", "root:"),
+        "verification_step": "Verifikasi log sudo (/var/log/auth.log) dan jejak auditd (EXECVE uid=0) untuk mengonfirmasi apakah terjadi eksekusi privilese yang valid.",
+        "gap_template": "Ketidaksesuaian relevansi bukti: Inferensi eskalasi privilese/sudo merujuk bukti ({cited_ids}) yang tidak memuat telemetri eksekusi sudo/root.",
+    },
+    "authentication_success": {
+        "statement_patterns": [
+            re.compile(r"\b(successful(ly)?\s+(authenticated|logged\s+in|login)|authentication\s+succeeded|account\s+compromise(d)?)\b", re.IGNORECASE),
+            re.compile(r"\b(berhasil\s+login|autentikasi\s+berhasil|akun\s+dikompromikan)\b", re.IGNORECASE),
+        ],
+        "evidence_markers": ("accepted", "session opened", "auth_success", "login success", "success"),
+        "verification_step": "Tinjau log sesi PAM dan SSH untuk membuktikan apakah koneksi terautentikasi benar-benar berhasil.",
+        "gap_template": "Ketidaksesuaian relevansi bukti: Inferensi autentikasi berhasil merujuk bukti ({cited_ids}) yang hanya merekam kegagalan tanpa bukti sukses.",
+    },
+}
+
+
+def is_clause_negated_or_inquiry(text: str, match_start: int, match_end: int) -> bool:
+    """Checks whether a concept match in text is in a negative or inquiry/conditional context."""
+    prefix = text[max(0, match_start - 60):match_start]
+    suffix = text[match_end:min(len(text), match_end + 60)]
+    for p in NEGATION_PATTERNS:
+        if p.search(prefix) or p.search(suffix) or p.search(text):
+            return True
+    for p in INQUIRY_PATTERNS:
+        if p.search(prefix) or p.search(suffix) or p.search(text):
+            return True
+    return False
+
 
 def verify_forensic_grounding(analysis: AIAnalysisItem, context: IncidentContext) -> AIAnalysisItem:
     """
-    Comprehensive forensic grounding and semantic quality validator.
+    Comprehensive forensic grounding and semantic quality validator (Prioritas 10.1 Hardened).
     Enforces:
     1. Contextual Buzzword Quarantine: Demotes unsupported claims (Exfiltration, C2, Lateral Movement,
-       Persistence) from facts/inferences into unverified hypotheses with verification steps and data gaps.
-    2. Quantitative Claim Fidelity: Detects claims of multiple/repeated failures when telemetry records <= 1.
-    3. Loopback Identity Discontinuity Guard: Prevents merging distinct local identities (e.g. guest and ubuntu)
+       Persistence) from facts/inferences into unverified hypotheses with verification steps and data gaps,
+       EXCEPT when used in negative statements or conditional inquiries.
+    2. Semantic Evidence Relevance: Verifies that technique claims (sudo/privilege escalation, auth success)
+       are corroborated by the actual semantic payload of cited evidence items.
+    3. Quantitative Claim Fidelity: Detects claims of multiple/repeated failures when telemetry records <= 1.
+    4. Loopback Identity Discontinuity Guard: Prevents merging distinct local identities (e.g. guest and ubuntu)
        into a single attacker without process tree evidence.
-    4. SSoT Immutability: Guarantees risk_score, risk_level, and severity freeze.
-    5. Evidence Provenance & Whitelisting: Strips hallucinated IDs from facts, inferences, and citations.
+    5. SSoT Immutability: Guarantees risk_score, risk_level, and severity freeze.
+    6. Evidence Provenance & Whitelisting: Strips hallucinated IDs from facts, inferences, and citations.
+    7. Chronological Timeline Normalization: Sorts timeline entries chronologically and normalizes sequential steps.
+    8. Malformed Payload Recovery: Gracefully recovers from raw string or non-list payloads.
     """
     allowed_ids = set(context.allowed_evidence_ids)
 
+    # 0. Malformed payload coercion & normalization
+    if not isinstance(analysis.facts, list):
+        if isinstance(analysis.facts, str) and analysis.facts.strip():
+            fallback_id = next(iter(allowed_ids), "EVT-UNKNOWN")
+            analysis.facts = [{"evidence_id": fallback_id, "fact": analysis.facts.strip(), "timestamp": None}]
+        else:
+            analysis.facts = []
+    else:
+        coerced_facts = []
+        for f in analysis.facts:
+            if isinstance(f, dict):
+                coerced_facts.append(f)
+            elif isinstance(f, str) and f.strip():
+                fallback_id = next(iter(allowed_ids), "EVT-UNKNOWN")
+                coerced_facts.append({"evidence_id": fallback_id, "fact": f.strip(), "timestamp": None})
+        analysis.facts = coerced_facts
+
+    if not isinstance(analysis.inferences, list):
+        if isinstance(analysis.inferences, str) and analysis.inferences.strip():
+            analysis.inferences = [{
+                "statement": analysis.inferences.strip(),
+                "supporting_evidence_ids": sorted(list(allowed_ids))[:2],
+                "rationale": "Extracted from model response."
+            }]
+        else:
+            analysis.inferences = []
+    else:
+        coerced_inferences = []
+        for inf in analysis.inferences:
+            if isinstance(inf, dict):
+                coerced_inferences.append(inf)
+            elif isinstance(inf, str) and inf.strip():
+                coerced_inferences.append({
+                    "statement": inf.strip(),
+                    "supporting_evidence_ids": sorted(list(allowed_ids))[:2],
+                    "rationale": "Extracted from model response."
+                })
+        analysis.inferences = coerced_inferences
+
+    if not isinstance(analysis.hypotheses, list):
+        if isinstance(analysis.hypotheses, str) and analysis.hypotheses.strip():
+            analysis.hypotheses = [{
+                "statement": analysis.hypotheses.strip(),
+                "status": "unverified",
+                "investigation_step": "Verifikasi telemetri host lebih lanjut."
+            }]
+        else:
+            analysis.hypotheses = []
+    else:
+        coerced_hypotheses = []
+        for h in analysis.hypotheses:
+            if isinstance(h, dict):
+                coerced_hypotheses.append(h)
+            elif isinstance(h, str) and h.strip():
+                coerced_hypotheses.append({
+                    "statement": h.strip(),
+                    "status": "unverified",
+                    "investigation_step": "Verifikasi telemetri host lebih lanjut."
+                })
+        analysis.hypotheses = coerced_hypotheses
+
+    if not isinstance(analysis.unknown_items, list):
+        if isinstance(analysis.unknown_items, str) and analysis.unknown_items.strip():
+            analysis.unknown_items = [{"data_gap": analysis.unknown_items.strip(), "impact": "Requires further investigation."}]
+        else:
+            analysis.unknown_items = []
+    else:
+        coerced_unknowns = []
+        for u in analysis.unknown_items:
+            if isinstance(u, dict):
+                coerced_unknowns.append(u)
+            elif isinstance(u, str) and u.strip():
+                coerced_unknowns.append({"data_gap": u.strip(), "impact": "Requires further investigation."})
+        analysis.unknown_items = coerced_unknowns
+
+    if not isinstance(analysis.supporting_evidence, list):
+        if isinstance(analysis.supporting_evidence, str) and analysis.supporting_evidence.strip():
+            analysis.supporting_evidence = [analysis.supporting_evidence.strip()]
+        else:
+            analysis.supporting_evidence = []
+
     # 1. Enforce SSoT Immutability for Risk Score & Level
-    analysis.risk_score = int(context.risk_score)
-    analysis.risk_level = str(context.risk_level)
+    try:
+        import math
+        raw_score = context.risk_score
+        if isinstance(raw_score, float) and math.isnan(raw_score):
+            analysis.risk_score = 0
+        else:
+            analysis.risk_score = max(0, min(100, int(raw_score)))
+    except (ValueError, TypeError):
+        analysis.risk_score = 0
+    analysis.risk_level = str(context.risk_level or "low").lower()
 
     # 2. Whitelist & Ground Cited Evidence IDs
     valid_supporting: List[str] = []
@@ -149,26 +300,35 @@ def verify_forensic_grounding(analysis: AIAnalysisItem, context: IncidentContext
         valid_supporting = sorted(list(allowed_ids))[:5]
     analysis.supporting_evidence = valid_supporting
 
-    # 3. Contextual Buzzword Quarantine (Semantic Non-Destructive Demotion)
+    # 3. Contextual Buzzword Quarantine & Semantic Evidence Relevance Check
     clean_inferences: List[Dict[str, Any]] = []
     existing_hypotheses: List[Dict[str, Any]] = list(analysis.hypotheses or [])
     existing_unknown_items: List[Dict[str, Any]] = list(analysis.unknown_items or [])
     demoted_concepts: List[str] = []
 
     # Check inferences
-    for inf in (analysis.inferences or []):
+    for inf in analysis.inferences:
         stmt = str(inf.get("statement", ""))
+        clean_eids = [eid for eid in inf.get("supporting_evidence_ids", []) if eid in allowed_ids]
+        inf["supporting_evidence_ids"] = clean_eids or (valid_supporting[:2] if valid_supporting else [])
+
+        # A. Check unevidenced threat concepts (negation and inquiry aware)
         matched_concept = None
         for concept_name, concept_cfg in THREAT_CONCEPTS.items():
             if not concept_cfg["is_evidenced"](context):
-                if any(p.search(stmt) for p in concept_cfg["patterns"]):
-                    matched_concept = (concept_name, concept_cfg)
+                for p in concept_cfg["patterns"]:
+                    m = p.search(stmt)
+                    if m:
+                        # Only quarantine if NOT negated and NOT an inquiry/conditional check
+                        if not is_clause_negated_or_inquiry(stmt, m.start(), m.end()):
+                            matched_concept = (concept_name, concept_cfg)
+                            break
+                if matched_concept:
                     break
 
         if matched_concept:
             c_name, c_cfg = matched_concept
             demoted_concepts.append(c_cfg["label"])
-            # Demote to hypotheses without losing context
             existing_hypotheses.append({
                 "statement": f"Dugaan/Potensi: {stmt}",
                 "status": "unverified",
@@ -179,34 +339,79 @@ def verify_forensic_grounding(analysis: AIAnalysisItem, context: IncidentContext
                 "data_gap": c_cfg["data_gap"],
                 "impact": f"Klaim {c_cfg['label']} belum terverifikasi secara forensik dan dialihkan ke hipotesis unverified."
             })
-        else:
-            clean_eids = [eid for eid in inf.get("supporting_evidence_ids", []) if eid in allowed_ids]
-            inf["supporting_evidence_ids"] = clean_eids or (valid_supporting[:2] if valid_supporting else [])
-            clean_inferences.append(inf)
+            continue
+
+        # B. Check semantic evidence relevance for specific techniques
+        semantic_mismatch = None
+        for tech_name, tech_cfg in TECHNIQUE_ASSERTIONS.items():
+            matched_p = None
+            for p in tech_cfg["statement_patterns"]:
+                m = p.search(stmt)
+                if m:
+                    matched_p = m
+                    break
+            if matched_p:
+                # If statement is negated or inquiry, skip mismatch check
+                if is_clause_negated_or_inquiry(stmt, matched_p.start(), matched_p.end()):
+                    continue
+                # Retrieve text of cited evidence items
+                cited_items = [
+                    ev for ev in context.evidence_items
+                    if str(ev.get("event_id") or ev.get("id")) in inf["supporting_evidence_ids"]
+                ]
+                if cited_items:
+                    combined_cited_text = " ".join(
+                        str(ev.get("message", "")) + " " + str(ev.get("event_type", "")) for ev in cited_items
+                    ).lower()
+                    has_required_marker = any(marker in combined_cited_text for marker in tech_cfg["evidence_markers"])
+                    if not has_required_marker:
+                        semantic_mismatch = (tech_name, tech_cfg, inf["supporting_evidence_ids"])
+                        break
+
+        if semantic_mismatch:
+            t_name, t_cfg, c_ids = semantic_mismatch
+            existing_hypotheses.append({
+                "statement": f"Dugaan/Potensi: {stmt}",
+                "status": "unverified",
+                "investigation_step": t_cfg["verification_step"],
+                "source_inference": stmt,
+            })
+            existing_unknown_items.append({
+                "data_gap": t_cfg["gap_template"].format(cited_ids=", ".join(c_ids)),
+                "impact": f"Klaim {t_name.replace('_', ' ')} dialihkan ke hipotesis unverified karena bukti yang dirujuk tidak relevan secara semantik."
+            })
+            continue
+
+        clean_inferences.append(inf)
 
     analysis.inferences = clean_inferences
 
     # Clean facts: facts must strictly cite verified evidence IDs and not assert unverified concepts
     clean_facts: List[Dict[str, Any]] = []
-    for f in (analysis.facts or []):
+    for f in analysis.facts:
         feid = f.get("evidence_id")
         if feid in allowed_ids:
             f_fact = str(f.get("fact", ""))
             has_unsupported_concept = False
             for concept_name, concept_cfg in THREAT_CONCEPTS.items():
                 if not concept_cfg["is_evidenced"](context):
-                    if any(p.search(f_fact) for p in concept_cfg["patterns"]):
-                        has_unsupported_concept = True
-                        demoted_concepts.append(concept_cfg["label"])
-                        existing_hypotheses.append({
-                            "statement": f"Dugaan/Potensi: {f_fact}",
-                            "status": "unverified",
-                            "investigation_step": concept_cfg["verification_step"],
-                        })
-                        existing_unknown_items.append({
-                            "data_gap": concept_cfg["data_gap"],
-                            "impact": f"Fakta AI dikoreksi: {concept_cfg['label']} dialihkan ke hipotesis unverified."
-                        })
+                    for p in concept_cfg["patterns"]:
+                        m = p.search(f_fact)
+                        if m:
+                            if not is_clause_negated_or_inquiry(f_fact, m.start(), m.end()):
+                                has_unsupported_concept = True
+                                demoted_concepts.append(concept_cfg["label"])
+                                existing_hypotheses.append({
+                                    "statement": f"Dugaan/Potensi: {f_fact}",
+                                    "status": "unverified",
+                                    "investigation_step": concept_cfg["verification_step"],
+                                })
+                                existing_unknown_items.append({
+                                    "data_gap": concept_cfg["data_gap"],
+                                    "impact": f"Fakta AI dikoreksi: {concept_cfg['label']} dialihkan ke hipotesis unverified."
+                                })
+                                break
+                    if has_unsupported_concept:
                         break
             if not has_unsupported_concept:
                 clean_facts.append(f)
@@ -269,7 +474,44 @@ def verify_forensic_grounding(analysis: AIAnalysisItem, context: IncidentContext
                         + f" (Perhatian: Aktivitas berasal dari loopback lokal dengan identitas terpisah {sorted(list(evidence_users))}; korelasi proses belum terbukti)."
                     ).strip()
 
-    # 6. Executive Summary & Threat Classification Forensic Grounding Caveats
+    # 6. Chronological Timeline Normalization & Step Renumbering
+    raw_timeline = analysis.timeline
+    if isinstance(raw_timeline, list):
+        parsed_timeline = []
+        for item in raw_timeline:
+            if isinstance(item, dict):
+                ts_str = str(item.get("timestamp") or "")
+                parsed_timeline.append((ts_str, item))
+            elif isinstance(item, str) and item.strip():
+                parsed_timeline.append(("", {
+                    "step": len(parsed_timeline) + 1,
+                    "timestamp": None,
+                    "event_type": "observation",
+                    "description": item.strip(),
+                    "evidence_id": next(iter(allowed_ids), "EVT-UNKNOWN"),
+                }))
+
+        def _sort_ts(entry):
+            ts = entry[0]
+            if not ts:
+                return datetime.min.replace(tzinfo=timezone.utc)
+            try:
+                clean_ts = ts[:-1] + "+00:00" if ts.endswith("Z") else ts
+                return datetime.fromisoformat(clean_ts)
+            except Exception:
+                return datetime.min.replace(tzinfo=timezone.utc)
+
+        parsed_timeline.sort(key=_sort_ts)
+        final_timeline = []
+        for idx, (_, item) in enumerate(parsed_timeline, start=1):
+            clean_item = dict(item)
+            clean_item["step"] = idx
+            final_timeline.append(clean_item)
+        analysis.timeline = final_timeline
+    else:
+        analysis.timeline = []
+
+    # 7. Executive Summary & Threat Classification Forensic Grounding Caveats
     if demoted_concepts:
         caveat_text = f" (Catatan Forensik: Dugaan {', '.join(set(demoted_concepts))} belum didukung bukti telemetri langsung dan diklasifikasikan sebagai hipotesis unverified)."
         if caveat_text not in analysis.executive_summary:

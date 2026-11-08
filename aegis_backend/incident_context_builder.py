@@ -116,9 +116,83 @@ class IncidentContextBuilder:
             if eid:
                 all_allowed_ids.add(str(eid))
 
-        # Sanitize and prioritize evidence items (token budgeting: max 15 prioritized items)
+        # Stratified Forensic Sampling (Token budgeting: max 15 prioritized items)
+        # Guarantees that in high-volume attacks (1,000+ events), critical milestone events
+        # (auth success, sudo execution, persistence/config changes) and temporal boundaries are not crowded out
+        # by repetitive brute-force failure logs.
+        budget_limit = 15
+
+        if len(evidence_items) <= budget_limit:
+            selected_raw_items = list(evidence_items)
+        else:
+            bucket_triggers: List[Dict[str, Any]] = []
+            bucket_milestones: List[Dict[str, Any]] = []
+            bucket_anomalies: List[Dict[str, Any]] = []
+            bucket_others: List[Dict[str, Any]] = []
+
+            for ev in evidence_items:
+                eid = str(ev.get("event_id") or ev.get("id") or "")
+                msg = str(ev.get("message", "")).lower()
+                etype = str(ev.get("event_type", "")).lower()
+
+                if eid and eid in alert_referenced_evidence_ids:
+                    bucket_triggers.append(ev)
+                elif (
+                    any(k in msg for k in ("accepted", "session opened for user", "auth_success", "login success", "success"))
+                    or etype in ("auth_success", "login_success")
+                    or any(k in msg for k in ("sudo:", "command=", "uid=0", "pkexec", "privilege", "escalat"))
+                    or etype in ("sudo_exec", "privilege_escalation")
+                    or any(k in msg for k in ("authorized_keys", "/etc/cron", "crontab", "/etc/sudoers", "/etc/shadow"))
+                ):
+                    bucket_milestones.append(ev)
+                elif any(k in msg for k in ("fail", "invalid", "denied", "error", "refused")) or "fail" in etype:
+                    bucket_anomalies.append(ev)
+                else:
+                    bucket_others.append(ev)
+
+            selected_dict: Dict[str, Dict[str, Any]] = {}
+
+            def _add_item(item: Dict[str, Any]):
+                item_id = str(item.get("event_id") or item.get("id") or id(item))
+                if item_id not in selected_dict and len(selected_dict) < budget_limit:
+                    selected_dict[item_id] = item
+
+            # 1. Always preserve alert triggers (up to 4)
+            for item in bucket_triggers[:4]:
+                _add_item(item)
+
+            # 2. Always preserve critical milestones (up to 6)
+            for item in bucket_milestones[:6]:
+                _add_item(item)
+
+            # 3. Preserve temporal boundary anchors (earliest and latest events)
+            if evidence_items:
+                _add_item(evidence_items[0])
+                _add_item(evidence_items[-1])
+
+            # 4. Fill remaining budget with anomalies / failure events
+            for item in bucket_anomalies:
+                if len(selected_dict) >= budget_limit:
+                    break
+                _add_item(item)
+
+            # 5. Fill any remaining slots from other events
+            for item in bucket_others:
+                if len(selected_dict) >= budget_limit:
+                    break
+                _add_item(item)
+
+            selected_raw_items = list(selected_dict.values())
+
+        # Sort selected budgeted items chronologically for coherent narrative
+        def _get_ts(it: Dict[str, Any]) -> str:
+            return str(it.get("event_timestamp") or it.get("timestamp") or it.get("created_at") or "")
+
+        selected_raw_items.sort(key=_get_ts)
+
+        # Sanitize selected budgeted evidence items
         sanitized_evidence: List[Dict[str, Any]] = []
-        for ev in evidence_items:
+        for ev in selected_raw_items:
             clean_ev = dict(ev)
             if "message" in clean_ev:
                 clean_ev["message"] = sanitizer.mask_text(str(clean_ev["message"]))
@@ -129,19 +203,7 @@ class IncidentContextBuilder:
             clean_ev["event_id"] = str(ev_id) if ev_id else None
             sanitized_evidence.append(clean_ev)
 
-        # Prioritization: trigger / alert-referenced > failure/escalation > others
-        def _evidence_priority(item: Dict[str, Any]) -> int:
-            eid = item.get("event_id")
-            score = 0
-            if eid and eid in alert_referenced_evidence_ids:
-                score += 10
-            msg = str(item.get("message", "")).lower()
-            if any(k in msg for k in ("fail", "invalid", "root", "sudo", "error", "denied")):
-                score += 5
-            return score
-
-        sanitized_evidence.sort(key=_evidence_priority, reverse=True)
-        budgeted_evidence = sanitized_evidence[:15]
+        budgeted_evidence = sanitized_evidence[:budget_limit]
 
         # Filter relevant posture findings for this host
         host_id = incident.get("host_id", "")

@@ -373,6 +373,110 @@ class AIAnalysisItem(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("facts", mode="before")
+    @classmethod
+    def coerce_facts(cls, v):
+        if isinstance(v, str):
+            return [{"evidence_id": "EVT-AUTO", "fact": v}]
+        if v is None:
+            return []
+        if isinstance(v, list):
+            res = []
+            for item in v:
+                if isinstance(item, str):
+                    res.append({"evidence_id": "EVT-AUTO", "fact": item})
+                elif isinstance(item, dict):
+                    res.append(item)
+            return res
+        return v
+
+    @field_validator("inferences", mode="before")
+    @classmethod
+    def coerce_inferences(cls, v):
+        if isinstance(v, str):
+            return [{"statement": v, "supporting_evidence_ids": [], "rationale": "Model statement."}]
+        if v is None:
+            return []
+        if isinstance(v, list):
+            res = []
+            for item in v:
+                if isinstance(item, str):
+                    res.append({"statement": item, "supporting_evidence_ids": [], "rationale": "Model statement."})
+                elif isinstance(item, dict):
+                    res.append(item)
+            return res
+        return v
+
+    @field_validator("hypotheses", mode="before")
+    @classmethod
+    def coerce_hypotheses(cls, v):
+        if isinstance(v, str):
+            return [{"statement": v, "status": "unverified", "investigation_step": "Verifikasi telemetri host."}]
+        if v is None:
+            return []
+        if isinstance(v, list):
+            res = []
+            for item in v:
+                if isinstance(item, str):
+                    res.append({"statement": item, "status": "unverified", "investigation_step": "Verifikasi telemetri host."})
+                elif isinstance(item, dict):
+                    res.append(item)
+            return res
+        return v
+
+    @field_validator("unknown_items", mode="before")
+    @classmethod
+    def coerce_unknown_items(cls, v):
+        if isinstance(v, str):
+            return [{"data_gap": v, "impact": "Requires additional telemetry."}]
+        if v is None:
+            return []
+        if isinstance(v, list):
+            res = []
+            for item in v:
+                if isinstance(item, str):
+                    res.append({"data_gap": item, "impact": "Requires additional telemetry."})
+                elif isinstance(item, dict):
+                    res.append(item)
+            return res
+        return v
+
+    @field_validator("timeline", mode="before")
+    @classmethod
+    def coerce_timeline(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        return []
+
+    @field_validator("supporting_evidence", mode="before")
+    @classmethod
+    def coerce_supporting_evidence(cls, v):
+        if isinstance(v, str):
+            return [v]
+        if v is None:
+            return []
+        return v
+
+    @field_validator("risk_score", mode="before")
+    @classmethod
+    def coerce_risk_score(cls, v):
+        import math
+        try:
+            if isinstance(v, float) and math.isnan(v):
+                return 0
+            return int(v)
+        except Exception:
+            return 0
+
+    @field_validator("risk_level", mode="before")
+    @classmethod
+    def coerce_risk_level(cls, v):
+        if v is None:
+            return "low"
+        return str(v)
+
 
 class IncidentDetailResponse(BaseModel):
     incident: IncidentItem
