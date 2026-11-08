@@ -217,3 +217,4 @@ If an unrecoverable failure occurs during migration:
 - Execute `supabase/rollback_migration_002.sql`
 
 All rollback scripts are strictly non-destructive to Baseline 001 tables (`hosts`, `telemetry_events`, `alerts`, `alert_evidence`).
+

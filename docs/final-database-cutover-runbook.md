@@ -214,3 +214,4 @@ In the Supabase SQL Editor, execute:
 - `supabase/rollback_migration_002.sql`
 
 *Post-Rollback SLA:* System operational in Hybrid Mode within 3 minutes.
+
