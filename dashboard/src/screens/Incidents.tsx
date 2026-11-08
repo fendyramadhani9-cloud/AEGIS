@@ -168,7 +168,23 @@ export function IncidentsScreen() {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      fontSize: '0.75rem',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      background: 'rgba(59, 130, 246, 0.15)',
+                      color: '#93c5fd',
+                      fontWeight: 600,
+                    }}
+                    title="Active persistence engine"
+                  >
+                    💾 Storage: {summary.storageBackend === 'sqlite_local' ? 'SQLite Local (WAL)' : summary.storageBackend}
+                  </span>
                   <span
                     style={{
                       display: 'inline-flex',
@@ -192,17 +208,7 @@ export function IncidentsScreen() {
                         background: aiHealth.keyAvailable ? '#22c55e' : '#eab308',
                       }}
                     />
-                    {aiHealth.keyAvailable ? 'Live Cloud Key Active' : 'Offline Deterministic Provider'}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: '0.75rem',
-                      color: 'var(--color-text-muted)',
-                      borderLeft: '1px solid var(--color-border)',
-                      paddingLeft: '8px',
-                    }}
-                  >
-                    Storage: <code className="mono">{summary.storageBackend}</code>
+                    {aiHealth.keyAvailable ? 'Google Gemini Live' : 'Deterministic Playbook'}
                   </span>
                 </div>
               </div>
@@ -484,12 +490,25 @@ export function IncidentsScreen() {
                                   style={{
                                     fontSize: '0.85rem',
                                     color: 'var(--color-text-muted)',
-                                    margin: '0 0 10px 0',
+                                    margin: '0 0 6px 0',
                                     lineHeight: '1.4',
                                   }}
                                 >
                                   {inc.correlationScenario}
                                 </p>
+                              )}
+
+                              {inc.correlationReason && (
+                                <div
+                                  style={{
+                                    fontSize: '0.75rem',
+                                    color: '#93c5fd',
+                                    marginBottom: '10px',
+                                    fontFamily: 'monospace',
+                                  }}
+                                >
+                                  <span style={{ fontWeight: 600 }}>Pivot Continuity:</span> {inc.correlationReason}
+                                </div>
                               )}
 
                               <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>

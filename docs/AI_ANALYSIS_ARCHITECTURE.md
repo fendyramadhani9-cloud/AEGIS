@@ -63,3 +63,4 @@ Before forensic context is dispatched to external AI models, `TelemetrySanitizer
 - Key-value credentials (`password=`, `api_key=`, `secret=`).
 - Cloud service keys (AWS AKIA, Google AIza, GitHub ghp).
 - Database connection strings with embedded passwords.
+

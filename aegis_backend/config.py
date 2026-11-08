@@ -40,6 +40,10 @@ class Settings:
         self.llm_provider: str = os.getenv("AEGIS_LLM_PROVIDER", "mock")
         self.llm_api_key: Optional[str] = os.getenv("AEGIS_LLM_API_KEY")
 
+        # SQLite Local Persistent Storage (for incidents, analyses, and timelines)
+        default_sqlite = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "aegis_incidents.db")
+        self.sqlite_db_path: str = os.getenv("AEGIS_SQLITE_DB_PATH", default_sqlite)
+
     @property
     def is_supabase_configured(self) -> bool:
         """Returns True only if both URL and Service Role Key are provided."""
@@ -61,6 +65,7 @@ class Settings:
             "supabase_configured": self.is_supabase_configured,
             "supabase_key_masked": mask_secret(self.supabase_service_role_key),
             "llm_provider": self.llm_provider,
+            "sqlite_db_path": self.sqlite_db_path,
         }
 
 

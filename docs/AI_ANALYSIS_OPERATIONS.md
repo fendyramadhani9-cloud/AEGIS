@@ -41,3 +41,4 @@ Expected output:
 3. **Analyst Review:** Review executive summary, attack narrative, and grounded evidence.
 4. **Containment:** Apply recommended actions (e.g., firewall block `ufw deny from <IP>`).
 5. **Status Update:** Update incident lifecycle status to `mitigated` and then `resolved`.
+

@@ -61,3 +61,4 @@ erDiagram
 - Rollback: `supabase/rollback_migration_004.sql`
   The rollback drops `incident_status_history`, `ai_analyses`, `incident_timeline`, `incident_alerts`, and `incidents` in reverse dependency order, leaving historical alerts and baseline tables completely untouched.
 - Tested locally via PostgreSQL engine (PGlite in `tests/verify_incident_migration.cjs`).
+

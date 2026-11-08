@@ -1,11 +1,13 @@
 """
 AEGIS Multi-Dimensional Risk Assessment Engine.
-Calculates objective, contextual incident risk scores and levels based on
+Calculates objective, contextual incident risk scores (0-100) and levels based on
 alert severities, attack sequence progression, evidence quality, and host posture.
+
 Guarantees:
 1. Mathematical transparency: Every point contributing to the score is listed as a factor.
-2. Preserves deterministic alert severity: The original alert severity is never mutated.
-3. Incorporates Security Checker posture context without conflating posture with active threat.
+2. Single source of truth formula: Harmonized across code, documentation, and tests.
+3. Preserves deterministic alert severity: The original alert severity is never mutated.
+4. Incorporates Security Checker posture context without conflating posture with active threat.
 """
 
 from typing import List, Dict, Any, Optional
@@ -14,10 +16,17 @@ from dataclasses import dataclass, field
 
 @dataclass
 class RiskFactor:
-    name: str
+    factor_id: str
+    factor_name: str
     points: int
-    category: str  # 'severity', 'progression', 'evidence', 'posture'
+    category: str  # 'severity', 'multi_alert', 'progression', 'evidence', 'posture'
     description: str
+    supporting_evidence_ids: List[str] = field(default_factory=list)
+
+    @property
+    def name(self) -> str:
+        """Alias for backward compatibility with existing tests and UI."""
+        return self.factor_name
 
 
 @dataclass
@@ -33,10 +42,13 @@ class RiskAssessmentResult:
             "risk_level": self.risk_level,
             "risk_factors": [
                 {
-                    "name": f.name,
+                    "factor_id": f.factor_id,
+                    "factor_name": f.factor_name,
+                    "name": f.factor_name,
                     "points": f.points,
                     "category": f.category,
                     "description": f.description,
+                    "supporting_evidence_ids": f.supporting_evidence_ids,
                 }
                 for f in self.risk_factors
             ],
@@ -45,7 +57,10 @@ class RiskAssessmentResult:
 
 
 class RiskAssessmentEngine:
-    """Evaluates contextual risk for a correlated incident."""
+    """
+    Evaluates contextual risk for a correlated incident using an explicit, bounded formula:
+    Risk = min(100, Base + MultiAlert + Progression + Evidence + Posture)
+    """
 
     SEVERITY_WEIGHTS = {
         "critical": 40,
@@ -74,7 +89,9 @@ class RiskAssessmentEngine:
                 summary="No active alerts in incident.",
             )
 
-        # 1. Base Severity Contribution (Highest alert severity)
+        # ---------------------------------------------------------------------
+        # 1. Base Severity Contribution (Highest alert severity in cluster)
+        # ---------------------------------------------------------------------
         severities = [a.get("severity", "low").lower() for a in alerts]
         sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
         highest_sev = max(severities, key=lambda s: sev_rank.get(s, 0), default="low")
@@ -82,27 +99,34 @@ class RiskAssessmentEngine:
         score += base_points
         factors.append(
             RiskFactor(
-                name="Base Alert Severity",
+                factor_id=f"SEV-{highest_sev.upper()}",
+                factor_name="Base Alert Severity",
                 points=base_points,
                 category="severity",
                 description=f"Incident encompasses at least one '{highest_sev.upper()}' severity detection.",
             )
         )
 
-        # 2. Multi-Alert Correlation Escalation
+        # ---------------------------------------------------------------------
+        # 2. Multi-Alert Correlation Escalation (Cluster depth)
+        # +6 points per additional alert beyond the primary, capped at +24
+        # ---------------------------------------------------------------------
         if len(alerts) > 1:
-            multi_alert_points = min((len(alerts) - 1) * 8, 24)
+            multi_alert_points = min((len(alerts) - 1) * 6, 24)
             score += multi_alert_points
             factors.append(
                 RiskFactor(
-                    name="Correlated Multi-Alert Cluster",
+                    factor_id="MULTI-ALERT",
+                    factor_name="Correlated Multi-Alert Cluster",
                     points=multi_alert_points,
-                    category="correlation",
+                    category="multi_alert",
                     description=f"Cluster aggregates {len(alerts)} related detections on the same host.",
                 )
             )
 
-        # 3. Attack Sequence Progression Analysis
+        # ---------------------------------------------------------------------
+        # 3. Attack Sequence Progression Analysis (Kill-chain stages)
+        # ---------------------------------------------------------------------
         rule_ids = {a.get("rule_id", "") for a in alerts}
         has_brute = "RULE-SSH-BRUTE" in rule_ids
         has_auth_success = "RULE-AUTH-003" in rule_ids
@@ -113,7 +137,8 @@ class RiskAssessmentEngine:
             score += prog_points
             factors.append(
                 RiskFactor(
-                    name="Full Kill Chain Sequence",
+                    factor_id="PROG-KILLCHAIN",
+                    factor_name="Full Kill Chain Sequence",
                     points=prog_points,
                     category="progression",
                     description="Complete progression observed: SSH Brute Force -> Successful Access -> Privileged Sudo Execution.",
@@ -124,7 +149,8 @@ class RiskAssessmentEngine:
             score += prog_points
             factors.append(
                 RiskFactor(
-                    name="Access to Privilege Escalation",
+                    factor_id="PROG-AUTH-SUDO",
+                    factor_name="Access to Privilege Escalation",
                     points=prog_points,
                     category="progression",
                     description="Authentication success immediately followed by privileged root/sudo commands.",
@@ -135,33 +161,40 @@ class RiskAssessmentEngine:
             score += prog_points
             factors.append(
                 RiskFactor(
-                    name="Brute Force to Compromise",
+                    factor_id="PROG-BRUTE-AUTH",
+                    factor_name="Brute Force to Compromise",
                     points=prog_points,
                     category="progression",
                     description="Repeated failed authentications culminated in successful account login.",
                 )
             )
 
-        # Sudo root shell specific escalation
+        # Interactive Root Shell / High-risk command execution
         for a in alerts:
-            if a.get("rule_id") == "RULE-SUSP-SUDO" and "Root Shell" in a.get("title", ""):
+            reason = (a.get("reason") or "").lower()
+            title = (a.get("title") or "").lower()
+            if a.get("rule_id") == "RULE-SUSP-SUDO" and ("root shell" in title or "/bin/bash" in reason or "chmod 777" in reason):
                 score += 10
                 factors.append(
                     RiskFactor(
-                        name="Interactive Root Shell Spawn",
+                        factor_id="PROG-ROOTSHELL",
+                        factor_name="Interactive Root Shell Spawn",
                         points=10,
                         category="progression",
-                        description="Privileged interactive shell execution (/bin/bash) executed via sudo.",
+                        description="Privileged interactive shell or hazardous permission modification (/bin/bash or chmod 777) executed via sudo.",
                     )
                 )
                 break
 
-        # 4. Evidence Volume & Forensic Confidence
+        # ---------------------------------------------------------------------
+        # 4. Forensic Telemetry Corroboration Strength
+        # ---------------------------------------------------------------------
         if evidence_count >= 10:
             score += 8
             factors.append(
                 RiskFactor(
-                    name="Substantial Forensic Telemetry",
+                    factor_id="EVID-SUBSTANTIAL",
+                    factor_name="Substantial Forensic Telemetry",
                     points=8,
                     category="evidence",
                     description=f"Strong corroborating evidence ({evidence_count} logged events) substantiating detection.",
@@ -171,14 +204,29 @@ class RiskAssessmentEngine:
             score += 5
             factors.append(
                 RiskFactor(
-                    name="Corroborating Telemetry Evidence",
+                    factor_id="EVID-MODERATE",
+                    factor_name="Corroborating Telemetry Evidence",
                     points=5,
                     category="evidence",
                     description=f"{evidence_count} telemetry events ground the detected activity.",
                 )
             )
+        elif evidence_count >= 1:
+            score += 2
+            factors.append(
+                RiskFactor(
+                    factor_id="EVID-MINIMAL",
+                    factor_name="Minimal Telemetry Evidence",
+                    points=2,
+                    category="evidence",
+                    description=f"{evidence_count} telemetry event(s) recorded.",
+                )
+            )
 
+        # ---------------------------------------------------------------------
         # 5. Host Posture Vulnerability Context (from Security Checker)
+        # Capped at +20
+        # ---------------------------------------------------------------------
         if posture_findings:
             failed_check_ids = {
                 f.get("check_id")
@@ -189,7 +237,8 @@ class RiskAssessmentEngine:
                 score += 10
                 factors.append(
                     RiskFactor(
-                        name="Vulnerable Host Perimeter (Firewall Inactive)",
+                        factor_id="POSTURE-FW-FAIL",
+                        factor_name="Vulnerable Host Perimeter (Firewall Inactive)",
                         points=10,
                         category="posture",
                         description="Host firewall (UFW/nftables) is inactive, facilitating unrestricted network ingress.",
@@ -199,7 +248,8 @@ class RiskAssessmentEngine:
                 score += 5
                 factors.append(
                     RiskFactor(
-                        name="Vulnerable Host Containment (AppArmor Inactive)",
+                        factor_id="POSTURE-APPARMOR-FAIL",
+                        factor_name="Vulnerable Host Containment (AppArmor Inactive)",
                         points=5,
                         category="posture",
                         description="AppArmor mandatory access control is not enforcing profiles on the host.",
@@ -209,34 +259,31 @@ class RiskAssessmentEngine:
                 score += 5
                 factors.append(
                     RiskFactor(
-                        name="Insecure System File Permissions",
+                        factor_id="POSTURE-PERM-FAIL",
+                        factor_name="Insecure System File Permissions",
                         points=5,
                         category="posture",
                         description="Key security configuration files (/etc/sudoers or /etc/shadow) have permissive access permissions.",
                     )
                 )
 
-        # Bound score between 0 and 100
+        # ---------------------------------------------------------------------
+        # 6. Bounding & Level Classification
+        # ---------------------------------------------------------------------
         bounded_score = min(max(score, 0), 100)
 
-        # Map to Risk Level
-        if bounded_score >= 80:
-            level = "critical"
-        elif bounded_score >= 60:
-            level = "high"
+        if bounded_score >= 85:
+            risk_level = "critical"
+        elif bounded_score >= 65:
+            risk_level = "high"
         elif bounded_score >= 35:
-            level = "medium"
+            risk_level = "medium"
         else:
-            level = "low"
-
-        summary = (
-            f"Risk score {bounded_score}/100 ({level.upper()}) derived from "
-            f"{highest_sev.upper()} base alert severity with {len(factors)} contextual risk factors."
-        )
+            risk_level = "low"
 
         return RiskAssessmentResult(
             risk_score=bounded_score,
-            risk_level=level,
+            risk_level=risk_level,
             risk_factors=factors,
-            summary=summary,
+            summary=f"Incident assessed at {risk_level.upper()} risk (Score: {bounded_score}/100) with {len(factors)} corroborating risk factors.",
         )

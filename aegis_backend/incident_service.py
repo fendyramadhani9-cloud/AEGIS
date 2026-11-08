@@ -206,3 +206,4 @@ class IncidentService:
         """Retrieves aggregated metrics for incidents."""
         summary_data = self.repo.get_incidents_summary(host_id=host_id)
         return IncidentSummaryResponse.model_validate(summary_data)
+

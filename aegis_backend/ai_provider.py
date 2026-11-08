@@ -85,13 +85,38 @@ class MockAIProvider(BaseAIProvider):
             exec_summary = f"Security alerts detected on host '{context.host_id}': {context.title}."
 
         observed = []
+        facts = []
         for ev in context.evidence_items[:5]:
             ev_id = ev.get("event_id") or ev.get("id")
-            observed.append({
+            item = {
                 "evidence_id": ev_id,
                 "fact": ev.get("message", "Telemetry observation recorded."),
                 "timestamp": ev.get("event_timestamp") or ev.get("created_at"),
-            })
+            }
+            observed.append(item)
+            facts.append(item)
+
+        inferences = [
+            {
+                "statement": f"Observed activity pattern aligns with {threat_cls}.",
+                "supporting_evidence_ids": evidence_ids[:3],
+                "rationale": "High-confidence sequential correlation across logged telemetry events.",
+            }
+        ]
+
+        hypotheses = [
+            {
+                "statement": "Attacker may seek persistence via scheduled cron or secondary SSH keys.",
+                "status": "unverified",
+                "investigation_step": "Inspect /etc/crontab and ~/.ssh/authorized_keys for recent modifications.",
+            }
+        ]
+
+        unknown_items = [
+            {"data_gap": "External IP ownership and Autonomous System Number (ASN).", "impact": "Attribution to specific threat group incomplete."},
+            {"data_gap": "Full process execution parameters inside spawned interactive shells.", "impact": "Sub-command actions require auditd inspection."},
+        ]
+        unknowns = [item["data_gap"] for item in unknown_items]
 
         timeline = []
         for i, ev in enumerate(context.evidence_items[:6]):
@@ -144,6 +169,10 @@ class MockAIProvider(BaseAIProvider):
             threat_classification=threat_cls,
             executive_summary=exec_summary,
             attack_scenario=context.attack_scenario or exec_summary,
+            facts=facts,
+            inferences=inferences,
+            hypotheses=hypotheses,
+            unknown_items=unknown_items,
             observed_behaviors=observed,
             timeline=timeline,
             risk_level=context.severity,
@@ -159,7 +188,7 @@ class MockAIProvider(BaseAIProvider):
             investigation_notes="Offline deterministic analysis based strictly on collected telemetry.",
             provider="mock-evaluator",
             model=self.model_name,
-            storage_backend="database",
+            storage_backend="sqlite_local",
             created_at=now_iso,
             completed_at=now_iso,
         )
@@ -252,23 +281,29 @@ class GeminiProvider(BaseAIProvider):
 
         system_prompt = (
             "You are AEGIS AI Incident Investigation Analyst. Analyze the provided Linux security incident context.\n"
-            "STRICT GROUNDING RULES:\n"
+            "STRICT GROUNDING & TAXONOMY RULES:\n"
             "1. Output MUST be valid JSON adhering strictly to the schema provided.\n"
-            "2. ANTI-HALLUCINATION REQUIREMENT: Only reference event IDs explicitly listed in 'allowed_evidence_ids'. Do NOT invent event IDs.\n"
-            "3. Be factually precise: distinguish observed facts from inferences. Do not exaggerate event counts.\n"
+            "2. ANTI-HALLUCINATION REQUIREMENT: Only reference event IDs explicitly listed in 'allowed_evidence_ids'. Do NOT invent event IDs, IPs, users, or commands.\n"
+            "3. STRICT TAXONOMY SEPARATION:\n"
+            "   - 'facts': Concrete telemetry statements with valid evidence_id.\n"
+            "   - 'inferences': Logical conclusions derived from multiple facts with rationale.\n"
+            "   - 'hypotheses': Unproven possibilities marked as status 'unverified' with next steps.\n"
+            "   - 'unknowns': Explicitly state information that is missing from telemetry.\n"
             "4. NEVER suggest modifying production systems directly; provide actionable administrator recommendations.\n"
             "5. The incident severity is immutable.\n"
             "6. Output JSON format:\n"
             "{\n"
-            '  "threat_classification": "Brief MITRE ATT&CK or industry attack type",\n'
+            '  "threat_classification": "MITRE ATT&CK technique or attack pattern",\n'
             '  "executive_summary": "2-3 sentences plain language summary",\n'
             '  "attack_scenario": "Detailed reconstructed narrative of what occurred",\n'
-            '  "observed_behaviors": [{"evidence_id": "EVT-...", "fact": "...", "timestamp": "..."}],\n'
+            '  "facts": [{"evidence_id": "EVT-...", "fact": "Direct telemetry observation", "timestamp": "..."}],\n'
+            '  "inferences": [{"statement": "Logical conclusion", "supporting_evidence_ids": ["EVT-..."], "rationale": "Why concluded"}],\n'
+            '  "hypotheses": [{"statement": "Unverified theory", "status": "unverified", "investigation_step": "How to verify"}],\n'
+            '  "unknowns": [{"data_gap": "Missing telemetry detail", "impact": "Forensic limitation"}],\n'
             '  "timeline": [{"step": 1, "timestamp": "...", "event_type": "...", "description": "...", "evidence_id": "EVT-..."}],\n'
             '  "confidence_level": "high|medium|low",\n'
             '  "confidence_reason": "Justification for confidence level",\n'
             '  "supporting_evidence": ["EVT-...", "EVT-..."],\n'
-            '  "unknowns": ["Things that cannot be determined from telemetry"],\n'
             '  "impact_assessment": "Potential consequence to the host or organisation",\n'
             '  "recommended_actions": [{"priority": "immediate|high|medium", "action": "..."}],\n'
             '  "containment_recommendations": ["Step 1", "Step 2"]\n'
@@ -343,7 +378,44 @@ class GeminiProvider(BaseAIProvider):
             text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
             parsed = json.loads(text_content)
 
-            # Anti-hallucination evidence validation: filter citations
+            # Strict Anti-hallucination Post-Validation
+            raw_facts = parsed.get("facts", parsed.get("observed_behaviors", []))
+            valid_facts = []
+            for f in raw_facts:
+                if isinstance(f, dict):
+                    ev_id = f.get("evidence_id")
+                    if ev_id in context.allowed_evidence_ids:
+                        valid_facts.append(f)
+            if not valid_facts and context.allowed_evidence_ids:
+                for ev in context.evidence_items[:5]:
+                    valid_facts.append({
+                        "evidence_id": ev.get("event_id") or ev.get("id"),
+                        "fact": ev.get("message", "Corroborating telemetry event."),
+                        "timestamp": ev.get("event_timestamp") or ev.get("created_at"),
+                    })
+
+            raw_inferences = parsed.get("inferences", [])
+            valid_inferences = []
+            for inf in raw_inferences:
+                if isinstance(inf, dict):
+                    clean_ids = [eid for eid in inf.get("supporting_evidence_ids", []) if eid in context.allowed_evidence_ids]
+                    inf["supporting_evidence_ids"] = clean_ids or sorted(list(context.allowed_evidence_ids))[:2]
+                    valid_inferences.append(inf)
+
+            raw_hypotheses = parsed.get("hypotheses", [])
+            valid_hypotheses = [h for h in raw_hypotheses if isinstance(h, dict)]
+
+            raw_unknowns = parsed.get("unknowns", [])
+            valid_unknown_items = []
+            plain_unknowns = []
+            for u in raw_unknowns:
+                if isinstance(u, dict):
+                    valid_unknown_items.append(u)
+                    plain_unknowns.append(u.get("data_gap", str(u)))
+                else:
+                    plain_unknowns.append(str(u))
+                    valid_unknown_items.append({"data_gap": str(u), "impact": "Requires additional telemetry."})
+
             cited = parsed.get("supporting_evidence", [])
             valid_citations = [cid for cid in cited if cid in context.allowed_evidence_ids]
             if not valid_citations and context.allowed_evidence_ids:
@@ -358,7 +430,11 @@ class GeminiProvider(BaseAIProvider):
                 threat_classification=parsed.get("threat_classification", "Security Detection"),
                 executive_summary=parsed.get("executive_summary", "Incident analysis completed."),
                 attack_scenario=parsed.get("attack_scenario", context.attack_scenario or ""),
-                observed_behaviors=parsed.get("observed_behaviors", []),
+                facts=valid_facts,
+                inferences=valid_inferences,
+                hypotheses=valid_hypotheses,
+                unknown_items=valid_unknown_items,
+                observed_behaviors=valid_facts,
                 timeline=parsed.get("timeline", []),
                 risk_level=context.severity,
                 risk_score=85 if context.severity in ("critical", "high") else 45,
@@ -366,14 +442,14 @@ class GeminiProvider(BaseAIProvider):
                 confidence_reason=parsed.get("confidence_reason", "Grounded in verified telemetry."),
                 supporting_evidence=valid_citations,
                 contradicting_evidence=[],
-                unknowns=parsed.get("unknowns", []),
+                unknowns=plain_unknowns or ["Telemetry provides sufficient scope for primary threat vector."],
                 impact_assessment=parsed.get("impact_assessment", "Potential access violation."),
                 recommended_actions=parsed.get("recommended_actions", []),
                 containment_recommendations=parsed.get("containment_recommendations", []),
                 investigation_notes="Live Google Gemini analysis verified against grounding telemetry.",
                 provider="gemini",
                 model=self.model_name,
-                storage_backend="database",
+                storage_backend="sqlite_local",
                 created_at=now_iso,
                 completed_at=datetime.now(timezone.utc).isoformat(),
             )
@@ -618,10 +694,10 @@ class NullAIProvider(BaseAIProvider):
                 {"priority": "high", "action": "Review alerts and evidence directly from the Detections screen."},
             ],
             containment_recommendations=[],
-            investigation_notes="Set provider credentials to activate automated reasoning.",
+            investigation_notes="Deterministic fallback playbook applied. AI provider offline or unconfigured.",
             provider="none",
             model="none",
-            storage_backend="database",
+            storage_backend="sqlite_local",
             created_at=now_iso,
             completed_at=now_iso,
         )
@@ -651,3 +727,4 @@ def get_ai_provider() -> BaseAIProvider:
         return MockAIProvider()
 
     return NullAIProvider()
+

@@ -290,11 +290,13 @@ class IncidentItem(BaseModel):
     source_ip: Optional[str] = None
     target_user: Optional[str] = None
     attack_scenario: Optional[str] = None
+    correlation_reason: Optional[str] = None
     assigned_to: Optional[str] = None
     first_seen_at: str
     last_seen_at: str
     created_at: str
     updated_at: Optional[str] = None
+    storage_backend: Optional[str] = "sqlite_local"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -338,10 +340,14 @@ class AIAnalysisItem(BaseModel):
     incident_id: Optional[str] = None
     alert_id: Optional[str] = None
     host_id: str
-    analysis_status: str  # 'completed', 'partial', 'insufficient_data', 'failed', 'unavailable'
+    analysis_status: str  # 'completed', 'partial', 'insufficient_data', 'failed', 'unavailable', 'degraded'
     threat_classification: str
     executive_summary: str
     attack_scenario: str
+    facts: List[Dict[str, Any]] = Field(default_factory=list)
+    inferences: List[Dict[str, Any]] = Field(default_factory=list)
+    hypotheses: List[Dict[str, Any]] = Field(default_factory=list)
+    unknown_items: List[Dict[str, Any]] = Field(default_factory=list)
     observed_behaviors: List[Dict[str, Any]] = Field(default_factory=list)
     timeline: List[Dict[str, Any]] = Field(default_factory=list)
     risk_level: str
@@ -357,7 +363,7 @@ class AIAnalysisItem(BaseModel):
     investigation_notes: Optional[str] = None
     provider: str
     model: str
-    storage_backend: str = "database"
+    storage_backend: str = "sqlite_local"
     created_at: str
     completed_at: Optional[str] = None
 
@@ -407,11 +413,14 @@ class AIHealthResponse(BaseModel):
     reachable: bool
     key_available: Optional[bool] = None
     offline_fallback_ready: Optional[bool] = True
+    analysis_status: Optional[str] = "ready"
     message: str
 
     def model_post_init(self, __context: Any) -> None:
         if not self.active_provider:
             self.active_provider = self.provider
         if self.key_available is None:
-            self.key_available = self.configured and self.reachable
+            self.key_available = self.configured
+        if not self.analysis_status:
+            self.analysis_status = "ready" if self.reachable else "degraded"
 

@@ -45,3 +45,4 @@ Incident identifiers are generated using a deterministic SHA-256 digest:
 $$\text{Digest} = \text{SHA256}(\text{host\_id} + ":" + \text{join}(\text{sorted}(\text{alert\_ids})))[0:12]$$
 $$\text{IncidentID} = \text{"INC-"} + \text{host\_id} + \text{"-"} + \text{Digest}$$
 This guarantees that re-running correlation produces stable, idempotent identifiers.
+

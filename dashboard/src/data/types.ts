@@ -204,9 +204,12 @@ export type IncidentSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
 export interface IncidentRiskFactor {
   name: string;
+  factorId?: string;
   weight: number;
   contribution: number;
+  category?: string;
   description: string;
+  supportingEvidenceIds?: string[];
 }
 
 export interface AIAnalysisRecord {
@@ -218,6 +221,10 @@ export interface AIAnalysisRecord {
   threatClassification: string;
   executiveSummary: string;
   attackScenario: string;
+  facts?: Array<{ evidence_id: string; fact: string; timestamp?: string }>;
+  inferences?: Array<{ statement: string; supporting_evidence_ids: string[]; rationale: string }>;
+  hypotheses?: Array<{ statement: string; status: string; investigation_step: string }>;
+  unknownItems?: Array<{ data_gap: string; impact: string }>;
   keyObservations: Array<{
     observation: string;
     evidenceIds: string[];
@@ -234,6 +241,7 @@ export interface AIAnalysisRecord {
   tokensUsed?: number;
   latencyMs?: number;
   promptSanitized?: boolean;
+  storageBackend?: string;
   createdAt: ISODate;
   error?: string | null;
 }
@@ -253,6 +261,8 @@ export interface Incident {
   detectedAt: ISODate;
   resolvedAt?: ISODate | null;
   correlationScenario?: string;
+  correlationReason?: string;
+  storageBackend?: string;
   riskFactors?: IncidentRiskFactor[];
   alerts?: Alert[];
   latestAnalysis?: AIAnalysisRecord | null;
@@ -289,6 +299,8 @@ export interface AIHealthStatus {
   activeProvider: string;
   model: string;
   keyAvailable: boolean;
+  reachable?: boolean;
+  analysisStatus?: string;
   offlineFallbackReady: boolean;
   providersConfigured: string[];
 }

@@ -27,3 +27,4 @@ Click on any incident card to view its comprehensive investigation dossier:
 ### C. Correlated Alerts & Grounded Evidence
 - Review each alert linked to this incident with rule ID, severity, and reason.
 - Review raw normalized telemetry logs providing concrete ground-truth verification.
+

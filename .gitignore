@@ -18,4 +18,13 @@ supabase/.temp/
 .DS_Store
 Thumbs.db
 
+# Local SQLite Database Files
+*.db
+*.db-wal
+*.db-shm
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/
+
 

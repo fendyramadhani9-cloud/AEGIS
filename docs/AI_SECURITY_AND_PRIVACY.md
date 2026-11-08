@@ -30,3 +30,4 @@ Incident risk levels and alert severities are established by the deterministic e
 
 ### D. Prompt Injection Defense
 Raw log messages are wrapped inside JSON forensic structures with explicit instructions treating them as untrusted raw telemetry. Injected commands like `IGNORE ALL PREVIOUS INSTRUCTIONS` are rendered harmless and treated as inert strings.
+

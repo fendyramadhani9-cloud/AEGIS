@@ -167,6 +167,20 @@ export function IncidentDetailScreen() {
                     >
                       {incident.riskLevel} Risk ({incident.riskScore}/100)
                     </span>
+                    <span
+                      style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        padding: '3px 8px',
+                        borderRadius: '4px',
+                        background: 'rgba(59, 130, 246, 0.15)',
+                        color: '#93c5fd',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                      }}
+                      title="Permanently persisted in SQLite database on disk"
+                    >
+                      💾 Storage: {incident.storageBackend === 'sqlite_local' ? 'SQLite Local (WAL)' : incident.storageBackend || 'SQLite Local'}
+                    </span>
                   </div>
 
                   {/* Status Change Button */}
@@ -225,6 +239,35 @@ export function IncidentDetailScreen() {
                   <span>·</span>
                   <span>{incident.evidenceCount} Supporting Evidence Items</span>
                 </div>
+
+                {/* Correlation Rationale (Pivot Continuity) */}
+                {incident.correlationReason && (
+                  <div
+                    style={{
+                      marginTop: '16px',
+                      padding: '12px 16px',
+                      borderRadius: '6px',
+                      background: 'rgba(59, 130, 246, 0.08)',
+                      border: '1px solid rgba(59, 130, 246, 0.25)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        color: '#93c5fd',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      Correlation Rationale (Pivot Continuity)
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--color-text)', lineHeight: '1.45' }}>
+                      {incident.correlationReason}
+                    </div>
+                  </div>
+                )}
               </section>
 
               {/* Status Update Modal */}
@@ -467,13 +510,38 @@ export function IncidentDetailScreen() {
                           </div>
                         )}
 
-                        {/* Grounded Key Observations with Citations */}
+                        {/* 4-Tier Grounded Forensic Findings */}
+                        {/* Tier 1: Grounded Empirical Facts */}
                         <div>
-                          <h4 style={{ fontSize: '0.9rem', fontWeight: 600, margin: '0 0 8px 0' }}>
-                            Grounded Key Observations
-                          </h4>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                            <span
+                              style={{
+                                fontSize: '0.65rem',
+                                fontWeight: 700,
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                background: 'rgba(34, 197, 94, 0.15)',
+                                color: '#4ade80',
+                                border: '1px solid rgba(34, 197, 94, 0.3)',
+                                letterSpacing: '0.05em',
+                              }}
+                            >
+                              TIER 1 · FACT
+                            </span>
+                            <h4 style={{ fontSize: '0.9rem', fontWeight: 600, margin: 0 }}>
+                              Empirical Observations (Direct Telemetry)
+                            </h4>
+                          </div>
+
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {analysis.keyObservations.map((obs, idx) => (
+                            {((analysis.facts && analysis.facts.length > 0)
+                              ? analysis.facts.map((f) => ({
+                                  observation: f.fact,
+                                  evidenceIds: f.evidence_id ? [f.evidence_id] : [],
+                                  confidence: 1.0,
+                                }))
+                              : analysis.keyObservations
+                            ).map((obs, idx) => (
                               <div
                                 key={idx}
                                 style={{
@@ -491,7 +559,7 @@ export function IncidentDetailScreen() {
                                     <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>
                                       Evidence Citation:
                                     </span>
-                                    {obs.evidenceIds.map((eid) => (
+                                    {obs.evidenceIds.map((eid: string) => (
                                       <button
                                         key={eid}
                                         type="button"
@@ -527,6 +595,217 @@ export function IncidentDetailScreen() {
                             ))}
                           </div>
                         </div>
+
+                        {/* Tier 2: Logical Inferences */}
+                        {analysis.inferences && analysis.inferences.length > 0 && (
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                              <span
+                                style={{
+                                  fontSize: '0.65rem',
+                                  fontWeight: 700,
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  background: 'rgba(59, 130, 246, 0.15)',
+                                  color: '#60a5fa',
+                                  border: '1px solid rgba(59, 130, 246, 0.3)',
+                                  letterSpacing: '0.05em',
+                                }}
+                              >
+                                TIER 2 · INFERENCE
+                              </span>
+                              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, margin: 0 }}>
+                                Logical Inferences (Corroborated Telemetry Deductions)
+                              </h4>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {analysis.inferences.map((inf, idx) => (
+                                <div
+                                  key={idx}
+                                  style={{
+                                    padding: '10px 14px',
+                                    borderRadius: '6px',
+                                    background: 'rgba(59, 130, 246, 0.04)',
+                                    border: '1px solid rgba(59, 130, 246, 0.15)',
+                                  }}
+                                >
+                                  <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#93c5fd', marginBottom: '4px' }}>
+                                    {inf.statement}
+                                  </div>
+                                  <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', lineHeight: '1.4', marginBottom: '6px' }}>
+                                    {inf.rationale}
+                                  </div>
+                                  {inf.supporting_evidence_ids && inf.supporting_evidence_ids.length > 0 && (
+                                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                      <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                                        Supporting IDs:
+                                      </span>
+                                      {inf.supporting_evidence_ids.map((eid: string) => (
+                                        <button
+                                          key={eid}
+                                          type="button"
+                                          onClick={() => {
+                                            setHighlightedEvidenceId(eid);
+                                            const el = document.getElementById(`evidence-${eid}`);
+                                            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                          }}
+                                          style={{
+                                            padding: '2px 6px',
+                                            borderRadius: '4px',
+                                            background: 'rgba(59, 130, 246, 0.15)',
+                                            color: '#60a5fa',
+                                            border: '1px solid rgba(59, 130, 246, 0.3)',
+                                            fontSize: '0.7rem',
+                                            fontFamily: 'monospace',
+                                            cursor: 'pointer',
+                                          }}
+                                          title={`Jump to evidence event ${eid}`}
+                                        >
+                                          #{eid.substring(0, 8)}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Tier 3: Working Hypotheses */}
+                        {analysis.hypotheses && analysis.hypotheses.length > 0 && (
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                              <span
+                                style={{
+                                  fontSize: '0.65rem',
+                                  fontWeight: 700,
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  background: 'rgba(234, 179, 8, 0.15)',
+                                  color: '#facc15',
+                                  border: '1px solid rgba(234, 179, 8, 0.3)',
+                                  letterSpacing: '0.05em',
+                                }}
+                              >
+                                TIER 3 · HYPOTHESIS
+                              </span>
+                              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, margin: 0 }}>
+                                Working Hypotheses (Requires Independent Verification)
+                              </h4>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {analysis.hypotheses.map((hyp, idx) => (
+                                <div
+                                  key={idx}
+                                  style={{
+                                    padding: '10px 14px',
+                                    borderRadius: '6px',
+                                    background: 'rgba(234, 179, 8, 0.04)',
+                                    border: '1px solid rgba(234, 179, 8, 0.18)',
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                    <span
+                                      style={{
+                                        fontSize: '0.65rem',
+                                        padding: '1px 5px',
+                                        borderRadius: '3px',
+                                        background: 'rgba(234, 179, 8, 0.2)',
+                                        color: '#fef08a',
+                                        fontWeight: 600,
+                                        fontFamily: 'monospace',
+                                      }}
+                                    >
+                                      [{hyp.status || 'Unverified'}]
+                                    </span>
+                                    <strong style={{ fontSize: '0.85rem', color: 'var(--color-text)' }}>
+                                      {hyp.statement}
+                                    </strong>
+                                  </div>
+                                  <div style={{ fontSize: '0.8rem', color: '#93c5fd', marginTop: '4px' }}>
+                                    🔍 Verification: {hyp.investigation_step}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Tier 4: Limits and Unknowns */}
+                        {((analysis.unknownItems && analysis.unknownItems.length > 0) || (analysis.unknowns && analysis.unknowns.length > 0)) && (
+                          <div
+                            style={{
+                              padding: '12px 14px',
+                              borderRadius: '6px',
+                              background: 'rgba(234, 179, 8, 0.08)',
+                              border: '1px solid rgba(234, 179, 8, 0.2)',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                              <span
+                                style={{
+                                  fontSize: '0.65rem',
+                                  fontWeight: 700,
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  background: 'rgba(234, 179, 8, 0.2)',
+                                  color: '#fef08a',
+                                  border: '1px solid rgba(234, 179, 8, 0.4)',
+                                  letterSpacing: '0.05em',
+                                }}
+                              >
+                                TIER 4 · UNKNOWN
+                              </span>
+                              <h4
+                                style={{
+                                  fontSize: '0.85rem',
+                                  fontWeight: 600,
+                                  margin: 0,
+                                  color: '#facc15',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                }}
+                              >
+                                <HelpCircle size={14} />
+                                Forensic Blind Spots &amp; Missing Telemetry (Anti-Hallucination)
+                              </h4>
+                            </div>
+
+                            {analysis.unknownItems && analysis.unknownItems.length > 0 ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {analysis.unknownItems.map((u, i) => (
+                                  <div
+                                    key={i}
+                                    style={{
+                                      fontSize: '0.8rem',
+                                      padding: '8px 10px',
+                                      borderRadius: '4px',
+                                      background: 'rgba(0,0,0,0.2)',
+                                      border: '1px solid rgba(234, 179, 8, 0.15)',
+                                    }}
+                                  >
+                                    <div style={{ fontWeight: 600, color: 'var(--color-text)', marginBottom: '2px' }}>
+                                      {u.data_gap}
+                                    </div>
+                                    <div style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+                                      Impact: {u.impact}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                                {(analysis.unknowns || []).map((u, i) => (
+                                  <li key={i}>{u}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
 
                         {/* Actionable Recommendations */}
                         <div>
@@ -576,38 +855,6 @@ export function IncidentDetailScreen() {
                             ))}
                           </div>
                         </div>
-
-                        {/* Limits and Unknowns */}
-                        {analysis.unknowns && analysis.unknowns.length > 0 && (
-                          <div
-                            style={{
-                              padding: '12px 14px',
-                              borderRadius: '6px',
-                              background: 'rgba(234, 179, 8, 0.08)',
-                              border: '1px solid rgba(234, 179, 8, 0.2)',
-                            }}
-                          >
-                            <h4
-                              style={{
-                                fontSize: '0.8rem',
-                                fontWeight: 600,
-                                margin: '0 0 6px 0',
-                                color: '#facc15',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                              }}
-                            >
-                              <HelpCircle size={14} />
-                              Anti-Hallucination Limits &amp; Unobserved Factors
-                            </h4>
-                            <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                              {analysis.unknowns.map((u, i) => (
-                                <li key={i}>{u}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
                       </div>
                     )}
                   </Section>
@@ -778,13 +1025,30 @@ export function IncidentDetailScreen() {
                             }}
                           >
                             <div style={{ maxWidth: '75%' }}>
-                              <strong style={{ display: 'block', color: 'var(--color-text)' }}>{factor.name}</strong>
-                              <span style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px', flexWrap: 'wrap' }}>
+                                {factor.category && (
+                                  <span
+                                    style={{
+                                      fontSize: '0.65rem',
+                                      padding: '1px 5px',
+                                      borderRadius: '3px',
+                                      background: 'rgba(255,255,255,0.08)',
+                                      color: 'var(--color-text-muted)',
+                                      textTransform: 'uppercase',
+                                      fontFamily: 'monospace',
+                                    }}
+                                  >
+                                    {factor.category}
+                                  </span>
+                                )}
+                                <strong style={{ color: 'var(--color-text)' }}>{factor.name}</strong>
+                              </div>
+                              <span style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem', lineHeight: '1.4' }}>
                                 {factor.description}
                               </span>
                             </div>
-                            <div style={{ textAlign: 'right', fontWeight: 600, color: '#38bdf8' }}>
-                              +{factor.contribution.toFixed(1)}
+                            <div style={{ textAlign: 'right', fontWeight: 600, color: '#38bdf8', whiteSpace: 'nowrap' }}>
+                              +{factor.contribution.toFixed(1)} pts
                             </div>
                           </div>
                         ))}

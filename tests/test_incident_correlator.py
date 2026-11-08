@@ -170,3 +170,65 @@ def test_correlator_deterministic_incident_ids():
     assert id1 == id2
     assert id1.startswith("INC-host-fenn-ubuntu-")
     assert len(id1) > len("INC-host-fenn-ubuntu-")
+
+
+def test_correlator_pivot_continuity_ip_separation():
+    correlator = IncidentCorrelator(time_window_seconds=1800)
+    now = datetime.now(timezone.utc)
+
+    alerts = [
+        {
+            "id": "ALT-IP-A",
+            "host_id": "host-fenn",
+            "rule_id": "RULE-SSH-BRUTE",
+            "title": "SSH Brute from IP A",
+            "severity": "high",
+            "detected_at": now.isoformat(),
+            "reason": "4 failed logins from source IP 198.51.100.10 for user 'root'",
+        },
+        {
+            "id": "ALT-IP-B",
+            "host_id": "host-fenn",
+            "rule_id": "RULE-SSH-BRUTE",
+            "title": "SSH Brute from IP B",
+            "severity": "high",
+            "detected_at": (now + timedelta(minutes=5)).isoformat(),
+            "reason": "4 failed logins from source IP 203.0.113.88 for user 'oracle'",
+        },
+    ]
+
+    incidents = correlator.correlate(alerts)
+    # Must be 2 separate incidents because they share no source IP, no user, and no causal chain!
+    assert len(incidents) == 2
+    assert {inc.alerts[0]["id"] for inc in incidents} == {"ALT-IP-A", "ALT-IP-B"}
+
+
+def test_correlator_unrelated_admin_sudo_segregation():
+    correlator = IncidentCorrelator(time_window_seconds=1800)
+    now = datetime.now(timezone.utc)
+
+    alerts = [
+        {
+            "id": "ALT-BRUTE-EXT",
+            "host_id": "host-fenn",
+            "rule_id": "RULE-SSH-BRUTE",
+            "title": "SSH brute from external",
+            "severity": "high",
+            "detected_at": now.isoformat(),
+            "reason": "Failed SSH for user 'root' from 198.51.100.5",
+        },
+        {
+            "id": "ALT-ADMIN-SUDO",
+            "host_id": "host-fenn",
+            "rule_id": "RULE-SUSP-SUDO",
+            "title": "Scheduled maintenance sudo",
+            "severity": "medium",
+            "detected_at": (now + timedelta(minutes=10)).isoformat(),
+            "reason": "Privileged execution by user 'sysadmin': '/usr/bin/apt-get update'",
+        },
+    ]
+
+    incidents = correlator.correlate(alerts)
+    # Must NOT conflate unrelated admin sudo with external brute force against root!
+    assert len(incidents) == 2
+

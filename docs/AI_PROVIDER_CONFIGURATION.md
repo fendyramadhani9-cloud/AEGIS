@@ -39,3 +39,4 @@ AEGIS_USE_MOCK_LLM=false
 2. The failed request is retried once with the new key.
 3. If all keys fail or no key is present, the engine returns a clean `AIAnalysisItem(analysis_status="failed")` with actionable administrator advice.
 4. Error logs and HTTP responses redact all API key strings via `TelemetrySanitizer` to prevent credential exposure.
+

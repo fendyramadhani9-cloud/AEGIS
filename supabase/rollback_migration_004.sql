@@ -13,3 +13,4 @@ DROP TABLE IF EXISTS public.ai_analyses CASCADE;
 DROP TABLE IF EXISTS public.incident_timeline CASCADE;
 DROP TABLE IF EXISTS public.incident_alerts CASCADE;
 DROP TABLE IF EXISTS public.incidents CASCADE;
+

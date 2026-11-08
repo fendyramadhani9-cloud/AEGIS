@@ -122,3 +122,4 @@ class IncidentContextBuilder:
             target_user=incident.get("target_user"),
             attack_scenario=incident.get("attack_scenario"),
         )
+

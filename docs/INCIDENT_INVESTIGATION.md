@@ -41,3 +41,4 @@ An AEGIS incident aggregates:
 3. **Grounded Supporting Evidence:** Specific normalized log records cited as proof.
 4. **Security Posture Findings:** Local configuration deficiencies (e.g., inactive firewall, password authentication enabled).
 5. **Timeline Stream:** Unified chronological sequence combining alerts, events, status changes, and AI analysis generations.
+

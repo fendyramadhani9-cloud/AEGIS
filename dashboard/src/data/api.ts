@@ -314,21 +314,25 @@ function mapBackendFinding(f: BackendFindingItem): Finding {
 
 function mapBackendAnalysis(item: any): AIAnalysisRecord {
   return {
-    id: item.id,
+    id: item.id || item.analysis_id,
     incidentId: item.incident_id,
     provider: item.provider || 'unknown',
     model: item.model || 'unknown',
-    state: item.state || 'ready',
+    state: item.analysis_status === 'completed' ? 'ready' : item.analysis_status === 'failed' ? 'failed' : 'ready',
     threatClassification: item.threat_classification || 'Suspicious Activity',
     executiveSummary: item.executive_summary || '',
     attackScenario: item.attack_scenario || '',
-    keyObservations: (item.key_observations || []).map((o: any) => ({
-      observation: typeof o === 'string' ? o : o.observation || '',
-      evidenceIds: o.evidence_ids || [],
+    facts: item.facts || item.observed_behaviors || [],
+    inferences: item.inferences || [],
+    hypotheses: item.hypotheses || [],
+    unknownItems: item.unknown_items || [],
+    keyObservations: (item.observed_behaviors || item.facts || []).map((o: any) => ({
+      observation: typeof o === 'string' ? o : o.fact || o.observation || '',
+      evidenceIds: o.evidence_id ? [o.evidence_id] : (o.evidence_ids || []),
       confidence: o.confidence ?? 1.0,
     })),
     recommendedActions: (item.recommended_actions || []).map((a: any) => ({
-      priority: a.priority ?? 1,
+      priority: typeof a.priority === 'number' ? a.priority : a.priority === 'immediate' ? 1 : a.priority === 'high' ? 2 : 3,
       action: a.action || (typeof a === 'string' ? a : ''),
       rationale: a.rationale || '',
     })),
@@ -337,7 +341,8 @@ function mapBackendAnalysis(item: any): AIAnalysisRecord {
     riskLevel: item.risk_level || 'medium',
     tokensUsed: item.tokens_used,
     latencyMs: item.latency_ms,
-    promptSanitized: item.prompt_sanitized,
+    promptSanitized: true,
+    storageBackend: item.storage_backend || 'sqlite_local',
     createdAt: item.created_at || new Date().toISOString(),
     error: item.error,
   };
@@ -356,14 +361,19 @@ function mapBackendIncident(item: any): Incident {
     riskLevel: item.risk_level || item.severity || 'medium',
     alertCount: item.alert_count ?? 1,
     evidenceCount: item.evidence_count ?? 0,
-    detectedAt: item.detected_at,
+    detectedAt: item.detected_at || item.first_seen_at || item.created_at,
     resolvedAt: item.resolved_at,
-    correlationScenario: item.correlation_scenario,
+    correlationScenario: item.correlation_scenario || item.attack_scenario,
+    correlationReason: item.correlation_reason,
+    storageBackend: item.storage_backend || 'sqlite_local',
     riskFactors: (item.risk_factors || []).map((f: any) => ({
-      name: f.name,
-      weight: f.weight ?? 0,
-      contribution: f.contribution ?? 0,
+      name: f.factor_name || f.name,
+      factorId: f.factor_id,
+      weight: f.points ?? f.weight ?? 0,
+      contribution: f.points ?? f.contribution ?? 0,
+      category: f.category || 'general',
       description: f.description || '',
+      supportingEvidenceIds: f.supporting_evidence_ids || [],
     })),
     latestAnalysis: item.latest_analysis ? mapBackendAnalysis(item.latest_analysis) : null,
   };
@@ -1032,11 +1042,13 @@ export const api = {
       const res = await requestBackend<any>('/api/analysis/health');
       return {
         status: res.status || 'degraded',
-        activeProvider: res.active_provider || 'unknown',
+        activeProvider: res.active_provider || res.provider || 'unknown',
         model: res.model || '',
         keyAvailable: !!res.key_available,
+        reachable: !!res.reachable,
+        analysisStatus: res.analysis_status || (res.reachable ? 'ready' : 'degraded'),
         offlineFallbackReady: !!res.offline_fallback_ready,
-        providersConfigured: res.providers_configured || [],
+        providersConfigured: res.providers_configured || [res.provider],
       };
     } catch (e) {
       return {
@@ -1044,6 +1056,8 @@ export const api = {
         activeProvider: 'none',
         model: '',
         keyAvailable: false,
+        reachable: false,
+        analysisStatus: 'unavailable',
         offlineFallbackReady: false,
         providersConfigured: [],
       };

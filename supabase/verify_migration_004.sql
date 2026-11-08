@@ -25,3 +25,4 @@ BEGIN
         RAISE NOTICE 'Verification SUCCESS: All Migration 004 tables established.';
     END IF;
 END $$;
+
