@@ -104,6 +104,30 @@ class CloudSqliteReconciler:
         missing_in_sqlite = list(cloud_ids - sqlite_ids)
         missing_in_cloud = list(sqlite_ids - cloud_ids)
 
+        fixed_count = 0
+        if missing_in_sqlite and self.fix_drift:
+            logger.info("  Reconciling %d missing records from Cloud to SQLite for table '%s'...", len(missing_in_sqlite), table_name)
+            try:
+                for missing_id in missing_in_sqlite:
+                    res = self.client.table(table_name).select("*").eq("id", missing_id).limit(1).execute()
+                    if res.data:
+                        row = res.data[0]
+                        # Insert missing row into SQLite
+                        cols = list(row.keys())
+                        placeholders = ", ".join(["?"] * len(cols))
+                        col_str = ", ".join([f'"{c}"' for c in cols])
+                        vals = [json.dumps(v) if isinstance(v, (dict, list)) else v for v in row.values()]
+                        cur.execute(f'INSERT OR REPLACE INTO "{table_name}" ({col_str}) VALUES ({placeholders});', vals)
+                        fixed_count += 1
+                conn.commit()
+                logger.info("  Successfully reconciled %d records for '%s'.", fixed_count, table_name)
+                # Refresh sqlite_ids
+                cur.execute(f'SELECT id FROM "{table_name}";')
+                sqlite_ids = set(r[0] for r in cur.fetchall())
+                missing_in_sqlite = list(cloud_ids - sqlite_ids)
+            except Exception as fix_err:
+                logger.error("  Failed to auto-reconcile table '%s': %s", table_name, fix_err)
+
         if missing_in_sqlite or (cloud_ids and missing_in_cloud):
             self.report["drift_detected"] = True
 
@@ -112,6 +136,7 @@ class CloudSqliteReconciler:
             "sqlite_count": len(sqlite_ids),
             "missing_in_sqlite_count": len(missing_in_sqlite),
             "missing_in_cloud_count": len(missing_in_cloud),
+            "reconciled_fixed_count": fixed_count,
         }
 
         self.report["summary"]["total_cloud_rows"] += len(cloud_ids)

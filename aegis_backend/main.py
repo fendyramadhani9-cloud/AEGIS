@@ -22,11 +22,14 @@ logger = logging.getLogger("aegis_backend")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager to run startup and shutdown procedures."""
+    """Application lifespan manager to run startup, background tasks, and shutdown procedures."""
     logger.info("Initializing AEGIS Backend in database mode: %s", settings.database_mode)
+    mirror_worker_task = None
+
     if settings.database_mode == "cloud_ssot":
+        # 1. Startup immediate catch-up replay
         try:
-            from aegis_backend.dependencies import get_repository
+            from aegis_backend.repository import get_repository
             repo = get_repository()
             if hasattr(repo, "replay_failed_mirrors"):
                 res = repo.replay_failed_mirrors()
@@ -34,7 +37,35 @@ async def lifespan(app: FastAPI):
                     logger.info("Startup mirror replay recovered %d records: %s", res.get("replayed"), res)
         except Exception as e:
             logger.warning("Startup mirror replay encountered an error: %s", e)
+
+        # 2. Continuous background worker for mirror recovery (every 60s)
+        async def _periodic_mirror_worker():
+            import asyncio
+            while True:
+                try:
+                    await asyncio.sleep(60)
+                    repo = get_repository()
+                    if hasattr(repo, "replay_failed_mirrors"):
+                        res = repo.replay_failed_mirrors()
+                        if res.get("replayed", 0) > 0:
+                            logger.info("Background mirror worker recovered %d records: %s", res.get("replayed"), res)
+                except asyncio.CancelledError:
+                    break
+                except Exception as ex:
+                    logger.debug("Background mirror worker non-critical error: %s", ex)
+
+        import asyncio
+        mirror_worker_task = asyncio.create_task(_periodic_mirror_worker())
+
     yield
+
+    if mirror_worker_task:
+        mirror_worker_task.cancel()
+        try:
+            await mirror_worker_task
+        except Exception:
+            pass
+
     logger.info("Shutting down AEGIS Backend...")
 
 # Create FastAPI app

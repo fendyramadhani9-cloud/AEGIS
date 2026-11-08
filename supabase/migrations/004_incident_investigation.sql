@@ -52,7 +52,11 @@ END $$;
 
 -- Update Trigger Function to support Multi-Alert Dynamic Severity & Host Isolation
 CREATE OR REPLACE FUNCTION public.fn_enforce_incident_severity_match()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 DECLARE
     v_alert_id TEXT;
     v_alert_severity VARCHAR(20);
@@ -83,7 +87,12 @@ BEGIN
 
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
+
+DROP TRIGGER IF EXISTS trg_incidents_severity_match ON public.incidents;
+CREATE TRIGGER trg_incidents_severity_match
+    BEFORE INSERT OR UPDATE OF severity, alert_id, primary_alert_id, host_id ON public.incidents
+    FOR EACH ROW EXECUTE FUNCTION public.fn_enforce_incident_severity_match();
 
 -- Update status check constraint to support full AEGIS lifecycle
 ALTER TABLE public.incidents DROP CONSTRAINT IF EXISTS incidents_status_check;

@@ -160,3 +160,4 @@ Sebagai bagian dari persiapan teknis (tanpa mengeksekusi ke Cloud), script gabun
 | **Proses Cutover / Migrasi** | **DIHENTIKAN TOTAL (HOLD)** |
 
 Tim pelaksana telah kembali ke posisi siaga tanpa melakukan perubahan apa pun lagi terhadap Supabase Cloud maupun konfigurasi database di VM `fenn`. Kami menunggu arahan dan panduan selanjutnya dari Project Owner.
+

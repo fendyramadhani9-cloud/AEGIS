@@ -69,7 +69,11 @@ CREATE INDEX IF NOT EXISTS idx_sc_findings_status ON public.security_findings(st
 -- Automatically synchronizes hosts.last_sc_run_at when a run completes.
 -- ------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.fn_sync_host_last_sc_run()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 BEGIN
     UPDATE public.hosts
     SET last_sc_run_at = NEW.completed_at
@@ -77,7 +81,7 @@ BEGIN
       AND (last_sc_run_at IS NULL OR last_sc_run_at < NEW.completed_at);
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 DROP TRIGGER IF EXISTS trg_sc_runs_sync_host ON public.security_check_runs;
 CREATE TRIGGER trg_sc_runs_sync_host
@@ -87,7 +91,13 @@ CREATE TRIGGER trg_sc_runs_sync_host
     EXECUTE FUNCTION public.fn_sync_host_last_sc_run();
 
 -- ------------------------------------------------------------------------------
--- 4. LEAST PRIVILEGE ACCESS CONTROL
+-- 4. ROW LEVEL SECURITY (RLS) ENFORCEMENT
+-- ------------------------------------------------------------------------------
+ALTER TABLE public.security_check_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.security_findings ENABLE ROW LEVEL SECURITY;
+
+-- ------------------------------------------------------------------------------
+-- 5. LEAST PRIVILEGE ACCESS CONTROL
 -- Revokes public, anon, and authenticated access.
 -- Grants full access exclusively to backend service_role and postgres superuser.
 -- ------------------------------------------------------------------------------

@@ -261,10 +261,17 @@ async function runSimulation() {
   // Verify new tables are dropped
   const checkTables = (await db.query(`
     SELECT table_name FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name IN ('incidents', 'incident_risk_factors', 'security_findings', 'security_check_runs');
+    WHERE table_schema = 'public' AND table_name IN ('incident_risk_factors', 'incident_alerts', 'incident_timeline', 'ai_analyses', 'incident_status_history', 'security_findings', 'security_check_runs');
   `)).rows;
   if (checkTables.length !== 0) throw new Error(`Rollback failed to drop tables: ${JSON.stringify(checkTables)}`);
-  console.log('  [PASS] Rollback scripts cleanly dropped new tables.');
+  
+  // Verify columns on incidents were reverted (primary_alert_id should be gone)
+  const checkCols = (await db.query(`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'incidents' AND column_name = 'primary_alert_id';
+  `)).rows;
+  if (checkCols.length !== 0) throw new Error('Rollback failed to revert 004 columns on incidents table');
+  console.log('  [PASS] Rollback scripts cleanly dropped new tables and reverted incidents schema to baseline 001.');
 
   // Verify baseline 001 is completely intact
   const cBaselineHosts = (await db.query(`SELECT count(*) FROM public.hosts;`)).rows[0].count;

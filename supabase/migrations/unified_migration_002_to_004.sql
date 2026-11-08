@@ -1,6 +1,7 @@
 -- ==============================================================================
--- AEGIS UNIFIED CLOUD SSoT MIGRATION: 002 -> 003 -> 004
+-- AEGIS UNIFIED CLOUD SSoT MIGRATION: 002 -> 003 -> 004 (HARDENED & AUDITED)
 -- Target Database: Supabase PostgreSQL 15+ (Project: hiwfbmwgnpnwaszltqwb)
+-- ACID Atomic Boundary: All DDL wrapped in a single explicit transaction
 -- ==============================================================================
 
 BEGIN;
@@ -453,7 +454,7 @@ GRANT EXECUTE ON FUNCTION public.fn_ingest_alert_with_evidence(jsonb, jsonb) TO 
 
 
 -- ==============================================================================
--- 2. MIGRATION 003: SECURITY CHECKER PERSISTENT RUNS & FINDINGS
+-- 2. MIGRATION 003: SECURITY CHECKER PERSISTENCE SCHEMA
 -- ==============================================================================
 -- ==============================================================================
 -- AEGIS Security Architecture Migration 003
@@ -526,7 +527,11 @@ CREATE INDEX IF NOT EXISTS idx_sc_findings_status ON public.security_findings(st
 -- Automatically synchronizes hosts.last_sc_run_at when a run completes.
 -- ------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.fn_sync_host_last_sc_run()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 BEGIN
     UPDATE public.hosts
     SET last_sc_run_at = NEW.completed_at
@@ -534,7 +539,7 @@ BEGIN
       AND (last_sc_run_at IS NULL OR last_sc_run_at < NEW.completed_at);
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 DROP TRIGGER IF EXISTS trg_sc_runs_sync_host ON public.security_check_runs;
 CREATE TRIGGER trg_sc_runs_sync_host
@@ -544,7 +549,13 @@ CREATE TRIGGER trg_sc_runs_sync_host
     EXECUTE FUNCTION public.fn_sync_host_last_sc_run();
 
 -- ------------------------------------------------------------------------------
--- 4. LEAST PRIVILEGE ACCESS CONTROL
+-- 4. ROW LEVEL SECURITY (RLS) ENFORCEMENT
+-- ------------------------------------------------------------------------------
+ALTER TABLE public.security_check_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.security_findings ENABLE ROW LEVEL SECURITY;
+
+-- ------------------------------------------------------------------------------
+-- 5. LEAST PRIVILEGE ACCESS CONTROL
 -- Revokes public, anon, and authenticated access.
 -- Grants full access exclusively to backend service_role and postgres superuser.
 -- ------------------------------------------------------------------------------
@@ -557,7 +568,7 @@ GRANT SELECT, INSERT, UPDATE ON TABLE public.security_findings TO service_role, 
 
 
 -- ==============================================================================
--- 3. MIGRATION 004: INCIDENTS, TIMELINE, AI ANALYSES & RISK FACTORS
+-- 3. MIGRATION 004: INCIDENT INVESTIGATION & ATTRIBUTION SCHEMA
 -- ==============================================================================
 -- ==============================================================================
 -- AEGIS Security Monitoring & Incident Investigation System
@@ -613,7 +624,11 @@ END $$;
 
 -- Update Trigger Function to support Multi-Alert Dynamic Severity & Host Isolation
 CREATE OR REPLACE FUNCTION public.fn_enforce_incident_severity_match()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 DECLARE
     v_alert_id TEXT;
     v_alert_severity VARCHAR(20);
@@ -644,7 +659,12 @@ BEGIN
 
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
+
+DROP TRIGGER IF EXISTS trg_incidents_severity_match ON public.incidents;
+CREATE TRIGGER trg_incidents_severity_match
+    BEFORE INSERT OR UPDATE OF severity, alert_id, primary_alert_id, host_id ON public.incidents
+    FOR EACH ROW EXECUTE FUNCTION public.fn_enforce_incident_severity_match();
 
 -- Update status check constraint to support full AEGIS lifecycle
 ALTER TABLE public.incidents DROP CONSTRAINT IF EXISTS incidents_status_check;

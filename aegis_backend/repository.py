@@ -297,7 +297,7 @@ class SupabaseRepository(BaseAegisRepository):
             entity_type=entity_type,
             entity_id=entity_id,
             action=action,
-            status="failed",
+            status="pending_retry",
             retry_count=max_retries,
             error_message=str(last_err),
         )
@@ -1180,6 +1180,13 @@ class SupabaseRepository(BaseAegisRepository):
                     inc = self.get_incident_by_id(entity_id)
                     if inc:
                         self.sqlite_store.update_incident_status(entity_id, inc.get("status", "open"))
+                elif entity_type == "security_check_run":
+                    res_run = self.client.table("security_check_runs").select("*").eq("id", entity_id).limit(1).execute()
+                    if res_run.data:
+                        run_row = res_run.data[0]
+                        res_fnd = self.client.table("security_findings").select("*").eq("run_id", entity_id).execute()
+                        findings = res_fnd.data or []
+                        self.sqlite_store.save_security_check_run(run_row, findings)
 
                 self.sqlite_store.log_mirror_attempt(
                     entity_type=entity_type,
@@ -2030,6 +2037,13 @@ class MockAegisRepository(BaseAegisRepository):
                     inc = self.get_incident_by_id(entity_id)
                     if inc:
                         self.sqlite_store.update_incident_status(entity_id, inc.get("status", "open"))
+                elif entity_type == "security_check_run":
+                    res_run = self.client.table("security_check_runs").select("*").eq("id", entity_id).limit(1).execute()
+                    if res_run.data:
+                        run_row = res_run.data[0]
+                        res_fnd = self.client.table("security_findings").select("*").eq("run_id", entity_id).execute()
+                        findings = res_fnd.data or []
+                        self.sqlite_store.save_security_check_run(run_row, findings)
 
                 self.sqlite_store.log_mirror_attempt(
                     entity_type=entity_type,
