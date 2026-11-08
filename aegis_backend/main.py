@@ -24,7 +24,7 @@ logger = logging.getLogger("aegis_backend")
 async def lifespan(app: FastAPI):
     """Application lifespan manager to run startup and shutdown procedures."""
     logger.info("Initializing AEGIS Backend in database mode: %s", settings.database_mode)
-    if settings.database_mode in ("cloud_ssot", "unified_cloud"):
+    if settings.database_mode == "cloud_ssot":
         try:
             from aegis_backend.dependencies import get_repository
             repo = get_repository()

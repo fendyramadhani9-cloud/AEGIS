@@ -340,7 +340,7 @@ Batas Waktu Abort / Rollback: 15 menit jika terjadi kegagalan skema/koneksi
 7. **Step 7: Switch Backend Configuration to SSoT Mode**
    - Perbarui konfigurasi pada VM `fenn`:
      ```bash
-     ssh ubuntu@192.168.193.129 "sed -i 's/AEGIS_DATABASE_MODE=.*/AEGIS_DATABASE_MODE=unified_cloud/' /home/ubuntu/aegis/.env"
+     ssh ubuntu@192.168.193.129 "sed -i 's/AEGIS_DATABASE_MODE=.*/AEGIS_DATABASE_MODE=cloud_ssot/' /home/ubuntu/aegis/.env"
      ```
 8. **Step 8: Restart Backend & Ingestion Collector**
    - Nyalakan kembali layanan:
@@ -348,7 +348,7 @@ Batas Waktu Abort / Rollback: 15 menit jika terjadi kegagalan skema/koneksi
      ssh ubuntu@192.168.193.129 "sudo systemctl start aegis-backend.service; sudo systemctl start aegis-collector.service"
      ```
 9. **Step 9: Post-Cutover Operational Verification**
-   - Audit endpoint `/api/system/status` dan pastikan `database_mode = "unified_cloud"`.
+   - Audit endpoint `/api/system/status` dan pastikan `database_mode = "cloud_ssot"`.
    - Periksa `/api/incidents` untuk memastikan 14 insiden terbaca langsung dari Supabase Cloud.
 
 ---
@@ -412,7 +412,8 @@ Berikut adalah daftar tindakan administratif dan produksi yang saat ini **DITAHA
 - [ ] **Persetujuan 1:** Izin menjalankan skrip DDL `002_atomic_alert_evidence_rpc.sql`, `003_security_checker.sql`, dan `004_incident_investigation.sql` pada proyek Supabase Cloud `hiwfbmwgnpnwaszltqwb`.
 - [ ] **Persetujuan 2:** Izin melakukan impor 136 record data operasional dari VM `fenn` ke tabel Supabase Cloud yang baru dibuat.
 - [ ] **Persetujuan 3:** Izin menghentikan sementara layanan `aegis-backend` dan `aegis-collector` selama estimasi downtime pemeliharaan ~25 menit.
-- [ ] **Persetujuan 4:** Izin mengubah parameter `AEGIS_DATABASE_MODE=unified_cloud` secara permanen pada file environment `/home/ubuntu/aegis/.env` VM `fenn`.
+- [ ] **Persetujuan 4:** Izin mengubah parameter `AEGIS_DATABASE_MODE=cloud_ssot` secara permanen pada file environment `/home/ubuntu/aegis/.env` VM `fenn`.
+- [ ] **Persetujuan 5:** Izin mengalihkan backend ke mode `cloud_ssot` setelah import data berhasil diverifikasi.
 
 ---
 
@@ -421,5 +422,6 @@ Berikut adalah daftar tindakan administratif dan produksi yang saat ini **DITAHA
 1. **Rekomendasi Arsitektur:** Seluruh fondasi teknis, integritas skema, korelasi multi-alert, dan pengujian engine telah berada dalam kondisi optimal. Arsitektur Unified Cloud SSoT sangat direkomendasikan untuk dieksekusi.
 2. **Rekomendasi Operasional:** Karena simulasi siklus hidup (Tahap B) telah memvalidasi seluruh alur termasuk skenario rollback tanpa kehilangan data, pemilik proyek dapat memberikan persetujuan untuk mengeksekusi **Tahap E (Production Cutover)** pada jendela waktu operasional yang dikehendaki.
 3. **Keputusan Pemilik Proyek:**
-   - **Opsi A (Lanjut ke Cutover):** Memberikan persetujuan untuk mengeksekusi DDL, impor data 136 baris ke Cloud, dan mengalihkan backend ke mode `unified_cloud`.
+   - **Opsi A (Lanjut ke Cutover):** Memberikan persetujuan untuk mengeksekusi DDL, impor data 136 baris ke Cloud, dan mengalihkan backend ke mode `cloud_ssot`.
    - **Opsi B (Tunda Cutover):** Tetap mempertahankan mode `hybrid` untuk sementara waktu hingga jadwal rilis produksi yang ditentukan.
+

@@ -44,8 +44,12 @@ class Settings:
         default_sqlite = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "aegis_incidents.db")
         self.sqlite_db_path: str = os.getenv("AEGIS_SQLITE_DB_PATH", default_sqlite)
 
-        # Database Architecture Mode: 'hybrid' (transitional) or 'cloud_ssot' (unified cloud single source of truth)
-        self.database_mode: str = os.getenv("AEGIS_DATABASE_MODE", "hybrid").lower()
+        # Database Architecture Mode: 'hybrid' (transitional) or 'cloud_ssot' (canonical Unified Cloud SSoT)
+        raw_mode = os.getenv("AEGIS_DATABASE_MODE", "hybrid").lower().strip()
+        if raw_mode in ("cloud_ssot", "unified_cloud"):
+            self.database_mode = "cloud_ssot"
+        else:
+            self.database_mode = "hybrid"
 
     @property
     def aegis_database_mode(self) -> str:

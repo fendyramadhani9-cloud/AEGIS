@@ -153,3 +153,4 @@ if __name__ == "__main__":
     print(json.dumps(res, indent=2))
     with open("preflight_sqlite_audit_report.json", "w", encoding="utf-8") as f:
         json.dump(res, f, indent=2)
+
