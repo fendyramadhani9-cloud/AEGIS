@@ -98,34 +98,17 @@ Backend FastAPI dan Dashboard UI tetap berjalan rapi di dalam Docker container, 
    ```bash
    docker compose up -d --build
    ```
-2. **Jalankan Collector di Host Linux (Ubuntu 22.04 / 24.04):**
+2. **Pasang Host Collector Cukup dengan 1 Klik (Otomatis Jadi Systemd Service):**
    ```bash
-   # Di terminal server host (luar docker):
-   sudo python3 -m aegis_agent.collector --backend-url http://127.0.0.1:1708/api
+   # Di terminal server Ubuntu host:
+   sudo bash scripts/install_agent.sh
    ```
-3. *(Opsional)* **Jadikan Systemd Service Otomatis:**
-   Buat file `/etc/systemd/system/aegis-collector.service`:
-   ```ini
-   [Unit]
-   Description=AEGIS Security Telemetry Collector
-   After=network.target docker.service
+   *Skrip ini otomatis mengisolasi virtualenv di `/opt/aegis-agent`, mengonfigurasi `/etc/aegis/agent.env`, mendaftarkan `/etc/systemd/system/aegis-collector.service`, dan langsung menyalakan pemantauan real-time ke gateway Docker port 1708.*
 
-   [Service]
-   Type=simple
-   User=root
-   WorkingDirectory=/opt/aegis
-   ExecStart=/usr/bin/python3 -m aegis_agent.collector --backend-url http://127.0.0.1:1708/api
-   Restart=always
-   RestartSec=5
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
-   Aktifkan service:
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now aegis-collector
-   ```
+3. *(Opsional) Perintah Operasional Agen Host:*
+   - Cek status layanan: `sudo systemctl status aegis-collector`
+   - Pantau streaming log: `sudo journalctl -u aegis-collector -f`
+   - Hapus/Uninstall agen: `sudo bash scripts/uninstall_agent.sh`
 
 #### Kelebihan Metode 2:
 - ✅ **Visibilitas Sistem 100% Tanpa Hambatan:** Collector berjalan langsung di OS host sehingga memiliki akses instan dan akurat ke `journalctl`, `systemctl is-active auditd`, `ufw status`, `dpkg -s`, serta socket jaringan `/proc/net` tanpa terhalang isolasi container.
