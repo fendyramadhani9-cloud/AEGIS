@@ -11,6 +11,7 @@ import logging
 
 from aegis_backend.config import settings
 from aegis_backend.repository import BaseAegisRepository, get_repository
+from aegis_backend.tenancy import authenticate_agent_token, claim_host_for_agent, get_scoped_repository
 from aegis_backend.security_checker_catalog import SECURITY_CHECKS_CATALOG, SecurityCheckDefinition
 from aegis_backend.schemas import (
     SecurityFindingItem,
@@ -32,19 +33,12 @@ router = APIRouter(
 )
 
 
-def verify_agent_token(x_agent_token: Optional[str] = Header(None, alias="X-Agent-Token")):
-    """Dependency enforcing agent authentication for submission endpoints."""
-    if not x_agent_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing required authentication token header: X-Agent-Token",
-        )
-    if x_agent_token != settings.agent_ingest_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid agent authentication token.",
-        )
-    return x_agent_token
+def verify_agent_token(x_agent_token: Optional[str] = Header(None, alias="X-Agent-Token")) -> str:
+    """
+    Dependency enforcing agent authentication for submission endpoints.
+    Returns the tenant id that the presented agent token belongs to.
+    """
+    return authenticate_agent_token(x_agent_token)
 
 
 # ==============================================================================
@@ -69,7 +63,7 @@ def list_catalog_checks():
 
 
 @router.get("/hosts")
-def list_auditable_hosts(repo: BaseAegisRepository = Depends(get_repository)):
+def list_auditable_hosts(repo: BaseAegisRepository = Depends(get_scoped_repository)):
     """Returns list of hosts registered and eligible for security posture audits."""
     hosts, _ = repo.list_hosts(limit=100)
     return {
@@ -94,7 +88,7 @@ def list_auditable_hosts(repo: BaseAegisRepository = Depends(get_repository)):
 @router.post("/runs", response_model=TriggerRunResponse)
 def request_security_run(
     payload: TriggerRunRequest,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Requests agent on host to execute a fresh security audit."""
     host = repo.get_host_by_id(payload.host_id)
@@ -123,7 +117,7 @@ def list_security_runs(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     host_id: Optional[str] = Query(None),
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Retrieves paginated history of security check execution runs."""
     items, total = repo.list_security_runs(limit=limit, offset=offset, host_id=host_id)
@@ -138,7 +132,7 @@ def list_security_runs(
 @router.get("/runs/{run_id}", response_model=SecurityCheckRunItem)
 def get_security_run_detail(
     run_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Retrieves metadata and summary for a single security check run."""
     run = repo.get_security_run_by_id(run_id)
@@ -163,7 +157,7 @@ def list_security_findings(
     severity: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
     search: Optional[str] = Query(None),
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Retrieves paginated security evaluation findings with multi-criteria filtering."""
     items, total = repo.list_security_findings(
@@ -186,7 +180,7 @@ def list_security_findings(
 @router.get("/findings/{finding_id}", response_model=SecurityFindingItem)
 def get_security_finding_detail(
     finding_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Retrieves full details and remediation advice for a single finding."""
     fnd = repo.get_security_finding_by_id(finding_id)
@@ -205,7 +199,7 @@ def get_security_finding_detail(
 @router.get("/summary", response_model=SecuritySummaryResponse)
 def get_security_summary(
     host_id: Optional[str] = Query(None),
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Returns aggregated security posture summary statistics."""
     summary_data = repo.get_security_summary(host_id=host_id)
@@ -215,7 +209,7 @@ def get_security_summary(
 @router.get("/hosts/{host_id}/latest")
 def get_host_latest_results(
     host_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Returns findings from the most recent security check run on specified host."""
     runs, total = repo.list_security_runs(limit=1, offset=0, host_id=host_id)
@@ -223,7 +217,7 @@ def get_host_latest_results(
         return {"host_id": host_id, "latest_run": None, "findings": []}
     
     latest_run = runs[0]
-    findings, _ = repo.list_security_findings(limit=200, offset=0, host_id=host_id)
+    findings, _ = repo.list_security_findings(limit=500, offset=0, host_id=host_id)
     run_findings = [f for f in findings if f.get("run_id") == latest_run["id"]]
     return {
         "host_id": host_id,
@@ -236,7 +230,7 @@ def get_host_latest_results(
 def get_host_security_history(
     host_id: str,
     limit: int = Query(10, ge=1, le=50),
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Returns execution run history for a host to enable regression tracking."""
     history = repo.get_host_security_history(host_id=host_id, limit=limit)
@@ -254,7 +248,7 @@ def get_host_security_history(
 @router.post("/agent-results", response_model=AgentSecurityCheckResultsResponse)
 def submit_agent_security_results(
     payload: AgentSecurityCheckResultsRequest,
-    _token: str = Depends(verify_agent_token),
+    agent_tenant: str = Depends(verify_agent_token),
     repo: BaseAegisRepository = Depends(get_repository),
 ):
     """Receives authenticated security audit results submitted by host agent."""
@@ -269,6 +263,10 @@ def submit_agent_security_results(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Host '{host_id}' is not registered with AEGIS.",
         )
+
+    # 1b. Tenant isolation: an agent may only submit results for hosts owned by its own tenant.
+    # (Done after the existence check so tenants can never pre-claim host ids that do not exist.)
+    claim_host_for_agent(host_id, agent_tenant, repo)
 
     # 2. Cross-host validation (all findings must match run host_id)
     for f in findings_data:

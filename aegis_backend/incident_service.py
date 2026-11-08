@@ -484,6 +484,17 @@ class OperationalStateStore:
         summary: str,
         details: Optional[Dict[str, Any]] = None,
     ) -> AuditLogItem:
+        # Tenant isolation & identity integrity: when a logged-in user triggers the action, the audit trail
+        # records the AUTHENTICATED username (never a client-supplied name) and tags the owning tenant.
+        from aegis_backend.tenancy import DEV_USER, current_user_var, infer_audit_tenant
+
+        ctx_user = current_user_var.get()
+        if ctx_user is not None and ctx_user != DEV_USER:
+            actor = ctx_user.username
+            tenant_id = ctx_user.tenant
+        else:
+            tenant_id = infer_audit_tenant(target_type, target_id, details)
+
         item = AuditLogItem(
             id=f"aud-{int(datetime.now(timezone.utc).timestamp() * 1000)}",
             ts=datetime.now(timezone.utc).isoformat(),
@@ -493,6 +504,7 @@ class OperationalStateStore:
             target_id=target_id,
             summary=summary,
             details=details or {},
+            tenant_id=tenant_id,
         )
         self.audit_logs.insert(0, item)
         self.save_snapshot()
@@ -1828,14 +1840,14 @@ class IncidentService:
         into correlated security incidents.
         """
         # 1. Fetch alerts
-        alerts_data, _ = self.repo.list_alerts(limit=100, host_id=host_id)
+        alerts_data, _ = self.repo.list_alerts(limit=500, host_id=host_id)
         if not alerts_data:
             return []
 
         # 2. Fetch posture context
         posture_findings = []
         try:
-            findings_data, _ = self.repo.list_security_findings(host_id=host_id, limit=50)
+            findings_data, _ = self.repo.list_security_findings(host_id=host_id, limit=200)
             posture_findings = findings_data
         except Exception:
             pass

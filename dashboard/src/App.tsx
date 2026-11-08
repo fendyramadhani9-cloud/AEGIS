@@ -1,8 +1,10 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AppLayout } from './components/AppShell';
 import { ToastProvider } from './components/Toast';
 import { PreferencesProvider } from './lib/preferences';
+import { getAuthToken, getPreviewState } from './data/api';
 
+import { LoginScreen } from './screens/Login';
 import { OverviewScreen } from './screens/Overview';
 import { HostsScreen } from './screens/Hosts';
 import { HostDetailScreen } from './screens/HostDetail';
@@ -18,13 +20,35 @@ import { ReportDetailScreen } from './screens/ReportDetail';
 import { AuditLogScreen } from './screens/AuditLog';
 import { SettingsScreen } from './screens/Settings';
 
+function RequireAuth({ children }: { children: React.ReactElement }) {
+  const location = useLocation();
+  const token = getAuthToken();
+  const preview = getPreviewState();
+
+  // In live backend mode without a token, redirect to login
+  if (!token && preview === 'live') {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+  return children;
+}
+
 export function App() {
   return (
     <PreferencesProvider>
       <ToastProvider>
         <BrowserRouter>
           <Routes>
-            <Route element={<AppLayout />}>
+            {/* Standalone Login Screen */}
+            <Route path="/login" element={<LoginScreen />} />
+
+            {/* Authenticated Dashboard Workspace */}
+            <Route
+              element={
+                <RequireAuth>
+                  <AppLayout />
+                </RequireAuth>
+              }
+            >
               <Route index element={<OverviewScreen />} />
               <Route path="hosts" element={<HostsScreen />} />
               <Route path="hosts/:id" element={<HostDetailScreen />} />
@@ -49,4 +73,3 @@ export function App() {
 }
 
 export default App;
-

@@ -107,6 +107,53 @@ export const store = {
   getVersion: () => version,
 };
 
+export interface AuthUser {
+  username: string;
+  tenant: string;
+  tenant_name: string;
+  role: 'superadmin' | 'engineer' | 'viewer';
+}
+
+const AUTH_TOKEN_KEY = 'aegis_auth_token';
+const AUTH_USER_KEY = 'aegis_auth_user';
+
+export const getAuthToken = (): string | null => {
+  try {
+    return localStorage.getItem(AUTH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+};
+
+export const getStoredUser = (): AuthUser | null => {
+  try {
+    const raw = localStorage.getItem(AUTH_USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+export const setAuthSession = (token: string, user: AuthUser) => {
+  try {
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+  } catch {
+    // Ignore
+  }
+  bump();
+};
+
+export const clearAuthSession = () => {
+  try {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_USER_KEY);
+  } catch {
+    // Ignore
+  }
+  bump();
+};
+
 export class ApiError extends Error {
   status?: number;
   constructor(message: string, status?: number) {
@@ -120,14 +167,25 @@ export class ApiError extends Error {
 async function requestBackend<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
   try {
+    const token = getAuthToken();
+    const authHeaders: Record<string, string> = {};
+    if (token) {
+      authHeaders['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await fetch(url, {
       ...options,
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        ...authHeaders,
         ...options?.headers,
       },
     });
+
+    if (res.status === 401 && token && !path.includes('/api/auth/login')) {
+      clearAuthSession();
+    }
 
     if (!res.ok) {
       let msg = `HTTP ${res.status}: ${res.statusText}`;
@@ -2410,6 +2468,10 @@ export const actions = {
     }, 2500);
   },
 
+  currentUser(): AuthUser | null {
+    return getStoredUser();
+  },
+
   async runPostureScan(hostId?: string) {
     if (previewState !== 'sample') {
       try {
@@ -2422,3 +2484,36 @@ export const actions = {
     bump();
   },
 };
+
+
+export async function loginUser(username: string, password: string): Promise<AuthUser> {
+  const data = await requestBackend<{ access_token: string; token_type: string; user: AuthUser }>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+  setAuthSession(data.access_token, data.user);
+  return data.user;
+}
+
+export async function logoutUser(): Promise<void> {
+  try {
+    await requestBackend('/api/auth/logout', { method: 'POST' });
+  } catch {
+    // Fallback if backend unreachable
+  } finally {
+    clearAuthSession();
+  }
+}
+
+export async function fetchCurrentUser(): Promise<AuthUser | null> {
+  const token = getAuthToken();
+  if (!token) return null;
+  try {
+    const user = await requestBackend<AuthUser>('/api/auth/me');
+    setAuthSession(token, user);
+    return user;
+  } catch {
+    clearAuthSession();
+    return null;
+  }
+}

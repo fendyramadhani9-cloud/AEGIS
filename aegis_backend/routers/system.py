@@ -6,6 +6,7 @@ Retrieves backend components status from system_status table.
 from fastapi import APIRouter, Depends, HTTPException, status
 from aegis_backend.schemas import SystemStatusResponse, ErrorResponse
 from aegis_backend.repository import BaseAegisRepository, get_repository
+from aegis_backend.tenancy import get_scoped_repository
 
 router = APIRouter(prefix="/api/system", tags=["System"])
 
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/api/system", tags=["System"])
     responses={500: {"model": ErrorResponse}},
     summary="Get System Component Health Status",
 )
-def get_system_status(repo: BaseAegisRepository = Depends(get_repository)):
+def get_system_status(repo: BaseAegisRepository = Depends(get_scoped_repository)):
     """Retrieves operational status for Collector, Rules Engine, and AI Provider."""
     try:
         row = repo.get_system_status()

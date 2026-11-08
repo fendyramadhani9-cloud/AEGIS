@@ -15,10 +15,12 @@ import {
   Settings2,
   ShieldAlert,
   Sun,
+  LogOut,
 } from 'lucide-react';
 import { LogoMark } from './states';
 import { usePrefs, type ThemePref } from '../lib/preferences';
 import { actions, api, hostName } from '../data/api';
+import { getStoredUser, logoutUser } from '../data/api';
 import { useNow, useQuery } from '../lib/hooks';
 import { countdown } from '../lib/time';
 
@@ -64,8 +66,15 @@ export function AppLayout() {
 
 function DesktopSidebar() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const { resolvedTheme, update } = usePrefs();
   const now = useNow(1000);
+  const currentUser = getStoredUser();
+
+  const handleLogout = async () => {
+    await logoutUser();
+    navigate('/login');
+  };
 
   const q = useQuery(async () => {
     const [evidence, system, alerts, findings, gaps, incSummary] = await Promise.all([
@@ -162,6 +171,17 @@ function DesktopSidebar() {
 
       {/* System Status in Sidebar Footer */}
       <div className="desktop-sidebar__footer">
+        {currentUser && (
+          <div className="sidebar-tenant-badge">
+            <div className="sidebar-tenant-badge__org" title={currentUser.tenant_name}>
+              {currentUser.tenant_name}
+            </div>
+            <div className="sidebar-tenant-badge__user">
+              <span>{currentUser.username}</span>
+              <span style={{ textTransform: 'uppercase', fontSize: '10px', opacity: 0.8 }}>[{currentUser.role}]</span>
+            </div>
+          </div>
+        )}
         {q.data?.system && (
           <div className="sidebar-system-status">
             <div className="sidebar-system-status__row">
@@ -199,6 +219,18 @@ function DesktopSidebar() {
             {resolvedTheme === 'dark' ? <Sun aria-hidden /> : <Moon aria-hidden />}
           </button>
         </div>
+
+        {currentUser && (
+          <button
+            type="button"
+            className="sidebar-logout-btn"
+            onClick={handleLogout}
+            title="Keluar dari sesi operator"
+          >
+            <LogOut size={14} aria-hidden />
+            <span>Keluar Sistem</span>
+          </button>
+        )}
       </div>
     </aside>
   );

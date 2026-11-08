@@ -8,6 +8,7 @@ from typing import Optional
 from datetime import datetime, timezone
 from aegis_backend.schemas import HostItem, PaginatedHostsResponse, ErrorResponse
 from aegis_backend.repository import BaseAegisRepository, get_repository
+from aegis_backend.tenancy import get_scoped_repository
 
 router = APIRouter(prefix="/api/hosts", tags=["Hosts"])
 
@@ -51,12 +52,12 @@ def list_hosts(
         pattern="^(online|delayed|offline|unknown)$",
         description="Filter by host agent status",
     ),
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Retrieves paginated list of monitored Linux hosts."""
     try:
         if agent_status:
-            raw_hosts, _ = repo.list_hosts(limit=1000, offset=0, status=None)
+            raw_hosts, _ = repo.list_hosts(limit=10000, offset=0, status=None)
             derived_all = []
             for h in raw_hosts:
                 h_dict = dict(h)
@@ -97,7 +98,7 @@ def list_hosts(
 )
 def get_host(
     host_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Retrieves details of a specific host by its ID."""
     try:

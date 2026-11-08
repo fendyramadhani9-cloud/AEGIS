@@ -46,6 +46,8 @@ class AegisTelemetryCollector:
     def __init__(self):
         self.running = True
         self.api_url = os.getenv("AEGIS_API_URL", "http://127.0.0.1:1708/api").rstrip("/")
+        if self.api_url.startswith("http://") and not any(h in self.api_url for h in ("127.0.0.1", "localhost")):
+            logger.warning("INSECURE TRANSPORT: AEGIS_API_URL uses unencrypted http:// across external network. Use https:// in production.")
         self.agent_token = os.getenv("AGENT_INGEST_TOKEN", "aegis-agent-dev-secret-token")
         self.host_id = os.getenv("AEGIS_HOST_ID", "host-fenn-ubuntu")
         self.hostname = os.getenv("AEGIS_HOSTNAME", socket.gethostname())
@@ -126,11 +128,13 @@ class AegisTelemetryCollector:
 
         try:
             cmd = ["journalctl", "_SYSTEMD_UNIT=ssh.service", "+", "_COMM=sudo", "-n", "1", "--show-cursor", "--no-pager"]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=15)
             cursor = self._extract_cursor(res.stdout)
             if cursor:
                 self.commit_cursor(cursor)
                 logger.info(f"Initialized journal cursor file at: {self.cursor_file}")
+        except subprocess.TimeoutExpired:
+            logger.error("journalctl init timed out after 15s")
         except Exception as e:
             logger.error(f"Failed to initialize cursor file: {e}")
 
@@ -158,7 +162,7 @@ class AegisTelemetryCollector:
                 "-n", "100",
                 "--no-pager",
             ]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=15)
             output = res.stdout.strip()
             if not output or output == "-- No entries --":
                 return [], None
@@ -177,6 +181,22 @@ class AegisTelemetryCollector:
                 lines.append(line)
 
             return lines, pending_cursor
+        except subprocess.CalledProcessError as e:
+            err_msg = str(e.stderr or "").lower()
+            logger.error(f"journalctl process error (exit {e.returncode}): {e.stderr}")
+            # If cursor became invalid/stale due to journal vacuuming or rotation, automatically reset it
+            if "cursor" in err_msg or "failed to seek" in err_msg or e.returncode != 0:
+                logger.warning("Stale or invalid journal cursor detected. Resetting cursor position...")
+                try:
+                    if self.cursor_file.exists():
+                        self.cursor_file.unlink()
+                except Exception:
+                    pass
+                self.init_cursor_if_missing()
+            return [], None
+        except subprocess.TimeoutExpired:
+            logger.error("journalctl command timed out after 15s")
+            return [], None
         except Exception as e:
             logger.error(f"Error querying journalctl: {e}")
             return [], None

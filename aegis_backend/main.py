@@ -20,7 +20,9 @@ from aegis_backend.routers import (
     operations,
     security_checker,
     incidents,
+    auth,
 )
+from aegis_backend.tenancy import auth_gate_middleware, get_auth_store
 
 # Setup logging
 logging.basicConfig(
@@ -33,6 +35,17 @@ logger = logging.getLogger("aegis_backend")
 async def lifespan(app: FastAPI):
     """Application lifespan manager to run startup, background tasks, and shutdown procedures."""
     logger.info("Initializing AEGIS Backend in database mode: %s", settings.database_mode)
+    if settings.auth_enabled:
+        if get_auth_store().has_users():
+            logger.info("Authentication ENABLED (deny-by-default, tenant isolation active).")
+        else:
+            logger.warning(
+                "Authentication is ENABLED but no users exist in %s. Nobody can log in until you run: "
+                "python scripts/manage_auth.py add-user <name> --tenant '*' --role superadmin",
+                settings.auth_file,
+            )
+    else:
+        logger.warning("Authentication is DISABLED (AEGIS_AUTH_ENABLED=false). Use only for local development.")
     mirror_worker_task = None
 
     if settings.database_mode == "cloud_ssot":
@@ -87,6 +100,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Deny-by-default authentication gateway.
+# Registered BEFORE CORS so that CORS (added next) wraps it and 401/403 responses still carry CORS headers.
+app.middleware("http")(auth_gate_middleware)
+
 # CORS Middleware (Configurable via AEGIS_CORS_ORIGINS)
 app.add_middleware(
     CORSMiddleware,
@@ -128,6 +145,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Register Routers
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(system.router)
 app.include_router(hosts.router)
 app.include_router(alerts.router)

@@ -4,8 +4,9 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/brand/aegis-mark-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#F7F2E9" />
+    <meta name="theme-color" content="#0b0f19" />
     <meta name="description" content="AEGIS — Linux security monitoring and incident investigation" />
     <title>AEGIS</title>
     <script>
@@ -25,6 +26,15 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function (err) {
+            console.debug('SW registration skipped:', err);
+          });
+        });
+      }
+    </script>
   </body>
 </html>
 

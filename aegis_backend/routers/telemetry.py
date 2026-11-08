@@ -24,6 +24,7 @@ from aegis_backend.schemas import (
 )
 from aegis_backend.incident_service import op_store
 from aegis_backend.repository import BaseAegisRepository, get_repository
+from aegis_backend.tenancy import authenticate_agent_token, claim_host_for_agent
 from aegis_backend.sanitizer import TelemetrySanitizer
 from aegis_agent.pipeline_adapter import LinuxLogPipelineAdapter
 from aegis_backend.rules_engine import RulesEngine
@@ -33,33 +34,25 @@ logger = logging.getLogger("aegis_backend.telemetry")
 router = APIRouter(prefix="/api/telemetry", tags=["Telemetry Ingestion"])
 
 
-def verify_agent_token(x_agent_token: Optional[str] = Header(None, alias="X-Agent-Token")) -> str:
+def verify_agent_token(
+    x_agent_token: Optional[str] = Header(None, alias="X-Agent-Token"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> str:
     """
-    Validates agent ingestion token using constant-time comparison to prevent timing attacks.
+    Validates the agent ingestion token (constant-time) and returns the tenant it belongs to.
+    - Tenant-scoped tokens (scripts/manage_auth.py) map to their own tenant.
+    - The legacy global AGENT_INGEST_TOKEN maps to the default tenant.
+    Supports either X-Agent-Token header or Authorization: Bearer <token>.
     Never logs or echoes the raw token.
     """
-    if not x_agent_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing required authentication token header: X-Agent-Token",
-        )
-
-    expected = settings.agent_ingest_token
-    if not expected:
-        logger.error("AGENT_INGEST_TOKEN is not configured on the server.")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Server ingestion authentication is misconfigured.",
-        )
-
-    # Constant-time comparison
-    if not hmac.compare_digest(x_agent_token.encode("utf-8"), expected.encode("utf-8")):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid agent authentication token.",
-        )
-
-    return "authenticated"
+    token = x_agent_token
+    if not token and authorization:
+        parts = authorization.split(None, 1)
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token = parts[1].strip()
+        else:
+            token = authorization.strip()
+    return authenticate_agent_token(token)
 
 
 def _build_safe_event_message(ev_type: str, user: Optional[str], src_ip: Optional[str], details: Dict[str, Any]) -> str:
@@ -156,7 +149,7 @@ def _resolve_source_id(details: Dict[str, Any], event_type: str) -> str:
 )
 def ingest_telemetry(
     payload: TelemetryIngestRequest,
-    _auth: str = Depends(verify_agent_token),
+    agent_tenant: str = Depends(verify_agent_token),
     repo: BaseAegisRepository = Depends(get_repository),
 ):
     """
@@ -166,6 +159,9 @@ def ingest_telemetry(
     3. Host registration / upsert (to satisfy foreign key constraints).
     4. Storage into telemetry_events with duplicate suppression.
     """
+    # Tenant isolation: an agent may only write for hosts owned by its own tenant (first claim binds the host)
+    claim_host_for_agent(payload.host_id, agent_tenant, repo)
+
     now_iso = datetime.now(timezone.utc).isoformat()
     total_received = len(payload.raw_logs)
 
@@ -322,7 +318,7 @@ def ingest_telemetry(
 )
 def register_heartbeat(
     payload: HeartbeatRequest,
-    _auth: str = Depends(verify_agent_token),
+    agent_tenant: str = Depends(verify_agent_token),
     repo: BaseAegisRepository = Depends(get_repository),
 ):
     """
@@ -336,6 +332,7 @@ def register_heartbeat(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Host '{payload.host_id}' is not registered. Cannot record heartbeat for unknown host.",
         )
+    claim_host_for_agent(payload.host_id, agent_tenant, repo)
 
     now_iso = datetime.now(timezone.utc).isoformat()
     host_record = {
@@ -374,13 +371,15 @@ def register_heartbeat(
 )
 def ingest_posture(
     payload: PostureIngestRequest,
-    _auth: str = Depends(verify_agent_token),
+    agent_tenant: str = Depends(verify_agent_token),
     repo: BaseAegisRepository = Depends(get_repository),
 ):
     """
     Receives live read-only 12-control (8 CIS + 4 DISA STIG) Security Checker
     posture scan results from a monitored Linux host agent.
     """
+    claim_host_for_agent(payload.host_id, agent_tenant, repo)
+
     now_iso = datetime.now(timezone.utc).isoformat()
     validated_findings: List[FindingItem] = []
 

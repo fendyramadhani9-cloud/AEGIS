@@ -70,6 +70,22 @@ class Settings:
         default_sqlite = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "aegis_incidents.db")
         self.sqlite_db_path: str = os.getenv("AEGIS_SQLITE_DB_PATH", default_sqlite)
 
+        # Authentication, RBAC & Hard Multi-Tenant Isolation
+        _data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+        self.auth_enabled: bool = os.getenv("AEGIS_AUTH_ENABLED", "false").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+        self.auth_file: str = os.getenv("AEGIS_AUTH_FILE", os.path.join(_data_dir, "auth.json"))
+        self.host_tenant_file: str = os.getenv(
+            "AEGIS_HOST_TENANT_FILE", os.path.join(_data_dir, "host_tenants.json")
+        )
+        # Optional signing secret for session tokens. If empty, a random per-process secret is used
+        # (all sessions are invalidated on restart).
+        self.auth_secret: str = os.getenv("AEGIS_AUTH_SECRET", "")
+        self.token_ttl_min: int = max(5, int(os.getenv("AEGIS_TOKEN_TTL_MIN", "480")))
+        # Tenant that owns hosts reporting with the legacy global AGENT_INGEST_TOKEN
+        self.default_tenant: str = os.getenv("AEGIS_DEFAULT_TENANT", "default").strip().lower() or "default"
+
         # Database Architecture Mode: 'hybrid' (transitional) or 'cloud_ssot' (canonical Unified Cloud SSoT)
         raw_mode = os.getenv("AEGIS_DATABASE_MODE", "hybrid").lower().strip()
         if raw_mode in ("cloud_ssot", "unified_cloud"):
@@ -162,6 +178,8 @@ class Settings:
             "llm_provider": self.llm_provider,
             "sqlite_db_path": self.sqlite_db_path,
             "database_mode": self.database_mode,
+            "auth_enabled": self.auth_enabled,
+            "default_tenant": self.default_tenant,
         }
 
 

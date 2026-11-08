@@ -14,6 +14,14 @@ from datetime import datetime, timezone, timedelta
 
 from aegis_backend.config import settings
 from aegis_backend.repository import BaseAegisRepository, get_repository
+from aegis_backend.tenancy import (
+    AuthUser,
+    actor_for,
+    get_request_user,
+    get_scoped_repository,
+    user_can_access_host,
+    user_can_access_hosts,
+)
 from aegis_backend.incident_service import (
     op_store,
     run_finding_sc_ai_analysis,
@@ -101,7 +109,7 @@ def _build_default_findings_for_hosts(hosts: List[Dict[str, Any]]) -> List[Findi
     summary="Get Live Telemetry Pipeline Health per Source",
 )
 def get_pipeline_health(
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     hosts, total_hosts = repo.list_hosts(limit=100, offset=0)
     online_hosts = [h for h in hosts if h.get("agent_status") == "online"]
@@ -170,8 +178,15 @@ def get_ai_roles_status():
     response_model=List[AuditLogItem],
     summary="List Operator Action Audit Trail Logs",
 )
-def list_audit_logs():
-    return op_store.audit_logs
+def list_audit_logs(user: AuthUser = Depends(get_request_user)):
+    if user.is_super:
+        return op_store.audit_logs
+    return [
+        log for log in op_store.audit_logs
+        if getattr(log, "tenant_id", None) == user.tenant or (
+            log.target_type == "host" and user_can_access_host(user, log.target_id)
+        )
+    ]
 
 
 @router.get(
@@ -181,7 +196,7 @@ def list_audit_logs():
 )
 def list_findings(
     host_id: Optional[str] = Query(default=None),
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     hosts, _ = repo.list_hosts(limit=100, offset=0)
     if host_id:
@@ -196,12 +211,14 @@ def list_findings(
 )
 def trigger_posture_scan(
     host_id: Optional[str] = Query(default=None),
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
+    user: AuthUser = Depends(get_request_user),
 ):
     hosts, _ = repo.list_hosts(limit=100, offset=0)
     if host_id:
         hosts = [h for h in hosts if h.get("id") == host_id]
     now_iso = datetime.now(timezone.utc).isoformat()
+    actor_name = user.username if user and user.username else "ops-admin"
 
     for h in hosts:
         hid = h.get("id", "host-unknown")
@@ -227,7 +244,7 @@ def trigger_posture_scan(
         except Exception:
             pass
         op_store.record_audit(
-            actor="ops-admin",
+            actor=actor_name,
             action="run_sc_scan",
             target_type="host",
             target_id=hid,
@@ -245,7 +262,7 @@ def trigger_posture_scan(
 )
 def get_finding(
     finding_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     hosts, _ = repo.list_hosts(limit=100, offset=0)
     findings = _build_default_findings_for_hosts(hosts)
@@ -263,7 +280,7 @@ def get_finding(
 )
 def analyze_finding(
     finding_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     hosts, _ = repo.list_hosts(limit=100, offset=0)
     findings = _build_default_findings_for_hosts(hosts)
@@ -279,7 +296,7 @@ def analyze_finding(
     response_model=List[EvidenceSessionItem],
     summary="List Emergency Evidence Mode Sessions",
 )
-def list_evidence_sessions():
+def list_evidence_sessions(user: AuthUser = Depends(get_request_user)):
     now = datetime.now(timezone.utc)
     for s in op_store.evidence_sessions:
         if s.status == "active":
@@ -290,7 +307,9 @@ def list_evidence_sessions():
                     s.ended_at = s.expires_at
             except Exception:
                 pass
-    return op_store.evidence_sessions
+    if user.is_super:
+        return op_store.evidence_sessions
+    return [s for s in op_store.evidence_sessions if user_can_access_host(user, s.host_id)]
 
 
 @router.post(
@@ -298,9 +317,15 @@ def list_evidence_sessions():
     response_model=EvidenceSessionItem,
     summary="Start Emergency Evidence Mode Session",
 )
-def start_evidence_session(req: StartEvidenceRequest):
+def start_evidence_session(
+    req: StartEvidenceRequest,
+    user: AuthUser = Depends(get_request_user),
+):
+    if not user_can_access_host(user, req.host_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Host '{req.host_id}' not found.")
     now = datetime.now(timezone.utc)
     exp = now + timedelta(minutes=req.duration_min)
+    actual_actor = actor_for(user, req.actor)
     session = EvidenceSessionItem(
         id=f"ev-{len(op_store.evidence_sessions) + 1:02d}-{int(now.timestamp()) % 10000}",
         host_id=req.host_id,
@@ -308,7 +333,7 @@ def start_evidence_session(req: StartEvidenceRequest):
         started_at=now.isoformat(),
         expires_at=exp.isoformat(),
         ended_at=None,
-        started_by=req.actor,
+        started_by=actual_actor,
         reason=req.reason,
         data_types=req.data_types,
         item_count=len(req.data_types) * 3,
@@ -316,7 +341,7 @@ def start_evidence_session(req: StartEvidenceRequest):
     )
     op_store.evidence_sessions.insert(0, session)
     op_store.record_audit(
-        actor=req.actor,
+        actor=actual_actor,
         action="start_evidence",
         target_type="evidence_session",
         target_id=session.id,
@@ -338,14 +363,19 @@ def start_evidence_session(req: StartEvidenceRequest):
     responses={404: {"model": ErrorResponse}},
     summary="Stop Active Emergency Evidence Mode Session",
 )
-def stop_evidence_session(session_id: str):
+def stop_evidence_session(
+    session_id: str,
+    user: AuthUser = Depends(get_request_user),
+):
     for s in op_store.evidence_sessions:
         if s.id == session_id:
+            if not user_can_access_host(user, s.host_id):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Evidence session '{session_id}' not found.")
             if s.status == "active":
                 s.status = "stopped"
                 s.ended_at = datetime.now(timezone.utc).isoformat()
                 op_store.record_audit(
-                    actor="ops-admin",
+                    actor=actor_for(user, "ops-admin"),
                     action="stop_evidence",
                     target_type="evidence_session",
                     target_id=session_id,
@@ -363,7 +393,7 @@ def stop_evidence_session(session_id: str):
 def list_collection_gaps(
     host_id: Optional[str] = Query(default=None),
     open_only: bool = Query(default=False),
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     hosts, _ = repo.list_hosts(limit=100, offset=0)
     return detect_collection_gaps(hosts, host_id=host_id, open_only=open_only)
@@ -374,8 +404,13 @@ def list_collection_gaps(
     response_model=List[ReportItem],
     summary="List Generated Security Reports",
 )
-def list_reports():
-    return op_store.reports
+def list_reports(user: AuthUser = Depends(get_request_user)):
+    if user.is_super:
+        return op_store.reports
+    return [
+        r for r in op_store.reports
+        if not r.host_ids or any(user_can_access_host(user, hid) for hid in r.host_ids)
+    ]
 
 
 @router.post(
@@ -385,7 +420,7 @@ def list_reports():
 )
 def create_report(
     req: CreateReportRequest,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     now_iso = datetime.now(timezone.utc).isoformat()
     alerts, _ = repo.list_alerts(limit=100, offset=0)
@@ -467,8 +502,13 @@ def create_report(
 )
 def download_report_pdf(
     report_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
+    user: AuthUser = Depends(get_request_user),
 ):
+    target_check = next((r for r in op_store.reports if r.id == report_id), None)
+    if target_check and target_check.host_ids and not user.is_super:
+        if not any(user_can_access_host(user, hid) for hid in target_check.host_ids):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Report '{report_id}' not found.")
     target = next((r for r in op_store.reports if r.id == report_id), None)
     alerts, _ = repo.list_alerts(limit=100, offset=0)
     hosts, _ = repo.list_hosts(limit=100, offset=0)

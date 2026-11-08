@@ -1,169 +1,197 @@
-# AEGIS — Linux Security Monitoring, Incident Investigation & Defense Posture Platform (v1.0)
+# AEGIS — Zero-Trust Linux Security Monitoring, Hard Multi-Tenant Defense & Incident Forensics Platform (v2.0)
 
-**AEGIS** adalah platform pemantauan keamanan server Linux (*Ubuntu 22.04 / 24.04 LTS*), deteksi ancaman deterministik, audit postur keamanan **CIS Benchmark + DISA STIG**, dan investigasi insiden berbantuan AI yang dirancang dengan filosofi **Zero Autonomous Remediation** serta konsumsi sumber daya ultra-rendah (*Ultra-Low RAM Footprint*).
+[![Tests: 223 Passed](https://img.shields.io/badge/pytest-223%20passed-brightgreen.svg)](tests/)
+[![Architecture: Multi--Tenant Zero--Trust](https://img.shields.io/badge/security-hard%20multi--tenant-blue.svg)](aegis_backend/tenancy.py)
+[![Compliance: CIS + DISA STIG](https://img.shields.io/badge/compliance-CIS%20%7C%20DISA%20STIG-orange.svg)](aegis_agent/security_checker.py)
+[![PWA: Installable APK Ready](https://img.shields.io/badge/mobile-PWA%20%2F%20APK%20ready-purple.svg)](dashboard/public/manifest.webmanifest)
+[![License: Defense Grade](https://img.shields.io/badge/license-Proprietary%20Defense-red.svg)](#)
+
+**AEGIS** adalah platform pemantauan keamanan server Linux (*Ubuntu 22.04 / 24.04 LTS*), deteksi ancaman deterministik MITRE ATT&CK, audit postur kepatuhan militer **CIS Benchmark + DISA STIG**, isolasi multi-satuan **Hard Multi-Tenant Zero-Trust**, dan investigasi insiden berbantuan AI yang dirancang dengan filosofi **Zero Autonomous Remediation** serta konsumsi memori ultra-rendah (*Ultra-Low RAM Footprint* < 135 MB total).
 
 ---
 
 ## 1. Keunggulan & Prinsip Arsitektur Utama
 
-1. **Zero Autonomous Remediation (100% Read-Only & Aman untuk Infrastruktur Kritis / Pertahanan)**
-   - AEGIS tidak pernah memblokir IP, mematikan layanan, atau mengubah konfigurasi server secara sepihak. Seluruh keputusan mitigasi berada di tangan operator manusia dengan panduan *rollback* dan analisis dampak layanan.
-2. **Deterministic Detection Engine (`RulesEngine` — 13 Aturan MITRE ATT&CK)**
-   - Deteksi ancaman berjalan 100% deterministik tanpa ketergantungan pada AI:
-     - `RULE-SSH-BRUTE` (`T1110.001`) — SSH Password Brute Force Burst
-     - `RULE-SSH-SPRAY` (`T1110.003`) — Multi-Account Password Spraying
-     - `RULE-ROOT-LOGIN` (`T1078.003`) — Direct Root SSH Login
-     - `RULE-SUDO-ABUSE` (`T1548.003`) — Repeated Sudo Authentication Failures
-     - `RULE-SUDO-ESCALATION` (`T1548.003`) — Suspicious Sudo Privilege Escalation (`chmod 777`, root shell, `/etc/shadow`)
-     - `RULE-USER-BACKDOOR` (`T1136.001`) — Backdoor Account Creation (`UID 0` / `usermod -aG sudo`)
-     - `RULE-PORT-SCAN` (`T1046`) — Network Port Scanning (`UFW BLOCK` burst)
-     - `RULE-KERNEL-EXPLOIT` (`T1068`) — Binary Segmentation Fault / Memory Corruption Probe
-     - `RULE-CRON-PERSIST` (`T1053.003`) — Suspicious Cron Job Persistence
-     - `RULE-DEFENSE-EVASION` (`T1562.001`) — Stopping Critical Security Services (`ufw`, `auditd`, `ssh`, `aegis-collector`)
-     - `RULE-WEB-PROBES` (`T1190`) — Web Server SQLi, Path Traversal, Command Injection & Scanner Probes
-     - `RULE-SSH-KEY-BACKDOOR` (`T1098.004`) — Tampering with `authorized_keys`, `/etc/ssh/sshd_config`, or `/etc/sudoers`
-     - `RULE-ANTI-FORENSICS` (`T1070`) — Log Wiping & Command History Erasure (`history -c`, `shred`, `truncate -s 0`, `rm -rf /var/log`)
-     - `RULE-DATA-EXFIL` (`T1041` / `T1560`) — Sensitive Directory Archiving & Outbound Transfer (`tar`, `scp`, `rsync`, `curl -F`)
-     - `RULE-ROOTKIT-SNIFF` (`T1547.006` / `T1040`) — Unauthorized Kernel Module Loading (`insmod`/`modprobe`) & Promiscuous Network Sniffing
-3. **12-Module Read-Only Security Checker (8 CIS Ubuntu Benchmark + 4 DISA STIG Military Controls)**
-   - **8 Kontrol CIS**: `CIS-SSH-5.2.8` (`PermitRootLogin`), `CIS-PERM-6.1.2` (`/etc/shadow` permissions), `CIS-PRIV-5.3.4` (`NOPASSWD` sudoers), `CIS-SUID-6.1.12` (SUID/SGID binaries), `CIS-NET-3.5.1` (UFW & open ports), `CIS-SYSCTL-3.3.1` (ASLR & kernel network hardening), `CIS-PKG-1.9` (pending security patches), `CIS-PERSIST-5.1.8` (cron & systemd persistence).
-   - **4 Kontrol DISA STIG (Defense-Grade)**: `STIG-BANNER-8.1` (Mandatory DoD/TNI Login Banner), `STIG-CRYPTO-5.2` (SSH Strong Ciphers & FIPS-Grade KEX), `STIG-AUDIT-4.1` (Kernel `auditd` Immutability `-e 2`), `STIG-MEDIA-1.1` (USB Mass Storage Kernel Blacklist).
-4. **Arsitektur 3 API Key AI Terpisah dengan Failover Otomatis (`AEGIS1`, `AEGIS2`, `AEGIS3`)**
-   - **`AEGIS1` (RM Analysis Agent)**: Investigasi insiden runtime, pemisahan ketat `FACT` vs `HYPOTHESIS`, dan pembuatan dokumen *Shift Handoff* `.md`.
-   - **`AEGIS2` (SC Analysis Agent)**: Analisis postur konfigurasi CIS & DISA STIG beserta rekomendasi pengerasan.
-   - **`AEGIS3` (Reporting Agent)**: Agen khusus penyusun laporan eksekutif harian & insiden (dengan ekspor PDF biner).
-5. **Status Kesiapan Siber (`SIAGA I / SIAGA II / SIAGA III`) & Forensik Rantai Bukti (SHA-256)**
-   - Indikator kesiapan komando real-time di halaman Overview, *Incident Replay* kronologis, *Blast Radius*, *Automatic Recovery Verification* (host offline tidak pernah dianggap pulih), dan bundel bukti bersegel SHA-256.
+### 1. Zero Autonomous Remediation (100% Read-Only & Aman untuk Infrastruktur Kritis)
+AEGIS **tidak pernah** memblokir IP, mematikan layanan, atau mengubah konfigurasi OS server secara otonom/sepihak. Seluruh rekomendasi mitigasi disajikan kepada operator manusia lengkap dengan estimasi dampak layanan (*service impact*), perintah verifikasi, serta langkah *rollback* terdokumentasi.
+
+### 2. Hard Multi-Tenant Isolation & Autentikasi Zero-Trust
+Memastikan pemisahan data absolut antar divisi, unit operasional (misal: Unit Alpha vs Unit Bravo), maupun tenant industri:
+- **Server-Side Enforcement**: Pengamanan diterapkan di lapisan backend gateway dan database access layer (`TenantScopedRepository`), bukan sekadar filter UI.
+- **Anti-Enumeration 404**: Jika operator Unit Alpha mencoba mengakses ID server milik Unit Bravo (`/api/hosts/server-bravo-01`), sistem mengembalikan respon **404 Not Found** (bukan 403), sehingga pihak luar tidak dapat memetakan keberadaan aset unit lain.
+- **Agent First-Claim & Anti-Spoofing**: Host terikat secara permanen ke tenant token saat telemetri pertama kali diterima. Upaya agen lain melakukan *spoofing* identitas server ditolak langsung (**403 Forbidden**).
+- **Anti-Brute-Force Rate Limiter**: Kunci akun otomatis selama 60 detik jika terjadi $\ge 5$ kali kegagalan login berturut-turut.
+- **Role-Based Access Control (RBAC)**:
+  - `superadmin`: Akses lintas unit (Pusat Komando / HQ Command).
+  - `engineer`: Hak baca dan operasional penuh terbatas pada unit miliknya.
+  - `viewer`: Hak baca mutlak (*read-only*), seluruh aksi mutasi diblokir (**403 Forbidden**).
+
+### 3. Deterministic Detection Engine (`RulesEngine` — 15 Aturan MITRE ATT&CK)
+Deteksi ancaman berjalan 100% deterministik tanpa ketergantungan pada model AI eksternal:
+- `RULE-SSH-BRUTE` (`T1110.001`) — SSH Password Brute Force Burst
+- `RULE-SSH-SPRAY` (`T1110.003`) — Multi-Account Password Spraying
+- `RULE-ROOT-LOGIN` (`T1078.003`) — Direct Root SSH Login
+- `RULE-SUDO-ABUSE` (`T1548.003`) — Repeated Sudo Authentication Failures
+- `RULE-SUDO-ESCALATION` (`T1548.003`) — Suspicious Sudo Privilege Escalation (`chmod 777`, interactive root shell, `/etc/shadow`)
+- `RULE-USER-BACKDOOR` (`T1136.001`) — Backdoor Account Creation (`UID 0` / `usermod -aG sudo`)
+- `RULE-PORT-SCAN` (`T1046`) — Network Port Scanning (`UFW BLOCK` burst)
+- `RULE-KERNEL-EXPLOIT` (`T1068`) — Binary Segmentation Fault / Memory Corruption Probe
+- `RULE-CRON-PERSIST` (`T1053.003`) — Suspicious Cron Job Persistence
+- `RULE-DEFENSE-EVASION` (`T1562.001`) — Stopping Critical Security Services (`ufw`, `auditd`, `ssh`, `aegis-collector`)
+- `RULE-WEB-PROBES` (`T1190`) — Web Server SQLi, Path Traversal, Command Injection & Scanner Probes
+- `RULE-SSH-KEY-BACKDOOR` (`T1098.004`) — Tampering with `authorized_keys`, `/etc/ssh/sshd_config`, or `/etc/sudoers`
+- `RULE-ANTI-FORENSICS` (`T1070`) — Log Wiping & Command History Erasure (`history -c`, `shred`, `truncate -s 0`, `rm -rf /var/log`)
+- `RULE-DATA-EXFIL` (`T1041` / `T1560`) — Sensitive Directory Archiving & Outbound Transfer (`tar`, `scp`, `rsync`, `curl -F`)
+- `RULE-ROOTKIT-SNIFF` (`T1547.006` / `T1040`) — Unauthorized Kernel Module Loading (`insmod`/`modprobe`) & Promiscuous Network Sniffing
+
+### 4. 12-Module Read-Only Security Checker (CIS Benchmark + DISA STIG)
+- **8 Kontrol CIS Ubuntu Benchmark**: `CIS-SSH-5.2.8` (`PermitRootLogin`), `CIS-PERM-6.1.2` (`/etc/shadow` mode `0640`), `CIS-PRIV-5.3.4` (`NOPASSWD` sudoers audit), `CIS-SUID-6.1.12` (SUID/SGID binary tracking), `CIS-NET-3.5.1` (UFW & open listening ports), `CIS-SYSCTL-3.3.1` (ASLR & kernel network parameters), `CIS-PKG-1.9` (pending security patches), `CIS-PERSIST-5.1.8` (cron & systemd persistence checks).
+- **4 Kontrol Militer DISA STIG**: `STIG-BANNER-8.1` (Mandatory Defense Login Banner), `STIG-CRYPTO-5.2` (SSH Strong Ciphers & FIPS-Grade KEX), `STIG-AUDIT-4.1` (Kernel `auditd` Immutability `-e 2`), `STIG-MEDIA-1.1` (USB Mass Storage Kernel Blacklist).
+
+### 5. Arsitektur 3 API Key AI Terpisah dengan Failover Otomatis
+- **`AEGIS1` (Runtime Monitor Agent)**: Analisis insiden, korelasi hipotesis forensik, dan pembuatan dokumen *Shift Handoff* `.md`.
+- **`AEGIS2` (Security Checker Agent)**: Analisis postur kepatuhan CIS & STIG serta panduan remediasi konfigurasi.
+- **`AEGIS3` (Reporting Agent)**: Penyusunan laporan eksekutif harian & forensik insiden lengkap dengan generator dokumen PDF biner.
+
+### 6. PWA & Mobile APK Ready (Android)
+- Dilengkapi Web App Manifest (`manifest.webmanifest`), Service Worker offline caching (`sw.js`), dan Web Push Alerts.
+- GitHub Actions CI/CD Workflow (`.github/workflows/build-apk.yml`) untuk kompilasi otomatis file `.apk` mandiri.
 
 ---
 
-## 2. Profil & Prediksi Penggunaan RAM (Docker & Native)
+## 2. Profil & Penggunaan Sumber Daya (RAM)
 
-AEGIS dirancang sangat hemat memori karena tidak menjalankan JVM, Elasticsearch, atau model LLM lokal di dalam server:
+AEGIS dirancang ringan dan tangguh untuk dijalankan pada mini server atau edge device:
 
-| Komponen / Container | Base Image | Penggunaan RAM (Idle) | Penggunaan RAM (Aktif / Beban Puncak) | Batas Memori (`mem_limit`) |
+| Komponen / Container | Base Image | RAM (Idle) | RAM (Beban Puncak) | Batas Memori (`mem_limit`) |
 | :--- | :--- | :---: | :---: | :---: |
-| **`aegis-backend`** (FastAPI + Uvicorn 1 Worker) | `python:3.12-slim` | **~55 – 75 MB** | **~90 – 115 MB** | `192 MB` |
-| **`aegis-dashboard`** (Static SPA + Reverse Proxy) | `nginx:1.27-alpine` | **~8 – 14 MB** | **~15 – 22 MB** | `64 MB` |
-| **`aegis-collector`** (Agent di Host Linux Target) | `python:3.12-slim` / Native | **~16 – 24 MB** | **~25 – 35 MB** | `48 MB` |
-| **TOTAL (`backend` + `dashboard`)** | **Multi-Stage Docker** | **~65 – 90 MB** | **~105 – 135 MB** | **256 MB Total** |
+| **`aegis-backend`** (FastAPI + Uvicorn) | `python:3.12-slim` | **~55 – 75 MB** | **~90 – 115 MB** | `192 MB` |
+| **`aegis-dashboard`** (Static SPA + Nginx) | `nginx:1.27-alpine` | **~8 – 14 MB** | **~15 – 22 MB** | `64 MB` |
+| **`aegis-collector`** (Agent di Host Target) | Python Native Systemd | **~16 – 24 MB** | **~25 – 35 MB** | `48 MB` |
+| **TOTAL KONSUMSI LENGKAP** | **Full Stack** | **~75 – 110 MB** | **~130 – 170 MB** | **256 MB Total** |
 
 ---
 
-## 3. Tiga Cara Menjalankan AEGIS (Setup & Perbandingan Kelebihan)
+## 3. Manajemen Multi-Tenant & Otorisasi Pengguna (CLI Admin)
 
-AEGIS dirancang fleksibel sehingga dapat dijalankan dalam **3 skenario deployment** yang berbeda sesuai kebutuhan: untuk demo lomba, monitoring server nyata, atau pengembangan kode lokal.
+AEGIS menyertakan alat administrasi command-line [`scripts/manage_auth.py`](file:///d:/Projects/School/aegis/scripts/manage_auth.py) untuk mengelola unit, kredensial operator, dan rotasi token agent secara mandiri.
+
+### Inisialisasi Unit & Pengguna Default
+```bash
+python scripts/manage_auth.py init-defaults
+```
+Perintah ini otomatis mengonfigurasi akun awal untuk pengujian multi-tenant:
+1. **Pusat Komando (HQ Command)**: Username `admin` / Password `Aegis@CommandHQ2026!` (Role: `superadmin`, Tenant: `*` — melihat seluruh server dari semua unit).
+2. **Unit Alpha**: Username `operator_alpha` / Password `Alpha@Aegis2026!` (Role: `engineer`, Tenant: `unit_alpha`).
+3. **Unit Bravo**: Username `operator_bravo` / Password `Bravo@Aegis2026!` (Role: `engineer`, Tenant: `unit_bravo`).
+
+### Perintah Operasional CLI Tambahan
+```bash
+# Tambah unit/tenant baru (misal: Sektor Industri atau Wilayah lain)
+python scripts/manage_auth.py add-tenant industri_migas "PT Industri Migas Energi"
+# Output memberikan token agent: aegis_agt_...
+
+# Tambah akun teknisi/operator
+python scripts/manage_auth.py add-user teknisi1 "PasswordKuat123!" --tenant industri_migas --role engineer
+
+# Lihat seluruh daftar unit & server yang terikat
+python scripts/manage_auth.py list-tenants
+
+# Lihat seluruh daftar pengguna aktif
+python scripts/manage_auth.py list-users
+
+# Rotasi token agent jika terjadi kompromi keamanan
+python scripts/manage_auth.py rotate-token unit_alpha
+```
 
 ---
 
-### METODE 1: Full Docker Containerized (Paling Praktis — Rekomendasi Demo Lomba)
-> **Skenario:** Sangat direkomendasikan untuk **presentasi ke dewan juri, demonstrasi fitur, simulasi serangan (Incident Replay), audit postur CIS/STIG, dan ekspor laporan PDF.**
+## 4. Tiga Cara Menjalankan AEGIS
 
-Semua layanan (Frontend Dashboard di port `1708` dan Backend FastAPI di port `1709`) dikemas dalam container multi-stage berukuran sangat kecil dengan penggunaan RAM terukur (< 135 MB total).
+AEGIS dapat dijalankan dalam 3 skenario deployment sesuai kebutuhan operasional:
 
-#### Langkah Setup:
+---
+
+### METODE 1: Full Docker Containerized (Paling Praktis — Rekomendasi Demo)
+> **Skenario:** Sangat direkomendasikan untuk demonstrasi fitur, evaluasi dewan juri, simulasi serangan, audit postur CIS/STIG, dan ekspor laporan PDF.
+
 1. **Konfigurasi Environment Variable (`.env`):**
    ```bash
    cp .env.example .env
-   # Buka .env dan pastikan kredensial Supabase serta 3 API Key AI (AEGIS1, AEGIS2, AEGIS3) terisi
+   # Pastikan kredensial database dan API Key AI (AEGIS1, AEGIS2, AEGIS3) terisi
    ```
 2. **Jalankan Container via Docker Compose:**
    ```bash
    docker compose up -d --build
    ```
 3. **Akses Layanan:**
-   - **Dashboard Web UI & Gateway Utama:** `http://localhost:1708` (atau ganti `localhost` dengan IP mini server kamu)
+   - **Dashboard Web UI & Gateway Utama:** `http://localhost:1708`
    - **Swagger API Docs:** `http://localhost:1708/docs`
    - **Direct Backend Health Check:** `http://localhost:1709/api/health`
-4. **Pantau Penggunaan RAM:**
-   ```bash
-   docker stats aegis-backend aegis-dashboard
-   ```
-
-#### Kelebihan Metode 1:
-- ✅ **Cukup Satu Perintah:** Seluruh platform langsung aktif tanpa perlu menginstall Python, Node.js, atau Nginx di OS host server.
-- ✅ **Sudah Terintegrasi Read-Only Host Mount:** Konfigurasi `/etc/ssh`, `/etc/issue.net`, `/etc/modprobe.d`, dan `/var/log` dari host sudah di-mount secara aman (`:ro`), sehingga pemeriksaan postur CIS/STIG berbasis file tetap dapat membaca konfigurasi asli server.
-- ✅ **Isolasi Penuh & Aman:** Layanan web tidak memiliki hak modifikasi ke sistem host (`read-only`), mencegah resiko kerusakan sistem.
-- ✅ **Konsumsi RAM Sangat Rendah:** Total konsumsi RAM container hanya ~65 MB (idle) hingga ~135 MB (beban puncak).
 
 ---
 
-### METODE 2: Mode Hibrida (Docker Core + Native Host Agent — Rekomendasi Monitoring Server Nyata)
-> **Skenario:** Sangat direkomendasikan untuk **server Linux produksi / mini server nyata** yang ingin dipantau kondisi log dan layanannya secara 100% *real-time* tanpa batasan abstraksi container.
+### METODE 2: Mode Hibrida (Docker Backend + Native Host Agent — Rekomendasi Server Nyata)
+> **Skenario:** Direkomendasikan untuk **server Linux produksi / mini server Ubuntu nyata** agar telemetri `journalctl`, `systemctl`, `ufw`, dan socket jaringan terpantau 100% tanpa batas isolasi container.
 
-Backend FastAPI dan Dashboard UI tetap berjalan rapi di dalam Docker container, sedangkan script `collector.py` dijalankan langsung sebagai *native process* atau *systemd service* pada OS Ubuntu host.
-
-#### Langkah Setup:
 1. **Jalankan Backend & Dashboard di Docker:**
    ```bash
    docker compose up -d --build
    ```
-2. **Pasang Host Collector Cukup dengan 1 Klik (Otomatis Jadi Systemd Service):**
+2. **Pasang Host Collector (1-Click Systemd Installer):**
    ```bash
-   # Di terminal server Ubuntu host:
-   sudo bash scripts/install_agent.sh
+   # Di server Linux target yang ingin dipantau:
+   sudo bash scripts/install_agent.sh \
+     --server-url http://<IP_SERVER_AEGIS>:8000 \
+     --tenant-id unit_alpha \
+     --auth-token aegis_agt_6_GULjT3yz20fgkK3ocCzZfqxTslOxN-lVRCNbNTWSM
    ```
-   *Skrip ini otomatis mengisolasi virtualenv di `/opt/aegis-agent`, mengonfigurasi `/etc/aegis/agent.env`, mendaftarkan `/etc/systemd/system/aegis-collector.service`, dan langsung menyalakan pemantauan real-time ke gateway Docker port 1708.*
+   *Skrip otomatis membuat virtualenv terisolasi di `/opt/aegis-agent`, mengonfigurasi `/etc/aegis/agent.env`, mendaftarkan service `/etc/systemd/system/aegis-collector.service`, dan mengunci permission file `600`.*
 
-3. *(Opsional) Perintah Operasional Agen Host:*
-   - Cek status layanan: `sudo systemctl status aegis-collector`
+3. **Perintah Kontrol Agen Host:**
+   - Cek status agent: `sudo systemctl status aegis-collector`
    - Pantau streaming log: `sudo journalctl -u aegis-collector -f`
-   - Hapus/Uninstall agen: `sudo bash scripts/uninstall_agent.sh`
-
-#### Kelebihan Metode 2:
-- ✅ **Visibilitas Sistem 100% Tanpa Hambatan:** Collector berjalan langsung di OS host sehingga memiliki akses instan dan akurat ke `journalctl`, `systemctl is-active auditd`, `ufw status`, `dpkg -s`, serta socket jaringan `/proc/net` tanpa terhalang isolasi container.
-- ✅ **Infrastruktur Bersih & Rapi:** Web server, API gateway, dan database client tetap terisolasi di dalam Docker container tanpa mengotori package manager host.
-- ✅ **Overhead di Host Sangat Minim:** Native agent collector hanya membutuhkan Python standar dan memakan RAM **~20 MB** saja di OS host.
-- ✅ **Toleransi Gangguan Jaringan (Two-Phase Cursor):** Jika container backend sedang direstart, collector di host akan menyimpan kursor log terakhir dan melanjutkan pengiriman otomatis saat backend kembali aktif tanpa ada log yang hilang.
+   - Restart agent: `sudo systemctl restart aegis-collector`
+   - Copot pemasangan: `sudo bash scripts/uninstall_agent.sh`
 
 ---
 
 ### METODE 3: Bare Metal / Native Development (Tanpa Docker)
-> **Skenario:** Sangat direkomendasikan untuk **pengembangan kode (development), penambahan fitur baru, debugging, dan pengujian cepat di laptop/PC developer.**
+> **Skenario:** Direkomendasikan untuk pengembangan kode (*development*), penambahan fitur, dan pengujian cepat di laptop developer.
 
-Semua komponen dijalankan langsung dari terminal lokal menggunakan lingkungan Python Virtualenv dan Node.js Vite dev server dengan dukungan *Hot Module Replacement (HMR)*.
-
-#### Langkah Setup:
-1. **Menjalankan Backend FastAPI (Port `1709`):**
+1. **Jalankan Backend FastAPI (Port `1709`):**
    ```bash
-   # Windows (PowerShell):
+   # Windows PowerShell:
    python -m venv venv
    .\venv\Scripts\Activate.ps1
    pip install -r requirements.txt
    python -m uvicorn aegis_backend.main:app --host 127.0.0.1 --port 1709 --reload
 
-   # Linux / macOS (Bash):
+   # Linux / macOS Bash:
    python3 -m venv venv
    source venv/bin/activate
    pip install -r requirements.txt
    python3 -m uvicorn aegis_backend.main:app --host 127.0.0.1 --port 1709 --reload
    ```
-2. **Menjalankan Frontend Dashboard (Port `1708`):**
+2. **Jalankan Frontend Dashboard (Port `1708`):**
    ```bash
    cd dashboard
    npm install
    npm run dev
    ```
    Buka peramban di: `http://localhost:1708`
-3. **Menjalankan Telemetry Collector (Opsional jika ingin ingest log langsung):**
-   ```bash
-   python -m aegis_agent.collector --backend-url http://127.0.0.1:1709/api
-   ```
-
-#### Kelebihan Metode 3:
-- ✅ **Hot-Reload Instan (HMR):** Perubahan pada kode React/TypeScript langsung ter-update di layar tanpa perlu rebuild container atau reload halaman secara manual.
-- ✅ **Auto-Reload Backend:** Perubahan pada file Python backend langsung di-reload secara otomatis oleh Uvicorn (`--reload`).
-- ✅ **Kemudahan Debugging Mendalam:** Pesan log terminal, stack trace Python, console inspect browser, dan breakpoint debugger IDE dapat diakses secara langsung tanpa perantara container.
-- ✅ **Tanpa Ketergantungan Docker Engine:** Dapat dijalankan di mesin atau laptop yang tidak memiliki Docker Desktop / daemon aktif.
 
 ---
 
 ## 5. Pengujian Otomatis & Verifikasi Kualitas
 
-### A. Menjalankan Seluruh Unit, Integration & Regression Test Suite (122 Pengujian)
+Seluruh suite pengujian otomatis telah diverifikasi dan lulus **100%**:
+
+### A. Menjalankan Backend Unit, Integration & Tenancy Test Suite (223 Pengujian)
 ```powershell
 python -m pytest -v
 ```
+*Mencakup 214 pengujian deteksi MITRE ATT&CK, parser log, rules engine, security checker, database fallback, sanitasi rahasia, serta 9 pengujian isolasi multi-tenant (anti-brute force, token revocation, anti-spoofing agent, dan anti-enumeration 404).*
 
 ### B. Menjalankan AI Evaluation Harness (Offline Benchmark)
 ```powershell
@@ -174,14 +202,39 @@ python evaluation/run_evaluation.py
 ```powershell
 npm --prefix dashboard run build
 ```
+*Memvalidasi seluruh 13 layar antarmuka pengguna (termasuk Login Guard & Scope Satuan) dengan 0 error TypeScript dan 0 error linting.*
 
 ---
 
 ## 6. Struktur Direktori Proyek
 
-- `aegis_backend/` — FastAPI API Gateway, endpoint operasional, PDF generator, sanitizer, dan `OperationalStateStore`.
-- `aegis_agent/` — `LinuxTelemetryParser`, `RulesEngine`, `ReadOnlySecurityChecker` (12 modul CIS + DISA STIG), `AegisTelemetryCollector`, dan layanan AI (`AEGIS1`, `AEGIS2`, `AEGIS3`).
-- `dashboard/` — Aplikasi antarmuka pengguna React 18 + TypeScript + Vite (12 layar operasional, tema terang/gelap, responsif desktop & mobile).
-- `supabase/migrations/` — Migrasi skema PostgreSQL, trigger imutabilitas severity & audit log, serta kebijakan RLS.
-- `tests/` — 122 pengujian otomatis mencakup parser, rules engine, collector, validator AI, dan endpoint REST API.
-- `docs/` — Dokumentasi cetak biru lengkap (`AEGIS_MASTER_BLUEPRINT_LENGKAP.md`) dan laporan audit QA (`AEGIS_FULL_QA_SECURITY_AUDIT_REPORT.md` & `BUG_FIX_REPORT.md`).
+```
+aegis/
+├── aegis_backend/            # Core FastAPI Gateway & Layanan Backend
+│   ├── tenancy.py            # Modul Isolasi Multi-Tenant, RBAC, Rate Limiter & Token Session
+│   ├── repository.py         # Abstraksi Basis Data SSoT (Supabase PostgreSQL + Mock fallback)
+│   ├── incident_service.py   # State Store, AI Correlator, Audit Logging & PDF Generator
+│   ├── sanitizer.py          # Inspeksi Regex Pre-Storage & Karantina Kredensial Sensitif
+│   ├── main.py               # Inisialisasi FastAPI, Gateway Middleware & Routing
+│   └── routers/              # Endpoint REST API (auth, hosts, telemetry, alerts, incidents, ops)
+├── aegis_agent/              # Modul Pemantauan & Analisis Host Target
+│   ├── collector.py          # Telemetry Ingest Collector & Cursor Tracker
+│   ├── pipeline_adapter.py   # Normalisasi Syslog, Auth, UFW, Nginx, Auditd
+│   ├── rules_engine.py       # Deterministic Detection Engine (15 Aturan MITRE ATT&CK)
+│   ├── security_checker.py   # 12 Modul Audit Postur Kepatuhan (8 CIS + 4 DISA STIG)
+│   └── services.py           # Provider AI 3-Key Failover (AEGIS1, AEGIS2, AEGIS3)
+├── dashboard/                # Antarmuka Pengguna React 18 + TypeScript + Vite
+│   ├── public/               # Asset Brand, Web Manifest (PWA), Service Worker (sw.js)
+│   └── src/
+│       ├── screens/          # 13 Layar Operasional (Login, Overview, Hosts, Incidents, Dll)
+│       ├── components/       # AppShell, Sidebar dengan Badge Satuan, UI Controls
+│       ├── data/api.ts       # Client API Gateway dengan Token Authorization Header
+│       └── styles/           # Desain Dark/Light Mode Standar Militer (tokens.css, app.css)
+├── scripts/                  # Skrip Otomasi DevOps & Administrasi
+│   ├── manage_auth.py        # CLI Manajemen Multi-Tenant, Pengguna & Token Agent
+│   ├── install_agent.sh      # 1-Click Native Host Installer (Systemd Daemon)
+│   └── uninstall_agent.sh    # Pembersih Bersih Service & Virtualenv Agent
+├── .github/workflows/        # CI/CD Pipeline & GitHub Actions APK Builder (TWA)
+├── tests/                    # 223 Pengujian Otomatis (Pytest)
+└── docs/                     # Dokumentasi Spesifikasi & Cetak Biru Arsitektur
+```

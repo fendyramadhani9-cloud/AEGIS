@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import logging
 
 from aegis_backend.repository import BaseAegisRepository, get_repository
+from aegis_backend.tenancy import get_scoped_repository, AuthUser, get_request_user, DEV_USER
 from aegis_backend.incident_service import IncidentService
 from aegis_backend.ai_provider import get_ai_provider
 from aegis_backend.schemas import (
@@ -31,7 +32,7 @@ logger = logging.getLogger("aegis_backend.routers.incidents")
 router = APIRouter(prefix="/api", tags=["Incidents & AI Analysis"])
 
 
-def get_incident_service(repo: BaseAegisRepository = Depends(get_repository)) -> IncidentService:
+def get_incident_service(repo: BaseAegisRepository = Depends(get_scoped_repository)) -> IncidentService:
     return IncidentService(repository=repo, ai_provider=get_ai_provider())
 
 
@@ -87,7 +88,7 @@ def list_incidents(
     status: Optional[str] = Query(default=None, description="Filter by status (new, investigating, confirmed, etc.)"),
     severity: Optional[str] = Query(default=None, description="Filter by severity"),
     search: Optional[str] = Query(default=None, description="Search keyword in incident title or ID"),
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Retrieves paginated, filtered list of correlated security incidents."""
     eff_limit = limit or page_size or 20
@@ -170,13 +171,19 @@ def update_incident_status(
     incident_id: str,
     req: IncidentStatusUpdateRequest,
     service: IncidentService = Depends(get_incident_service),
+    user: AuthUser = Depends(get_request_user),
 ):
     """Updates incident lifecycle status and appends transition to audit history."""
+    # Enforce identity integrity: in authenticated mode, operator must reflect the authenticated user (preventing spoofing)
+    if user and user != DEV_USER:
+        operator_name = user.username
+    else:
+        operator_name = req.operator or (user.username if user else "admin")
     updated = service.update_incident_status(
         incident_id=incident_id,
         new_status=req.status,
         note=req.note,
-        operator=req.operator or "admin",
+        operator=operator_name,
     )
     if not updated:
         raise HTTPException(

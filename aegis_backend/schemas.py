@@ -362,6 +362,7 @@ class AuditLogItem(BaseModel):
     target_id: str
     summary: str
     details: Optional[Dict[str, Any]] = None
+    tenant_id: Optional[str] = None
 
 
 class PipelineSourceHealthItem(BaseModel):

@@ -22,6 +22,7 @@ from aegis_backend.schemas import (
     ErrorResponse,
 )
 from aegis_backend.repository import BaseAegisRepository, get_repository
+from aegis_backend.tenancy import get_scoped_repository, AuthUser, get_request_user, DEV_USER
 from aegis_backend.incident_service import (
     op_store,
     run_alert_ai_analysis,
@@ -51,7 +52,7 @@ def list_alerts(
         pattern="^(critical|high|medium|low|info)$",
         description="Filter by severity level",
     ),
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Retrieves paginated list of deterministic security alerts."""
     try:
@@ -83,7 +84,7 @@ def list_alerts(
 )
 def get_alert(
     alert_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Retrieves details of a specific alert by its ID."""
     try:
@@ -111,7 +112,7 @@ def get_alert(
 )
 def get_alert_evidence(
     alert_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """
     Retrieves supporting telemetry evidence events bound to a specific alert.
@@ -154,7 +155,7 @@ def analyze_alert(
     alert_id: str,
     force: bool = Query(default=False, description="Bypass per-alert cooldown cache"),
     cooldown_sec: int = Query(default=10, ge=0, le=300, description="Cooldown window in seconds"),
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """
     Runs AI-assisted Runtime Monitor (RM) analysis on a deterministic alert and its supporting evidence.
@@ -195,7 +196,7 @@ def analyze_alert(
 )
 def get_alert_handoff(
     alert_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """
     Generates a context-rich, portable Markdown (.md) investigation and remediation prompt
@@ -231,7 +232,7 @@ def get_alert_handoff(
 def verify_alert(
     alert_id: str,
     window_min: int = Query(default=15, ge=0, le=1440),
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """
     Evaluates whether the triggering conditions of an alert have recovered.
@@ -272,7 +273,7 @@ def verify_alert(
 )
 def get_alert_replay(
     alert_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     """Reconstructs an evidence-based chronological replay of the incident."""
     try:
@@ -302,7 +303,7 @@ def get_alert_replay(
 )
 def get_alert_investigation(
     alert_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     alert = repo.get_alert_by_id(alert_id)
     if not alert:
@@ -322,7 +323,8 @@ def get_alert_investigation(
 def update_alert_investigation(
     alert_id: str,
     req: InvestigationUpdateRequest,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
+    user: AuthUser = Depends(get_request_user),
 ):
     """
     Updates the manual investigation lifecycle status and appends operator notes.
@@ -334,11 +336,16 @@ def update_alert_investigation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Alert with ID '{alert_id}' not found.",
         )
+    # Enforce identity integrity: in authenticated mode, author must reflect the authenticated user (preventing spoofing)
+    if user and user != DEV_USER:
+        author_name = user.username
+    else:
+        author_name = req.author or (user.username if user else "ops-admin")
     return op_store.update_investigation(
         alert_id=alert_id,
         status=req.status,
         note=req.note,
-        author=req.author,
+        author=author_name,
         alert=alert,
         repo=repo,
     )
@@ -352,7 +359,7 @@ def update_alert_investigation(
 )
 def get_alert_context(
     alert_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     alert = repo.get_alert_by_id(alert_id)
     if not alert:
@@ -374,7 +381,7 @@ def get_alert_context(
 )
 def export_alert_evidence_bundle(
     alert_id: str,
-    repo: BaseAegisRepository = Depends(get_repository),
+    repo: BaseAegisRepository = Depends(get_scoped_repository),
 ):
     alert = repo.get_alert_by_id(alert_id)
     if not alert:

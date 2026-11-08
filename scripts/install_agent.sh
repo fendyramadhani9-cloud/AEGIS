@@ -13,6 +13,7 @@ set -e
 DEFAULT_API_URL="http://127.0.0.1:1708/api"
 DEFAULT_TOKEN="aegis-agent-dev-secret-token"
 DEFAULT_HOST_ID="host-$(hostname -s)"
+DEFAULT_TENANT_ID="default"
 INSTALL_DIR="/opt/aegis-agent"
 CONFIG_DIR="/etc/aegis"
 STATE_DIR="/var/lib/aegis"
@@ -21,6 +22,7 @@ SERVICE_NAME="aegis-collector"
 API_URL="${DEFAULT_API_URL}"
 TOKEN="${DEFAULT_TOKEN}"
 HOST_ID="${DEFAULT_HOST_ID}"
+TENANT_ID="${DEFAULT_TENANT_ID}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -42,11 +44,14 @@ usage() {
     echo "Usage: sudo $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --api-url <URL>    AEGIS Backend API URL (default: ${DEFAULT_API_URL})"
-    echo "  --token <TOKEN>    Agent Ingestion Secret Token (default: from .env or dev token)"
-    echo "  --host-id <ID>     Custom Host Identifier (default: ${DEFAULT_HOST_ID})"
-    echo "  --uninstall        Stop and completely remove AEGIS Host Agent"
-    echo "  -h, --help         Show this help message"
+    echo "  --api-url <URL>        AEGIS Backend API URL (default: ${DEFAULT_API_URL})"
+    echo "  --server-url <URL>     Alias for --api-url"
+    echo "  --token <TOKEN>        Agent Ingestion Secret Token (default: dev token or from .env)"
+    echo "  --auth-token <TOKEN>   Alias for --token"
+    echo "  --tenant-id <TENANT>   Tenant / Battalion ID for Multi-Tenant Isolation"
+    echo "  --host-id <ID>         Custom Host Identifier (default: ${DEFAULT_HOST_ID})"
+    echo "  --uninstall            Stop and completely remove AEGIS Host Agent"
+    echo "  -h, --help             Show this help message"
     echo ""
     exit 0
 }
@@ -54,12 +59,16 @@ usage() {
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --api-url)
+        --api-url|--server-url)
             API_URL="$2"
             shift 2
             ;;
-        --token)
+        --token|--auth-token)
             TOKEN="$2"
+            shift 2
+            ;;
+        --tenant-id|--tenant)
+            TENANT_ID="$2"
             shift 2
             ;;
         --host-id)
@@ -145,6 +154,7 @@ cat <<EOF > "${CONFIG_DIR}/agent.env"
 # AEGIS Host Agent Runtime Configuration
 AEGIS_API_URL=${API_URL}
 AGENT_INGEST_TOKEN=${TOKEN}
+AEGIS_TENANT_ID=${TENANT_ID}
 AEGIS_HOST_ID=${HOST_ID}
 AEGIS_HOSTNAME=$(hostname)
 AEGIS_IP_ADDRESS=$(hostname -I | awk '{print $1}')
@@ -194,6 +204,7 @@ if systemctl is-active --quiet "${SERVICE_NAME}"; then
     echo "=================================================================="
     echo -e "${NC}"
     echo -e "  Host ID       : ${GREEN}${HOST_ID}${NC}"
+    echo -e "  Tenant ID     : ${GREEN}${TENANT_ID}${NC}"
     echo -e "  Target Gateway: ${GREEN}${API_URL}${NC}"
     echo -e "  Service Name  : ${GREEN}${SERVICE_NAME}.service${NC}"
     echo -e "  Config File   : ${CONFIG_DIR}/agent.env"
