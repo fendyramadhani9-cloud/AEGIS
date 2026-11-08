@@ -25,6 +25,25 @@ class DatabaseHealthResponse(BaseModel):
     checked_at: str
     message: str
     latency_ms: Optional[float] = None
+    database_mode: Optional[str] = None
+    authoritative_source: Optional[str] = None
+    mirror_queue_depth: Optional[int] = None
+    oldest_pending_age_seconds: Optional[float] = None
+    last_successful_mirror_at: Optional[str] = None
+    failover_state: Optional[str] = None
+    state_machine_state: Optional[str] = None
+    is_mutation_allowed: Optional[bool] = None
+    is_read_allowed: Optional[bool] = None
+    state_reason: Optional[str] = None
+
+
+class ReadinessResponse(BaseModel):
+    ready: bool
+    status: str
+    state: str
+    is_mutation_allowed: bool
+    authoritative_database: str
+    reason: str
 
 
 class SystemStatusResponse(BaseModel):
@@ -586,7 +605,7 @@ class IncidentItem(BaseModel):
     last_seen_at: str
     created_at: str
     updated_at: Optional[str] = None
-    storage_backend: Optional[str] = "sqlite_local"
+    storage_backend: Optional[str] = "supabase_cloud"
     provenance: Optional[str] = "synthetic_benchmark"
     source_category: Optional[str] = "unknown"
     source_label: Optional[str] = None
@@ -657,7 +676,7 @@ class AIAnalysisItem(BaseModel):
     investigation_notes: Optional[str] = None
     provider: str
     model: str
-    storage_backend: str = "sqlite_local"
+    storage_backend: str = "supabase_cloud"
     created_at: str
     completed_at: Optional[str] = None
 

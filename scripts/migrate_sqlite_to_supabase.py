@@ -20,6 +20,10 @@ import argparse
 import logging
 from typing import Dict, Any, List, Optional, Tuple, Set
 from datetime import datetime, timezone
+from dotenv import load_dotenv
+
+# Automatically load environment variables from .env if present
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("aegis_migration")

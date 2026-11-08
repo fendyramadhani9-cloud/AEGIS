@@ -147,8 +147,9 @@ def audit_database(db_path: str, backup_dir: str = "/home/ubuntu/aegis/backups")
     }
 
 if __name__ == "__main__":
-    db = sys.argv[1] if len(sys.argv) > 1 else "/home/ubuntu/aegis/data/aegis_incidents.db"
-    b_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(db), "backups")
+    default_db = "data/aegis_incidents.db" if os.path.exists("data/aegis_incidents.db") else "/home/ubuntu/aegis/data/aegis_incidents.db"
+    db = sys.argv[1] if len(sys.argv) > 1 else default_db
+    b_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(db)), "backups")
     res = audit_database(db, b_dir)
     print(json.dumps(res, indent=2))
     with open("preflight_sqlite_audit_report.json", "w", encoding="utf-8") as f:

@@ -87,8 +87,9 @@ class Settings:
         self.default_tenant: str = os.getenv("AEGIS_DEFAULT_TENANT", "default").strip().lower() or "default"
 
         # Database Architecture Mode: 'hybrid' (transitional) or 'cloud_ssot' (canonical Unified Cloud SSoT)
-        raw_mode = os.getenv("AEGIS_DATABASE_MODE", "hybrid").lower().strip()
-        if raw_mode in ("cloud_ssot", "unified_cloud"):
+        raw_mode = os.getenv("AEGIS_DATABASE_MODE") or os.getenv("AEGIS_STORAGE_BACKEND", "hybrid")
+        raw_mode = raw_mode.lower().strip()
+        if raw_mode in ("cloud_ssot", "unified_cloud", "supabase"):
             self.database_mode = "cloud_ssot"
         else:
             self.database_mode = "hybrid"

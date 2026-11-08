@@ -8,17 +8,24 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple, Dict, Any, Set
 from datetime import datetime, timezone
 import time
+import json
 import logging
 from supabase import create_client, Client
 from aegis_backend.config import settings
 from aegis_backend.sanitizer import TelemetrySanitizer
 from aegis_backend.sqlite_storage import SqliteIncidentStore
+from aegis_backend.state_machine import state_machine, DatabaseState
 
 logger = logging.getLogger(__name__)
 
 
 class BaseAegisRepository(ABC):
     """Abstract interface defining required database operations."""
+
+    @property
+    def mode(self) -> str:
+        """Returns the active database mode ('hybrid' or 'cloud_ssot')."""
+        return settings.database_mode
 
     @abstractmethod
     def check_database_health(self) -> Tuple[bool, str, Optional[float]]:
@@ -252,6 +259,11 @@ class BaseAegisRepository(ABC):
         """Replays any failed mirror operations to local SQLite replica."""
         pass
 
+    @abstractmethod
+    def catch_up_unmirrored_from_cloud(self, batch_size: int = 100) -> Dict[str, Any]:
+        """Scans Cloud with pagination for any records and reconciles them into SQLite."""
+        pass
+
 
 
 class SupabaseRepository(BaseAegisRepository):
@@ -270,10 +282,17 @@ class SupabaseRepository(BaseAegisRepository):
                 raise ValueError("Cannot initialize SupabaseRepository: Supabase credentials not configured in environment.")
             self.client: Client = create_client(settings.supabase_url, settings.supabase_service_role_key)
 
-    def _execute_mirror(self, entity_type: str, entity_id: str, action: str, mirror_fn) -> None:
+    def _execute_mirror(
+        self,
+        entity_type: str,
+        entity_id: str,
+        action: str,
+        mirror_fn,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """
         Executes local SQLite mirroring with retry (up to 3 attempts with exponential backoff)
-        and deterministic tracking in mirror_sync_log. Prevents silent synchronization drift.
+        and durable payload tracking in mirror_sync_log. Prevents silent synchronization drift.
         """
         attempts = 0
         max_retries = 3
@@ -288,6 +307,7 @@ class SupabaseRepository(BaseAegisRepository):
                     action=action,
                     status="synced",
                     retry_count=attempts - 1,
+                    payload=payload,
                 )
                 return
             except Exception as e:
@@ -305,6 +325,7 @@ class SupabaseRepository(BaseAegisRepository):
             status="pending_retry",
             retry_count=max_retries,
             error_message=str(last_err),
+            payload=payload,
         )
 
     def check_database_health(self) -> Tuple[bool, str, Optional[float]]:
@@ -586,6 +607,7 @@ class SupabaseRepository(BaseAegisRepository):
                 run_data["id"],
                 "upsert",
                 lambda: self.sqlite_store.upsert_security_check_run(run_data, findings),
+                payload={"run_data": run_data, "findings": findings},
             )
 
             return run_data
@@ -742,7 +764,8 @@ class SupabaseRepository(BaseAegisRepository):
                 res = self.client.table("incidents").select("*").eq("id", incident_id).limit(1).execute()
                 if not res.data or len(res.data) == 0:
                     return None
-                inc = res.data[0]
+                inc = dict(res.data[0])
+                inc["storage_backend"] = "supabase_cloud"
                 rel_res = self.client.table("incident_alerts").select("alert_id").eq("incident_id", incident_id).execute()
                 inc["alert_ids"] = [r["alert_id"] for r in (rel_res.data or [])]
                 if not inc["alert_ids"] and inc.get("primary_alert_id"):
@@ -767,8 +790,9 @@ class SupabaseRepository(BaseAegisRepository):
             try:
                 rf_res = self.client.table("incident_risk_factors").select("*").eq("incident_id", incident_id).execute()
                 return rf_res.data or []
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to fetch risk factors for incident %s: %s", incident_id, e)
+                raise RuntimeError(f"Cloud SSoT fetch risk factors failed: {e}") from e
         return self.sqlite_store.get_incident_risk_factors(incident_id)
 
     def list_incidents(
@@ -899,6 +923,7 @@ class SupabaseRepository(BaseAegisRepository):
                     incident_data["id"],
                     "upsert",
                     lambda: self.sqlite_store.upsert_incident(incident_data, alert_ids, risk_factors),
+                    payload={"incident_data": incident_data, "alert_ids": all_alert_ids, "risk_factors": risk_factors},
                 )
 
                 return incident_data
@@ -956,6 +981,7 @@ class SupabaseRepository(BaseAegisRepository):
                     incident_id,
                     "update_status",
                     lambda: self.sqlite_store.update_incident_status(incident_id, status, note, operator),
+                    payload={"incident_id": incident_id, "status": status, "note": note, "operator": operator},
                 )
                 return self.get_incident_by_id(incident_id)
             except Exception as e:
@@ -1046,6 +1072,7 @@ class SupabaseRepository(BaseAegisRepository):
                     analysis_data["id"],
                     "save",
                     lambda: self.sqlite_store.save_ai_analysis(analysis_data),
+                    payload=analysis_data,
                 )
                 return analysis_data
             except Exception as e:
@@ -1054,6 +1081,44 @@ class SupabaseRepository(BaseAegisRepository):
 
         return self.sqlite_store.save_ai_analysis(analysis_data)
 
+    @staticmethod
+    def _deserialize_cloud_analysis(row: Dict[str, Any]) -> Dict[str, Any]:
+        item = dict(row)
+        if "analysis_id" not in item:
+            item["analysis_id"] = item.get("id")
+        item["storage_backend"] = "supabase_cloud"
+
+        for k in [
+            "facts",
+            "inferences",
+            "hypotheses",
+            "observed_behaviors",
+            "timeline",
+            "supporting_evidence",
+            "contradicting_evidence",
+            "recommended_actions",
+            "containment_recommendations",
+            "unknowns",
+            "unknown_items",
+        ]:
+            val = item.get(k)
+            if isinstance(val, str):
+                try:
+                    item[k] = json.loads(val)
+                except Exception:
+                    pass
+            elif val is None:
+                item[k] = []
+
+        unknowns = item.get("unknowns", [])
+        if unknowns and isinstance(unknowns[0], dict):
+            item["unknown_items"] = unknowns
+            item["unknowns"] = [str(u.get("data_gap", u)) for u in unknowns]
+        elif not item.get("unknown_items") and unknowns:
+            item["unknown_items"] = [{"data_gap": str(x), "impact": "Forensic telemetry gap."} for x in unknowns]
+
+        return item
+
     def get_latest_ai_analysis(self, incident_id: str) -> Optional[Dict[str, Any]]:
         if self.simulate_db_error:
             raise RuntimeError("Database error on get latest ai analysis.")
@@ -1061,7 +1126,7 @@ class SupabaseRepository(BaseAegisRepository):
             try:
                 res = self.client.table("ai_analyses").select("*").eq("incident_id", incident_id).order("created_at", desc=True).limit(1).execute()
                 if res.data and len(res.data) > 0:
-                    return res.data[0]
+                    return self._deserialize_cloud_analysis(res.data[0])
                 return None
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to get latest AI analysis: %s", e)
@@ -1131,14 +1196,15 @@ class SupabaseRepository(BaseAegisRepository):
             raise RuntimeError("Database error on get incidents summary.")
         if settings.database_mode == "cloud_ssot":
             try:
-                query = self.client.table("incidents").select("id, status, risk_level, risk_score, created_at")
+                query = self.client.table("incidents").select("id, host_id, status, risk_level, risk_score, created_at, updated_at")
                 if host_id:
                     query = query.eq("host_id", host_id)
                 res = query.execute()
                 incs = res.data or []
                 total = len(incs)
-                open_c = sum(1 for i in incs if i.get("status") in ("new", "investigating", "confirmed", "open"))
+                new_cnt = sum(1 for i in incs if i.get("status") == "new")
                 investigating = sum(1 for i in incs if i.get("status") == "investigating")
+                confirmed = sum(1 for i in incs if i.get("status") == "confirmed")
                 contained = sum(1 for i in incs if i.get("status") == "contained")
                 resolved = sum(1 for i in incs if i.get("status") in ("resolved", "closed"))
                 fp = sum(1 for i in incs if i.get("status") == "false_positive")
@@ -1146,20 +1212,25 @@ class SupabaseRepository(BaseAegisRepository):
                 high = sum(1 for i in incs if i.get("risk_level") == "high")
                 med = sum(1 for i in incs if i.get("risk_level") == "medium")
                 low = sum(1 for i in incs if i.get("risk_level") == "low")
-                avg_risk = round(sum(i.get("risk_score", 50) for i in incs) / max(total, 1), 1)
+                hosts = len(set(i["host_id"] for i in incs if i.get("host_id")))
+                latest = max([i.get("updated_at") or i.get("created_at") for i in incs if i.get("updated_at") or i.get("created_at")], default=None)
 
                 return {
                     "total_incidents": total,
-                    "open_incidents": open_c,
-                    "investigating_incidents": investigating,
-                    "contained_incidents": contained,
-                    "resolved_incidents": resolved,
+                    "new_incidents": new_cnt,
+                    "open_incidents": new_cnt + investigating,
+                    "investigating": investigating,
+                    "confirmed": confirmed,
+                    "resolved": resolved,
                     "false_positives": fp,
-                    "critical_incidents": crit,
-                    "high_incidents": high,
-                    "medium_incidents": med,
-                    "low_incidents": low,
-                    "avg_risk_score": avg_risk,
+                    "contained": contained,
+                    "critical_risk": crit,
+                    "high_risk": high,
+                    "medium_risk": med,
+                    "low_risk": low,
+                    "total_hosts_affected": hosts,
+                    "latest_incident_at": latest,
+                    "storage_backend": "supabase_cloud",
                 }
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to get incidents summary: %s", e)
@@ -1174,7 +1245,7 @@ class SupabaseRepository(BaseAegisRepository):
     def replay_failed_mirrors(self) -> Dict[str, Any]:
         """
         Scans mirror_sync_log for failed synchronization attempts and replays them
-        from Supabase Cloud authoritative state to the local SQLite replica.
+        using either stored durable payload or by querying Supabase Cloud authoritative state.
         """
         failed_logs = self.sqlite_store.get_failed_mirror_logs()
         replayed = 0
@@ -1183,30 +1254,58 @@ class SupabaseRepository(BaseAegisRepository):
             entity_type = log.get("entity_type")
             entity_id = log.get("entity_id")
             action = log.get("action")
+            raw_payload = log.get("payload")
+            payload = None
+            if raw_payload:
+                try:
+                    payload = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+                except Exception:
+                    payload = None
+
             try:
                 if entity_type == "incident":
-                    inc = self.get_incident_by_id(entity_id)
-                    if inc:
+                    if payload and "incident_data" in payload:
                         self.sqlite_store.upsert_incident(
-                            incident_data=inc,
-                            alert_ids=inc.get("alert_ids", []),
-                            risk_factors=inc.get("risk_factors", []),
+                            incident_data=payload["incident_data"],
+                            alert_ids=payload.get("alert_ids", []),
+                            risk_factors=payload.get("risk_factors", []),
                         )
+                    else:
+                        inc = self.get_incident_by_id(entity_id)
+                        if inc:
+                            self.sqlite_store.upsert_incident(
+                                incident_data=inc,
+                                alert_ids=inc.get("alert_ids", []),
+                                risk_factors=inc.get("risk_factors", []),
+                            )
                 elif entity_type == "ai_analysis":
-                    analysis = self.get_ai_analysis(entity_id)
-                    if analysis:
-                        self.sqlite_store.save_ai_analysis(entity_id, analysis)
+                    if payload and isinstance(payload, dict):
+                        self.sqlite_store.save_ai_analysis(payload)
+                    else:
+                        res_ai = self.client.table("ai_analyses").select("*").eq("id", entity_id).limit(1).execute()
+                        if res_ai.data:
+                            self.sqlite_store.save_ai_analysis(res_ai.data[0])
                 elif entity_type == "incident_status":
-                    inc = self.get_incident_by_id(entity_id)
-                    if inc:
-                        self.sqlite_store.update_incident_status(entity_id, inc.get("status", "open"))
+                    st = payload.get("status") if payload else None
+                    if not st:
+                        inc = self.get_incident_by_id(entity_id)
+                        st = inc.get("status", "open") if inc else "open"
+                    self.sqlite_store.update_incident_status(
+                        entity_id,
+                        st,
+                        note=(payload.get("note") if payload else None),
+                        operator=(payload.get("operator", "admin") if payload else "admin"),
+                    )
                 elif entity_type == "security_check_run":
-                    res_run = self.client.table("security_check_runs").select("*").eq("id", entity_id).limit(1).execute()
-                    if res_run.data:
-                        run_row = res_run.data[0]
-                        res_fnd = self.client.table("security_findings").select("*").eq("run_id", entity_id).execute()
-                        findings = res_fnd.data or []
-                        self.sqlite_store.save_security_check_run(run_row, findings)
+                    if payload and "run_data" in payload:
+                        self.sqlite_store.upsert_security_check_run(payload["run_data"], payload.get("findings", []))
+                    else:
+                        res_run = self.client.table("security_check_runs").select("*").eq("id", entity_id).limit(1).execute()
+                        if res_run.data:
+                            run_row = res_run.data[0]
+                            res_fnd = self.client.table("security_findings").select("*").eq("run_id", entity_id).execute()
+                            findings = res_fnd.data or []
+                            self.sqlite_store.upsert_security_check_run(run_row, findings)
 
                 self.sqlite_store.log_mirror_attempt(
                     entity_type=entity_type,
@@ -1214,6 +1313,7 @@ class SupabaseRepository(BaseAegisRepository):
                     action=action,
                     status="synced",
                     retry_count=log.get("retry_count", 0) + 1,
+                    payload=payload,
                 )
                 replayed += 1
             except Exception as e:
@@ -1222,6 +1322,157 @@ class SupabaseRepository(BaseAegisRepository):
 
         return {"total_checked": len(failed_logs), "replayed": replayed, "still_failed": still_failed}
 
+    def _fetch_all_paginated(
+        self,
+        table_name: str,
+        order_col: Optional[str] = "created_at",
+        batch_size: int = 100,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetches all rows from a Supabase table with robust pagination."""
+        all_rows: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            query = self.client.table(table_name).select("*")
+            if filters:
+                for k, v in filters.items():
+                    query = query.eq(k, v)
+            if order_col:
+                query = query.order(order_col, desc=False)
+            res = query.range(offset, offset + batch_size - 1).execute()
+            batch = res.data or []
+            all_rows.extend(batch)
+            if len(batch) < batch_size:
+                break
+            offset += batch_size
+        return all_rows
+
+    def catch_up_unmirrored_from_cloud(self, batch_size: int = 100) -> Dict[str, Any]:
+        """
+        Comprehensive, paginated, multi-table startup catch-up scanner.
+        Guarantees that all Cloud records created or modified prior to backend restart/crash
+        are accurately reconciled into local SQLite in topological order:
+        1. security_check_runs
+        2. security_findings (child of runs)
+        3. incidents
+        4. incident_alerts (child of incidents)
+        5. incident_risk_factors (child of incidents)
+        6. incident_timeline (child of incidents)
+        7. ai_analyses (child of incidents)
+        8. incident_status_history (child of incidents)
+        """
+        caught_up = 0
+        scanned = 0
+        try:
+            # 1. Catch up security check runs & findings
+            runs = self._fetch_all_paginated("security_check_runs", order_col="started_at", batch_size=batch_size)
+            scanned += len(runs)
+            for run in runs:
+                run_id = run["id"]
+                local_run = self.sqlite_store.get_security_run_by_id(run_id)
+                needs_sync = False
+                if not local_run:
+                    needs_sync = True
+                elif local_run.get("status") != run.get("status") or str(local_run.get("completed_at")) != str(run.get("completed_at")):
+                    needs_sync = True
+
+                if needs_sync:
+                    findings = self._fetch_all_paginated("security_findings", order_col="checked_at", batch_size=batch_size, filters={"run_id": run_id})
+                    self.sqlite_store.upsert_security_check_run(run, findings)
+                    self.sqlite_store.log_mirror_attempt(
+                        entity_type="security_check_run",
+                        entity_id=run_id,
+                        action="catch_up",
+                        status="synced",
+                        retry_count=0,
+                        payload={"run_data": run, "findings": findings},
+                    )
+                    caught_up += 1
+
+            self.sqlite_store.record_catch_up_watermark("security_check_runs", len(runs), caught_up, status="completed")
+
+            # 2. Catch up incidents & relationships
+            incidents = self._fetch_all_paginated("incidents", order_col="created_at", batch_size=batch_size)
+            scanned += len(incidents)
+            for inc in incidents:
+                inc_id = inc["id"]
+                local_inc = self.sqlite_store.get_incident_by_id(inc_id)
+                needs_sync = False
+                if not local_inc:
+                    needs_sync = True
+                else:
+                    for f in ("status", "severity", "risk_score", "risk_level", "summary", "last_seen_at"):
+                        if str(local_inc.get(f, "")) != str(inc.get(f, "")):
+                            needs_sync = True
+                            break
+
+                if needs_sync:
+                    res_alerts = self._fetch_all_paginated("incident_alerts", order_col="added_at", batch_size=batch_size, filters={"incident_id": inc_id})
+                    alert_ids = [r["alert_id"] for r in res_alerts]
+
+                    risk_factors = self._fetch_all_paginated("incident_risk_factors", order_col=None, batch_size=batch_size, filters={"incident_id": inc_id})
+
+                    self.sqlite_store.upsert_incident(inc, alert_ids, risk_factors)
+                    self.sqlite_store.log_mirror_attempt(
+                        entity_type="incident",
+                        entity_id=inc_id,
+                        action="catch_up",
+                        status="synced",
+                        retry_count=0,
+                        payload={"incident_data": inc, "alert_ids": alert_ids, "risk_factors": risk_factors},
+                    )
+                    caught_up += 1
+
+            self.sqlite_store.record_catch_up_watermark("incidents", len(incidents), caught_up, status="completed")
+
+            # 3. Catch up incident timeline events
+            timelines = self._fetch_all_paginated("incident_timeline", order_col="timestamp", batch_size=batch_size)
+            scanned += len(timelines)
+            for tl in timelines:
+                self.sqlite_store.upsert_incident_timeline_event(tl)
+
+            # 4. Catch up AI analyses
+            analyses = self._fetch_all_paginated("ai_analyses", order_col="created_at", batch_size=batch_size)
+            scanned += len(analyses)
+            for anl in analyses:
+                anl_id = anl.get("id")
+                local_anl = self.sqlite_store.get_analysis_by_id(anl_id)
+                if not local_anl:
+                    self.sqlite_store.save_ai_analysis(anl)
+                    self.sqlite_store.log_mirror_attempt(
+                        entity_type="ai_analysis",
+                        entity_id=anl_id,
+                        action="catch_up",
+                        status="synced",
+                        retry_count=0,
+                        payload=anl,
+                    )
+                    caught_up += 1
+
+            self.sqlite_store.record_catch_up_watermark("ai_analyses", len(analyses), caught_up, status="completed")
+
+            # 5. Catch up incident status history
+            histories = self._fetch_all_paginated("incident_status_history", order_col="transitioned_at", batch_size=batch_size)
+            scanned += len(histories)
+            for hist in histories:
+                self.sqlite_store.upsert_incident_status_history(hist)
+
+            self.sqlite_store.record_catch_up_watermark("incident_status_history", len(histories), caught_up, status="completed")
+
+            state_machine.set_catch_up_completed(True)
+            logger.info("Startup catch-up scan completed: %d total entities scanned, %d caught up to SQLite.", scanned, caught_up)
+            return {"status": "ok", "total_scanned": scanned, "caught_up": caught_up}
+
+        except Exception as e:
+            state_machine.set_catch_up_completed(False)
+            state_machine.transition_to(
+                DatabaseState.RECOVERY_REQUIRED,
+                reason=f"Startup catch-up scan failed: {e}",
+                error_message=str(e),
+                force=True,
+            )
+            logger.critical("Startup catch-up scan failed critically: %s", e)
+            raise RuntimeError(f"Startup catch-up consistency failure: {e}") from e
 
 
 class MockAegisRepository(BaseAegisRepository):
@@ -1614,7 +1865,8 @@ class MockAegisRepository(BaseAegisRepository):
                 res = self.client.table("incidents").select("*").eq("id", incident_id).limit(1).execute()
                 if not res.data or len(res.data) == 0:
                     return None
-                inc = res.data[0]
+                inc = dict(res.data[0])
+                inc["storage_backend"] = "supabase_cloud"
                 rel_res = self.client.table("incident_alerts").select("alert_id").eq("incident_id", incident_id).execute()
                 inc["alert_ids"] = [r["alert_id"] for r in (rel_res.data or [])]
                 if not inc["alert_ids"] and inc.get("primary_alert_id"):
@@ -1639,8 +1891,9 @@ class MockAegisRepository(BaseAegisRepository):
             try:
                 rf_res = self.client.table("incident_risk_factors").select("*").eq("incident_id", incident_id).execute()
                 return rf_res.data or []
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to fetch risk factors for incident %s: %s", incident_id, e)
+                raise RuntimeError(f"Cloud SSoT fetch risk factors failed: {e}") from e
         return self.sqlite_store.get_incident_risk_factors(incident_id)
 
     def list_incidents(
@@ -1771,6 +2024,7 @@ class MockAegisRepository(BaseAegisRepository):
                     incident_data["id"],
                     "upsert",
                     lambda: self.sqlite_store.upsert_incident(incident_data, alert_ids, risk_factors),
+                    payload={"incident_data": incident_data, "alert_ids": all_alert_ids, "risk_factors": risk_factors},
                 )
 
                 return incident_data
@@ -1828,6 +2082,7 @@ class MockAegisRepository(BaseAegisRepository):
                     incident_id,
                     "update_status",
                     lambda: self.sqlite_store.update_incident_status(incident_id, status, note, operator),
+                    payload={"incident_id": incident_id, "status": status, "note": note, "operator": operator},
                 )
                 return self.get_incident_by_id(incident_id)
             except Exception as e:
@@ -1918,6 +2173,7 @@ class MockAegisRepository(BaseAegisRepository):
                     analysis_data["id"],
                     "save",
                     lambda: self.sqlite_store.save_ai_analysis(analysis_data),
+                    payload=analysis_data,
                 )
                 return analysis_data
             except Exception as e:
@@ -1926,6 +2182,44 @@ class MockAegisRepository(BaseAegisRepository):
 
         return self.sqlite_store.save_ai_analysis(analysis_data)
 
+    @staticmethod
+    def _deserialize_cloud_analysis(row: Dict[str, Any]) -> Dict[str, Any]:
+        item = dict(row)
+        if "analysis_id" not in item:
+            item["analysis_id"] = item.get("id")
+        item["storage_backend"] = "supabase_cloud"
+
+        for k in [
+            "facts",
+            "inferences",
+            "hypotheses",
+            "observed_behaviors",
+            "timeline",
+            "supporting_evidence",
+            "contradicting_evidence",
+            "recommended_actions",
+            "containment_recommendations",
+            "unknowns",
+            "unknown_items",
+        ]:
+            val = item.get(k)
+            if isinstance(val, str):
+                try:
+                    item[k] = json.loads(val)
+                except Exception:
+                    pass
+            elif val is None:
+                item[k] = []
+
+        unknowns = item.get("unknowns", [])
+        if unknowns and isinstance(unknowns[0], dict):
+            item["unknown_items"] = unknowns
+            item["unknowns"] = [str(u.get("data_gap", u)) for u in unknowns]
+        elif not item.get("unknown_items") and unknowns:
+            item["unknown_items"] = [{"data_gap": str(x), "impact": "Forensic telemetry gap."} for x in unknowns]
+
+        return item
+
     def get_latest_ai_analysis(self, incident_id: str) -> Optional[Dict[str, Any]]:
         if self.simulate_db_error:
             raise RuntimeError("Database error on get latest ai analysis.")
@@ -1933,7 +2227,7 @@ class MockAegisRepository(BaseAegisRepository):
             try:
                 res = self.client.table("ai_analyses").select("*").eq("incident_id", incident_id).order("created_at", desc=True).limit(1).execute()
                 if res.data and len(res.data) > 0:
-                    return res.data[0]
+                    return self._deserialize_cloud_analysis(res.data[0])
                 return None
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to get latest AI analysis: %s", e)
@@ -2003,14 +2297,15 @@ class MockAegisRepository(BaseAegisRepository):
             raise RuntimeError("Database error on get incidents summary.")
         if settings.database_mode == "cloud_ssot":
             try:
-                query = self.client.table("incidents").select("id, status, risk_level, risk_score, created_at")
+                query = self.client.table("incidents").select("id, host_id, status, risk_level, risk_score, created_at, updated_at")
                 if host_id:
                     query = query.eq("host_id", host_id)
                 res = query.execute()
                 incs = res.data or []
                 total = len(incs)
-                open_c = sum(1 for i in incs if i.get("status") in ("new", "investigating", "confirmed", "open"))
+                new_cnt = sum(1 for i in incs if i.get("status") == "new")
                 investigating = sum(1 for i in incs if i.get("status") == "investigating")
+                confirmed = sum(1 for i in incs if i.get("status") == "confirmed")
                 contained = sum(1 for i in incs if i.get("status") == "contained")
                 resolved = sum(1 for i in incs if i.get("status") in ("resolved", "closed"))
                 fp = sum(1 for i in incs if i.get("status") == "false_positive")
@@ -2018,20 +2313,25 @@ class MockAegisRepository(BaseAegisRepository):
                 high = sum(1 for i in incs if i.get("risk_level") == "high")
                 med = sum(1 for i in incs if i.get("risk_level") == "medium")
                 low = sum(1 for i in incs if i.get("risk_level") == "low")
-                avg_risk = round(sum(i.get("risk_score", 50) for i in incs) / max(total, 1), 1)
+                hosts = len(set(i["host_id"] for i in incs if i.get("host_id")))
+                latest = max([i.get("updated_at") or i.get("created_at") for i in incs if i.get("updated_at") or i.get("created_at")], default=None)
 
                 return {
                     "total_incidents": total,
-                    "open_incidents": open_c,
-                    "investigating_incidents": investigating,
-                    "contained_incidents": contained,
-                    "resolved_incidents": resolved,
+                    "new_incidents": new_cnt,
+                    "open_incidents": new_cnt + investigating,
+                    "investigating": investigating,
+                    "confirmed": confirmed,
+                    "resolved": resolved,
                     "false_positives": fp,
-                    "critical_incidents": crit,
-                    "high_incidents": high,
-                    "medium_incidents": med,
-                    "low_incidents": low,
-                    "avg_risk_score": avg_risk,
+                    "contained": contained,
+                    "critical_risk": crit,
+                    "high_risk": high,
+                    "medium_risk": med,
+                    "low_risk": low,
+                    "total_hosts_affected": hosts,
+                    "latest_incident_at": latest,
+                    "storage_backend": "supabase_cloud",
                 }
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to get incidents summary: %s", e)
@@ -2046,7 +2346,7 @@ class MockAegisRepository(BaseAegisRepository):
     def replay_failed_mirrors(self) -> Dict[str, Any]:
         """
         Scans mirror_sync_log for failed synchronization attempts and replays them
-        from Supabase Cloud authoritative state to the local SQLite replica.
+        using either stored durable payload or by querying Supabase Cloud authoritative state.
         """
         failed_logs = self.sqlite_store.get_failed_mirror_logs()
         replayed = 0
@@ -2055,30 +2355,58 @@ class MockAegisRepository(BaseAegisRepository):
             entity_type = log.get("entity_type")
             entity_id = log.get("entity_id")
             action = log.get("action")
+            raw_payload = log.get("payload")
+            payload = None
+            if raw_payload:
+                try:
+                    payload = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+                except Exception:
+                    payload = None
+
             try:
                 if entity_type == "incident":
-                    inc = self.get_incident_by_id(entity_id)
-                    if inc:
+                    if payload and "incident_data" in payload:
                         self.sqlite_store.upsert_incident(
-                            incident_data=inc,
-                            alert_ids=inc.get("alert_ids", []),
-                            risk_factors=inc.get("risk_factors", []),
+                            incident_data=payload["incident_data"],
+                            alert_ids=payload.get("alert_ids", []),
+                            risk_factors=payload.get("risk_factors", []),
                         )
+                    else:
+                        inc = self.get_incident_by_id(entity_id)
+                        if inc:
+                            self.sqlite_store.upsert_incident(
+                                incident_data=inc,
+                                alert_ids=inc.get("alert_ids", []),
+                                risk_factors=inc.get("risk_factors", []),
+                            )
                 elif entity_type == "ai_analysis":
-                    analysis = self.get_ai_analysis(entity_id)
-                    if analysis:
-                        self.sqlite_store.save_ai_analysis(entity_id, analysis)
+                    if payload and isinstance(payload, dict):
+                        self.sqlite_store.save_ai_analysis(payload)
+                    else:
+                        res_ai = self.client.table("ai_analyses").select("*").eq("id", entity_id).limit(1).execute()
+                        if res_ai.data:
+                            self.sqlite_store.save_ai_analysis(res_ai.data[0])
                 elif entity_type == "incident_status":
-                    inc = self.get_incident_by_id(entity_id)
-                    if inc:
-                        self.sqlite_store.update_incident_status(entity_id, inc.get("status", "open"))
+                    st = payload.get("status") if payload else None
+                    if not st:
+                        inc = self.get_incident_by_id(entity_id)
+                        st = inc.get("status", "open") if inc else "open"
+                    self.sqlite_store.update_incident_status(
+                        entity_id,
+                        st,
+                        note=(payload.get("note") if payload else None),
+                        operator=(payload.get("operator", "admin") if payload else "admin"),
+                    )
                 elif entity_type == "security_check_run":
-                    res_run = self.client.table("security_check_runs").select("*").eq("id", entity_id).limit(1).execute()
-                    if res_run.data:
-                        run_row = res_run.data[0]
-                        res_fnd = self.client.table("security_findings").select("*").eq("run_id", entity_id).execute()
-                        findings = res_fnd.data or []
-                        self.sqlite_store.save_security_check_run(run_row, findings)
+                    if payload and "run_data" in payload:
+                        self.sqlite_store.upsert_security_check_run(payload["run_data"], payload.get("findings", []))
+                    else:
+                        res_run = self.client.table("security_check_runs").select("*").eq("id", entity_id).limit(1).execute()
+                        if res_run.data:
+                            run_row = res_run.data[0]
+                            res_fnd = self.client.table("security_findings").select("*").eq("run_id", entity_id).execute()
+                            findings = res_fnd.data or []
+                            self.sqlite_store.upsert_security_check_run(run_row, findings)
 
                 self.sqlite_store.log_mirror_attempt(
                     entity_type=entity_type,
@@ -2086,6 +2414,7 @@ class MockAegisRepository(BaseAegisRepository):
                     action=action,
                     status="synced",
                     retry_count=log.get("retry_count", 0) + 1,
+                    payload=payload,
                 )
                 replayed += 1
             except Exception as e:
@@ -2093,6 +2422,21 @@ class MockAegisRepository(BaseAegisRepository):
                 logger.warning("Replay mirror failed for %s:%s: %s", entity_type, entity_id, e)
 
         return {"total_checked": len(failed_logs), "replayed": replayed, "still_failed": still_failed}
+
+    def catch_up_unmirrored_from_cloud(self, batch_size: int = 100) -> Dict[str, Any]:
+        """Mock implementation supporting failure injection and simulation tests."""
+        if getattr(self, "simulate_db_error", False):
+            state_machine.set_catch_up_completed(False)
+            state_machine.transition_to(
+                DatabaseState.RECOVERY_REQUIRED,
+                reason="Simulated Cloud timeout during catch-up",
+                error_message="Cloud connection timeout",
+                force=True,
+            )
+            raise RuntimeError("Simulated Cloud timeout during catch-up")
+
+        state_machine.set_catch_up_completed(True)
+        return {"status": "ok", "total_scanned": len(self.security_runs) + len(self.hosts), "caught_up": 0}
 
 
 
@@ -2106,12 +2450,23 @@ def get_repository() -> BaseAegisRepository:
     if _active_repository is not None:
         return _active_repository
 
+    if settings.database_mode == "cloud_ssot":
+        if not settings.is_supabase_configured:
+            logger.critical("FATAL [Cloud SSoT]: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured.")
+            raise RuntimeError("Cloud SSoT startup failed: Supabase credentials missing in environment.")
+        try:
+            _active_repository = SupabaseRepository()
+            return _active_repository
+        except Exception as e:
+            logger.critical("FATAL [Cloud SSoT]: Failed to initialize SupabaseRepository: %s", e)
+            raise RuntimeError(f"Cloud SSoT startup failed: {e}") from e
+
     if settings.is_supabase_configured:
         try:
             _active_repository = SupabaseRepository()
             return _active_repository
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to initialize SupabaseRepository in hybrid mode: %s. Falling back to mock.", e)
 
     _active_repository = MockAegisRepository()
     return _active_repository

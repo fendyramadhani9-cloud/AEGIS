@@ -23,6 +23,7 @@ from aegis_backend.routers import (
     auth,
 )
 from aegis_backend.tenancy import auth_gate_middleware, get_auth_store
+from aegis_backend.state_machine import state_machine, DatabaseState
 
 # Setup logging
 logging.basicConfig(
@@ -49,7 +50,7 @@ async def lifespan(app: FastAPI):
     mirror_worker_task = None
 
     if settings.database_mode == "cloud_ssot":
-        # 1. Startup immediate catch-up replay
+        # 1. Startup immediate catch-up replay and unmirrored scan
         try:
             from aegis_backend.repository import get_repository
             repo = get_repository()
@@ -57,8 +58,22 @@ async def lifespan(app: FastAPI):
                 res = repo.replay_failed_mirrors()
                 if res.get("replayed", 0) > 0:
                     logger.info("Startup mirror replay recovered %d records: %s", res.get("replayed"), res)
+            if hasattr(repo, "catch_up_unmirrored_from_cloud"):
+                catch_res = repo.catch_up_unmirrored_from_cloud()
+                if catch_res.get("caught_up", 0) > 0:
+                    logger.info("Startup mirror catch-up recovered %d unmirrored records: %s", catch_res.get("caught_up"), catch_res)
+            
+            state_machine.transition_to(DatabaseState.CLOUD_SSoT, "Startup catch-up and mirror replay successfully completed", force=True)
+            state_machine.set_catch_up_completed(True)
         except Exception as e:
-            logger.warning("Startup mirror replay encountered an error: %s", e)
+            logger.critical("Startup consistency catch-up encountered fatal error: %s", e)
+            state_machine.transition_to(
+                DatabaseState.RECOVERY_REQUIRED,
+                reason=f"Startup catch-up failed: {e}",
+                error_message=str(e),
+                force=True,
+            )
+            state_machine.set_catch_up_completed(False)
 
         # 2. Continuous background worker for mirror recovery (every 60s)
         async def _periodic_mirror_worker():
@@ -71,6 +86,10 @@ async def lifespan(app: FastAPI):
                         res = repo.replay_failed_mirrors()
                         if res.get("replayed", 0) > 0:
                             logger.info("Background mirror worker recovered %d records: %s", res.get("replayed"), res)
+                    if hasattr(repo, "catch_up_unmirrored_from_cloud"):
+                        catch_res = repo.catch_up_unmirrored_from_cloud()
+                        if catch_res.get("caught_up", 0) > 0:
+                            logger.info("Background mirror worker caught up %d unmirrored records: %s", catch_res.get("caught_up"), catch_res)
                 except asyncio.CancelledError:
                     break
                 except Exception as ex:
@@ -78,6 +97,8 @@ async def lifespan(app: FastAPI):
 
         import asyncio
         mirror_worker_task = asyncio.create_task(_periodic_mirror_worker())
+    else:
+        state_machine.transition_to(DatabaseState.HYBRID, "Running in local Hybrid mode", force=True)
 
     yield
 
@@ -92,11 +113,9 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="AEGIS Security Monitoring & Incident Investigation Backend",
-    description="Official API gateway for AEGIS Linux Security Monitoring Platform.",
+    title="AEGIS Backend API",
+    description="AI-Powered Linux Security Monitoring and Incident Investigation API",
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
     lifespan=lifespan,
 )
 
@@ -104,12 +123,38 @@ app = FastAPI(
 # Registered BEFORE CORS so that CORS (added next) wraps it and 401/403 responses still carry CORS headers.
 app.middleware("http")(auth_gate_middleware)
 
+
+@app.middleware("http")
+async def enforce_database_state_gate(request: Request, call_next):
+    """
+    Traffic gate enforcing strict fail-closed and consistency:
+    Rejects mutating requests (POST, PUT, PATCH, DELETE) with HTTP 503 if the database
+    is in a non-operational or recovery-required state.
+    """
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        path = request.url.path
+        # Allow health checks and internal test overrides
+        if not path.startswith("/api/health"):
+            if not state_machine.is_mutation_allowed():
+                return JSONResponse(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    content={
+                        "error": "Database Mutation Rejected",
+                        "detail": f"System is currently in '{state_machine.current_state.value}' state. Mutations are suspended.",
+                        "state": state_machine.current_state.value,
+                        "reason": state_machine.reason,
+                        "authoritative_database": state_machine.get_authoritative_database(),
+                    },
+                )
+    return await call_next(request)
+
+
 # CORS Middleware (Configurable via AEGIS_CORS_ORIGINS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=("*" not in settings.cors_origins),
-    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
