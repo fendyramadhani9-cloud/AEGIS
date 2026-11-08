@@ -252,3 +252,4 @@ Jika Pemilik Proyek memutuskan untuk melanjutkan ke **Tahap 2 (Cutover ke Unifie
 2. Memperbarui konfigurasi `/home/ubuntu/aegis/.env` menjadi `AEGIS_STORAGE_BACKEND=supabase`.
 3. Menjalankan restart terencana layanan `aegis-backend.service` di VM `fenn` (downtime API < 15 detik).
 4. Menjalankan pengujian fungsional live dashboard dan investigasi AI pada Cloud SSoT.
+

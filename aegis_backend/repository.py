@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 class BaseAegisRepository(ABC):
     """Abstract interface defining required database operations."""
 
+    @property
+    def mode(self) -> str:
+        """Returns the active database mode ('hybrid' or 'cloud_ssot')."""
+        return settings.database_mode
+
     @abstractmethod
     def check_database_health(self) -> Tuple[bool, str, Optional[float]]:
         """Returns (connected, message, latency_ms)."""
@@ -767,8 +772,9 @@ class SupabaseRepository(BaseAegisRepository):
             try:
                 rf_res = self.client.table("incident_risk_factors").select("*").eq("incident_id", incident_id).execute()
                 return rf_res.data or []
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to fetch risk factors for incident %s: %s", incident_id, e)
+                raise RuntimeError(f"Cloud SSoT fetch risk factors failed: {e}") from e
         return self.sqlite_store.get_incident_risk_factors(incident_id)
 
     def list_incidents(
@@ -1639,8 +1645,9 @@ class MockAegisRepository(BaseAegisRepository):
             try:
                 rf_res = self.client.table("incident_risk_factors").select("*").eq("incident_id", incident_id).execute()
                 return rf_res.data or []
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to fetch risk factors for incident %s: %s", incident_id, e)
+                raise RuntimeError(f"Cloud SSoT fetch risk factors failed: {e}") from e
         return self.sqlite_store.get_incident_risk_factors(incident_id)
 
     def list_incidents(
