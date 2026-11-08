@@ -764,7 +764,8 @@ class SupabaseRepository(BaseAegisRepository):
                 res = self.client.table("incidents").select("*").eq("id", incident_id).limit(1).execute()
                 if not res.data or len(res.data) == 0:
                     return None
-                inc = res.data[0]
+                inc = dict(res.data[0])
+                inc["storage_backend"] = "supabase_cloud"
                 rel_res = self.client.table("incident_alerts").select("alert_id").eq("incident_id", incident_id).execute()
                 inc["alert_ids"] = [r["alert_id"] for r in (rel_res.data or [])]
                 if not inc["alert_ids"] and inc.get("primary_alert_id"):
@@ -1080,6 +1081,44 @@ class SupabaseRepository(BaseAegisRepository):
 
         return self.sqlite_store.save_ai_analysis(analysis_data)
 
+    @staticmethod
+    def _deserialize_cloud_analysis(row: Dict[str, Any]) -> Dict[str, Any]:
+        item = dict(row)
+        if "analysis_id" not in item:
+            item["analysis_id"] = item.get("id")
+        item["storage_backend"] = "supabase_cloud"
+
+        for k in [
+            "facts",
+            "inferences",
+            "hypotheses",
+            "observed_behaviors",
+            "timeline",
+            "supporting_evidence",
+            "contradicting_evidence",
+            "recommended_actions",
+            "containment_recommendations",
+            "unknowns",
+            "unknown_items",
+        ]:
+            val = item.get(k)
+            if isinstance(val, str):
+                try:
+                    item[k] = json.loads(val)
+                except Exception:
+                    pass
+            elif val is None:
+                item[k] = []
+
+        unknowns = item.get("unknowns", [])
+        if unknowns and isinstance(unknowns[0], dict):
+            item["unknown_items"] = unknowns
+            item["unknowns"] = [str(u.get("data_gap", u)) for u in unknowns]
+        elif not item.get("unknown_items") and unknowns:
+            item["unknown_items"] = [{"data_gap": str(x), "impact": "Forensic telemetry gap."} for x in unknowns]
+
+        return item
+
     def get_latest_ai_analysis(self, incident_id: str) -> Optional[Dict[str, Any]]:
         if self.simulate_db_error:
             raise RuntimeError("Database error on get latest ai analysis.")
@@ -1087,7 +1126,7 @@ class SupabaseRepository(BaseAegisRepository):
             try:
                 res = self.client.table("ai_analyses").select("*").eq("incident_id", incident_id).order("created_at", desc=True).limit(1).execute()
                 if res.data and len(res.data) > 0:
-                    return res.data[0]
+                    return self._deserialize_cloud_analysis(res.data[0])
                 return None
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to get latest AI analysis: %s", e)
@@ -1826,7 +1865,8 @@ class MockAegisRepository(BaseAegisRepository):
                 res = self.client.table("incidents").select("*").eq("id", incident_id).limit(1).execute()
                 if not res.data or len(res.data) == 0:
                     return None
-                inc = res.data[0]
+                inc = dict(res.data[0])
+                inc["storage_backend"] = "supabase_cloud"
                 rel_res = self.client.table("incident_alerts").select("alert_id").eq("incident_id", incident_id).execute()
                 inc["alert_ids"] = [r["alert_id"] for r in (rel_res.data or [])]
                 if not inc["alert_ids"] and inc.get("primary_alert_id"):
@@ -2142,6 +2182,44 @@ class MockAegisRepository(BaseAegisRepository):
 
         return self.sqlite_store.save_ai_analysis(analysis_data)
 
+    @staticmethod
+    def _deserialize_cloud_analysis(row: Dict[str, Any]) -> Dict[str, Any]:
+        item = dict(row)
+        if "analysis_id" not in item:
+            item["analysis_id"] = item.get("id")
+        item["storage_backend"] = "supabase_cloud"
+
+        for k in [
+            "facts",
+            "inferences",
+            "hypotheses",
+            "observed_behaviors",
+            "timeline",
+            "supporting_evidence",
+            "contradicting_evidence",
+            "recommended_actions",
+            "containment_recommendations",
+            "unknowns",
+            "unknown_items",
+        ]:
+            val = item.get(k)
+            if isinstance(val, str):
+                try:
+                    item[k] = json.loads(val)
+                except Exception:
+                    pass
+            elif val is None:
+                item[k] = []
+
+        unknowns = item.get("unknowns", [])
+        if unknowns and isinstance(unknowns[0], dict):
+            item["unknown_items"] = unknowns
+            item["unknowns"] = [str(u.get("data_gap", u)) for u in unknowns]
+        elif not item.get("unknown_items") and unknowns:
+            item["unknown_items"] = [{"data_gap": str(x), "impact": "Forensic telemetry gap."} for x in unknowns]
+
+        return item
+
     def get_latest_ai_analysis(self, incident_id: str) -> Optional[Dict[str, Any]]:
         if self.simulate_db_error:
             raise RuntimeError("Database error on get latest ai analysis.")
@@ -2149,7 +2227,7 @@ class MockAegisRepository(BaseAegisRepository):
             try:
                 res = self.client.table("ai_analyses").select("*").eq("incident_id", incident_id).order("created_at", desc=True).limit(1).execute()
                 if res.data and len(res.data) > 0:
-                    return res.data[0]
+                    return self._deserialize_cloud_analysis(res.data[0])
                 return None
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to get latest AI analysis: %s", e)

@@ -131,3 +131,4 @@ AEGIS supports two primary operational topologies governed by `AEGIS_DATABASE_MO
 2. **Backend-to-Cloud Boundary:** All Cloud communication uses encrypted HTTPS REST endpoints authenticated via `SUPABASE_SERVICE_ROLE_KEY`. Client roles (`anon`, `authenticated`) have zero database permissions.
 3. **AI Context Boundary:** The AI prompt context is strictly filtered: passwords, private keys, and sensitive authorization headers are scrubbed by `aegis_backend/sanitizer.py` before prompt construction.
 4. **Local File Permissions:** SQLite databases, collector cursors, and environment configuration files on host `fenn` are restricted to the `ubuntu` system account (`chmod 0600` / `chmod 0700`). Root privileges are required only for raw journal scraping.
+

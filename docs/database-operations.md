@@ -103,3 +103,4 @@ python3 scripts/sync_cloud_to_sqlite.py --db-path data/aegis_incidents.db --sync
 2. **Topological Order:** Reconciles tables in parent-child foreign key order.
 3. **Timestamp Conflict Detection:** If SQLite has a newer timestamp than Cloud, reverse-sync records a conflict entry in `conflict_report_YYYYMMDD_HHMMSS.json` and rolls back the transaction unless `--force-cloud-wins` is provided.
 4. **Zero-Deletion Policy:** Local-only records are never deleted; only missing Cloud records are inserted or updated.
+

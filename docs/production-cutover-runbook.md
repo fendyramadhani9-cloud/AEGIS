@@ -147,3 +147,4 @@ curl -s http://127.0.0.1:8000/api/health/database
 # Must report: {"database_mode":"hybrid","authoritative_database":"sqlite_local"}
 ```
 *(Rollback completes in under 30 seconds with zero data loss).*
+

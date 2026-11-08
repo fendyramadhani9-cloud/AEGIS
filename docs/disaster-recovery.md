@@ -128,3 +128,4 @@ When Supabase Cloud recovers after an emergency manual failover:
 3. If conflicts are detected, review `data/backups/conflict_report_*.json`.
 4. Resolve conflicting timestamps or execute with `--force-cloud-wins` if Cloud remains primary.
 5. Once resolved, switch `.env` back to `cloud_ssot` and restart `aegis-backend.service`.
+
