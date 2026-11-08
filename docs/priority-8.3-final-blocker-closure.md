@@ -267,3 +267,4 @@ Untuk mengeksekusi **Tahap E (Production Cutover)**, diperlukan persetujuan atas
 3. **Langkah 3 (Rekonsiliasi):** Memverifikasi jumlah baris Cloud tepat 136 record.
 4. **Langkah 4 (Cutover Backend):** Mengubah `AEGIS_DATABASE_MODE=cloud_ssot` di `/home/ubuntu/aegis/.env` dan me-restart backend.
 5. **Langkah 5 (Collector Resume & Smoke Test):** Mengaktifkan kembali collector dan memverifikasi ingestion live ke Cloud SSoT.
+
