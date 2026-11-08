@@ -466,6 +466,55 @@ export function IncidentsScreen() {
                               >
                                 <Tag>{inc.id}</Tag>
                                 <Badge meta={statusConfig} size="sm" />
+                                {inc.provenance === 'controlled_operational_test' ? (
+                                  <span
+                                    style={{
+                                      fontSize: '0.65rem',
+                                      fontWeight: 700,
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      background: 'rgba(20, 184, 166, 0.15)',
+                                      color: '#2dd4bf',
+                                      border: '1px solid rgba(20, 184, 166, 0.35)',
+                                      letterSpacing: '0.04em',
+                                    }}
+                                    title="Generated from live controlled operational validation test on Linux VM"
+                                  >
+                                    🎯 OPERATIONAL TEST
+                                  </span>
+                                ) : inc.provenance === 'genuine_host_telemetry' ? (
+                                  <span
+                                    style={{
+                                      fontSize: '0.65rem',
+                                      fontWeight: 700,
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      background: 'rgba(34, 197, 94, 0.15)',
+                                      color: '#4ade80',
+                                      border: '1px solid rgba(34, 197, 94, 0.35)',
+                                      letterSpacing: '0.04em',
+                                    }}
+                                    title="Live unclassified background host telemetry"
+                                  >
+                                    🛡️ GENUINE HOST
+                                  </span>
+                                ) : (
+                                  <span
+                                    style={{
+                                      fontSize: '0.65rem',
+                                      fontWeight: 700,
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      background: 'rgba(168, 85, 247, 0.15)',
+                                      color: '#c084fc',
+                                      border: '1px solid rgba(168, 85, 247, 0.35)',
+                                      letterSpacing: '0.04em',
+                                    }}
+                                    title="Pre-loaded synthetic benchmark dataset (RFC 5737 test data)"
+                                  >
+                                    🧪 SYNTHETIC BENCHMARK
+                                  </span>
+                                )}
                                 <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
                                   Host: <strong className="mono">{inc.hostname || hostName(inc.hostId)}</strong>
                                 </span>

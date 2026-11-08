@@ -221,6 +221,13 @@ class SqliteIncidentStore:
                     )
                     conn.commit()
 
+                # Provenance schema evolution
+                try:
+                    conn.execute("ALTER TABLE incidents ADD COLUMN provenance TEXT DEFAULT 'synthetic_benchmark';")
+                    conn.commit()
+                except Exception:
+                    pass
+
     # =========================================================================
     # INCIDENT OPERATIONS
     # =========================================================================
@@ -237,6 +244,18 @@ class SqliteIncidentStore:
         alert_ids = alert_ids or []
         risk_factors = risk_factors or []
 
+        # Determine data provenance
+        default_prov = (
+            "synthetic_benchmark"
+            if (
+                "ALT-SEED-" in str(incident_data.get("primary_alert_id", ""))
+                or "198.51.100." in str(incident_data.get("source_ip", ""))
+                or "09e84aeac243e448" in str(incident_data.get("primary_alert_id", ""))
+            )
+            else "controlled_operational_test"
+        )
+        prov = incident_data.get("provenance") or default_prov
+
         with self._lock:
             with self._connection() as conn:
                 # 1. Upsert incident header
@@ -245,12 +264,12 @@ class SqliteIncidentStore:
                         id, host_id, title, severity, risk_level, risk_score,
                         status, primary_alert_id, alert_count, source_ip, target_user,
                         attack_scenario, correlation_reason, assigned_to,
-                        first_seen_at, last_seen_at, created_at, updated_at
+                        first_seen_at, last_seen_at, created_at, updated_at, provenance
                     ) VALUES (
                         :id, :host_id, :title, :severity, :risk_level, :risk_score,
                         :status, :primary_alert_id, :alert_count, :source_ip, :target_user,
                         :attack_scenario, :correlation_reason, :assigned_to,
-                        :first_seen_at, :last_seen_at, :created_at, :updated_at
+                        :first_seen_at, :last_seen_at, :created_at, :updated_at, :provenance
                     )
                     ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
@@ -264,7 +283,8 @@ class SqliteIncidentStore:
                         attack_scenario = excluded.attack_scenario,
                         correlation_reason = excluded.correlation_reason,
                         last_seen_at = excluded.last_seen_at,
-                        updated_at = excluded.updated_at;
+                        updated_at = excluded.updated_at,
+                        provenance = excluded.provenance;
                 """, {
                     "id": inc_id,
                     "host_id": incident_data.get("host_id", ""),
@@ -284,6 +304,7 @@ class SqliteIncidentStore:
                     "last_seen_at": incident_data.get("last_seen_at", now_iso),
                     "created_at": incident_data.get("created_at", now_iso),
                     "updated_at": now_iso,
+                    "provenance": prov,
                 })
 
                 # 2. Insert alert relationships idempotently
@@ -339,6 +360,7 @@ class SqliteIncidentStore:
                     return None
                 data = dict(row)
                 data["storage_backend"] = "sqlite_local"
+                data["provenance"] = data.get("provenance") or "synthetic_benchmark"
                 return data
 
     def list_incidents(
@@ -379,6 +401,7 @@ class SqliteIncidentStore:
                 items = [dict(r) for r in cur.fetchall()]
                 for it in items:
                     it["storage_backend"] = "sqlite_local"
+                    it["provenance"] = it.get("provenance") or "synthetic_benchmark"
                 return items, total
 
     def get_incident_summary(self) -> Dict[str, Any]:

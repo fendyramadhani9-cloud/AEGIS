@@ -55,6 +55,24 @@ class CorrelatedIncident:
         self.risk_result = risk_result or RiskAssessmentResult(risk_score=0, risk_level="low")
 
     def to_dict(self) -> Dict[str, Any]:
+        is_synthetic = (
+            "ALT-SEED-" in str(self.primary_alert_id)
+            or (self.source_ip and ("198.51.100." in self.source_ip or "203.0.113." in self.source_ip))
+            or "09e84aeac243e448" in str(self.primary_alert_id)
+        )
+        is_test = (
+            "127.0.0.1" in str(self.source_ip)
+            or "sec_test_user" in str(self.target_user)
+            or (self.target_user and "test" in str(self.target_user).lower())
+            or "controlled" in str(self.attack_scenario).lower()
+        )
+        if is_synthetic:
+            prov = "synthetic_benchmark"
+        elif is_test:
+            prov = "controlled_operational_test"
+        else:
+            prov = "genuine_host_telemetry"
+
         return {
             "id": self.incident_id,
             "host_id": self.host_id,
@@ -73,6 +91,7 @@ class CorrelatedIncident:
             "last_seen_at": self.last_seen_at,
             "risk_factors": [f.__dict__ for f in self.risk_result.risk_factors],
             "storage_backend": "sqlite_local",
+            "provenance": prov,
         }
 
 

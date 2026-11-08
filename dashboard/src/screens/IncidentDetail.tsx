@@ -181,6 +181,52 @@ export function IncidentDetailScreen() {
                     >
                       💾 Storage: {incident.storageBackend === 'sqlite_local' ? 'SQLite Local (WAL)' : incident.storageBackend || 'SQLite Local'}
                     </span>
+                    {incident.provenance === 'controlled_operational_test' ? (
+                      <span
+                        style={{
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          background: 'rgba(20, 184, 166, 0.15)',
+                          color: '#2dd4bf',
+                          border: '1px solid rgba(20, 184, 166, 0.35)',
+                        }}
+                        title="Generated from live controlled operational validation test on Linux VM"
+                      >
+                        🎯 Provenance: Operational Test
+                      </span>
+                    ) : incident.provenance === 'genuine_host_telemetry' ? (
+                      <span
+                        style={{
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          background: 'rgba(34, 197, 94, 0.15)',
+                          color: '#4ade80',
+                          border: '1px solid rgba(34, 197, 94, 0.35)',
+                        }}
+                        title="Live unclassified background host telemetry"
+                      >
+                        🛡️ Provenance: Genuine Host Telemetry
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          background: 'rgba(168, 85, 247, 0.15)',
+                          color: '#c084fc',
+                          border: '1px solid rgba(168, 85, 247, 0.35)',
+                        }}
+                        title="Pre-loaded synthetic benchmark dataset (RFC 5737 test data)"
+                      >
+                        🧪 Provenance: Synthetic Benchmark
+                      </span>
+                    )}
                   </div>
 
                   {/* Status Change Button */}

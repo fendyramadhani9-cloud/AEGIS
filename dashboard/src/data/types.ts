@@ -263,6 +263,7 @@ export interface Incident {
   correlationScenario?: string;
   correlationReason?: string;
   storageBackend?: string;
+  provenance?: 'synthetic_benchmark' | 'controlled_operational_test' | 'genuine_host_telemetry';
   riskFactors?: IncidentRiskFactor[];
   alerts?: Alert[];
   latestAnalysis?: AIAnalysisRecord | null;

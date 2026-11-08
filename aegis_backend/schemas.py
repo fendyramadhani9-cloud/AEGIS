@@ -297,6 +297,7 @@ class IncidentItem(BaseModel):
     created_at: str
     updated_at: Optional[str] = None
     storage_backend: Optional[str] = "sqlite_local"
+    provenance: Optional[str] = "synthetic_benchmark"
 
     model_config = ConfigDict(from_attributes=True)
 
