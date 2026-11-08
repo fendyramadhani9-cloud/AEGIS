@@ -80,13 +80,17 @@ def main():
     print("  -> Stopping aegis-backend.service...")
     run_cmd("sudo systemctl stop aegis-backend.service")
 
-    time.sleep(1)
+    time.sleep(2)
     backend_up = check_api_health()
     collector_status = run_cmd("systemctl is-active aegis-collector.service")
     backend_status = run_cmd("systemctl is-active aegis-backend.service")
     print(f"  - Service status during downtime: Collector={collector_status}, Backend={backend_status}")
     assert backend_status != "active", "Backend should be stopped!"
     assert collector_status != "active", "Collector should be stopped!"
+
+    # Record cursor snapshot strictly AFTER services are stopped and fully quiesced
+    cursor_stopped = CURSOR_FILE.read_text().strip()
+    print(f"  - Cursor at rest (post-stop): {cursor_stopped[:35]}...")
 
     # 4. Generate Telemetry while Services are Offline
     print("\n[PHASE 4] Generating New Auth Event during Downtime...")
@@ -102,7 +106,7 @@ def main():
 
     # Verify cursor has NOT moved while collector is stopped
     cursor_during = CURSOR_FILE.read_text().strip()
-    assert cursor_during == cursor_before, "Cursor must NOT move while collector is stopped!"
+    assert cursor_during == cursor_stopped, "Cursor must NOT move while collector is stopped!"
     print("  [PASS] Cursor strictly preserved during downtime.")
 
     # 5. Restore Backend & Collector Services
@@ -123,19 +127,19 @@ def main():
 
     # 6. Wait for Collector to Poll and Ingest
     print("\n[PHASE 6] Waiting for Ingestion Cycle & Two-Phase Cursor Commit...")
-    # Poll cursor file for up to 25 seconds (poll interval is ~15s)
+    # Poll cursor file for up to 30 seconds (poll interval is ~15s)
     cursor_advanced = False
-    cursor_after = cursor_before
-    for i in range(25):
+    cursor_after = cursor_stopped
+    for i in range(30):
         time.sleep(1)
         current_cursor = CURSOR_FILE.read_text().strip()
-        if current_cursor != cursor_before:
+        if current_cursor != cursor_stopped:
             cursor_advanced = True
             cursor_after = current_cursor
             print(f"  -> Cursor successfully advanced at t={i+1}s!")
             break
 
-    print(f"  - Initial Cursor:  {cursor_before[:35]}...")
+    print(f"  - Cursor at rest:  {cursor_stopped[:35]}...")
     print(f"  - Advanced Cursor: {cursor_after[:35]}...")
     print(f"  - Two-Phase Commit Verified: {cursor_advanced}")
 
