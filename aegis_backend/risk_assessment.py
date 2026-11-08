@@ -90,20 +90,42 @@ class RiskAssessmentEngine:
             )
 
         # ---------------------------------------------------------------------
+        # 0. Evidence Collection across Alerts in Cluster
+        # ---------------------------------------------------------------------
+        all_evidence_ids: List[str] = []
+        alert_evidence_map: Dict[str, List[str]] = {}
+        for a in alerts:
+            aid = a.get("id", "")
+            eids = a.get("evidence_ids") or []
+            if isinstance(eids, list):
+                clean_eids = [str(x) for x in eids if x]
+                alert_evidence_map[aid] = clean_eids
+                all_evidence_ids.extend(clean_eids)
+        unique_all_evidence_ids = list(dict.fromkeys(all_evidence_ids))
+
+        # ---------------------------------------------------------------------
         # 1. Base Severity Contribution (Highest alert severity in cluster)
+        # Strictly mutually exclusive: Only the highest severity alert contributes Base points.
         # ---------------------------------------------------------------------
         severities = [a.get("severity", "low").lower() for a in alerts]
         sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
         highest_sev = max(severities, key=lambda s: sev_rank.get(s, 0), default="low")
         base_points = cls.SEVERITY_WEIGHTS.get(highest_sev, 10)
         score += base_points
+
+        sev_supporting: List[str] = []
+        for a in alerts:
+            if a.get("severity", "").lower() == highest_sev:
+                sev_supporting.extend(alert_evidence_map.get(a.get("id", ""), []))
+
         factors.append(
             RiskFactor(
                 factor_id=f"SEV-{highest_sev.upper()}",
                 factor_name="Base Alert Severity",
                 points=base_points,
                 category="severity",
-                description=f"Incident encompasses at least one '{highest_sev.upper()}' severity detection.",
+                description=f"Incident encompasses at least one '{highest_sev.upper()}' severity detection ({base_points} pts). Only highest base severity contributes.",
+                supporting_evidence_ids=list(dict.fromkeys(sev_supporting)),
             )
         )
 
@@ -120,17 +142,25 @@ class RiskAssessmentEngine:
                     factor_name="Correlated Multi-Alert Cluster",
                     points=multi_alert_points,
                     category="multi_alert",
-                    description=f"Cluster aggregates {len(alerts)} related detections on the same host.",
+                    description=f"Cluster aggregates {len(alerts)} related detections on the same host (+{multi_alert_points} pts, max +24).",
+                    supporting_evidence_ids=unique_all_evidence_ids[:10],
                 )
             )
 
         # ---------------------------------------------------------------------
         # 3. Attack Sequence Progression Analysis (Kill-chain stages)
+        # Stages are mutually exclusive (highest progression level applies)
         # ---------------------------------------------------------------------
         rule_ids = {a.get("rule_id", "") for a in alerts}
         has_brute = "RULE-SSH-BRUTE" in rule_ids
         has_auth_success = "RULE-AUTH-003" in rule_ids
         has_susp_sudo = "RULE-SUSP-SUDO" in rule_ids
+
+        prog_evidence: List[str] = []
+        for a in alerts:
+            if a.get("rule_id") in ("RULE-SSH-BRUTE", "RULE-AUTH-003", "RULE-SUSP-SUDO"):
+                prog_evidence.extend(alert_evidence_map.get(a.get("id", ""), []))
+        prog_evidence = list(dict.fromkeys(prog_evidence))
 
         if has_brute and has_auth_success and has_susp_sudo:
             prog_points = 25
@@ -142,6 +172,7 @@ class RiskAssessmentEngine:
                     points=prog_points,
                     category="progression",
                     description="Complete progression observed: SSH Brute Force -> Successful Access -> Privileged Sudo Execution.",
+                    supporting_evidence_ids=prog_evidence,
                 )
             )
         elif has_auth_success and has_susp_sudo:
@@ -154,6 +185,7 @@ class RiskAssessmentEngine:
                     points=prog_points,
                     category="progression",
                     description="Authentication success immediately followed by privileged root/sudo commands.",
+                    supporting_evidence_ids=prog_evidence,
                 )
             )
         elif has_brute and has_auth_success:
@@ -166,10 +198,11 @@ class RiskAssessmentEngine:
                     points=prog_points,
                     category="progression",
                     description="Repeated failed authentications culminated in successful account login.",
+                    supporting_evidence_ids=prog_evidence,
                 )
             )
 
-        # Interactive Root Shell / High-risk command execution
+        # Interactive Root Shell / High-risk command execution (Max once)
         for a in alerts:
             reason = (a.get("reason") or "").lower()
             title = (a.get("title") or "").lower()
@@ -182,12 +215,13 @@ class RiskAssessmentEngine:
                         points=10,
                         category="progression",
                         description="Privileged interactive shell or hazardous permission modification (/bin/bash or chmod 777) executed via sudo.",
+                        supporting_evidence_ids=alert_evidence_map.get(a.get("id", ""), []),
                     )
                 )
                 break
 
         # ---------------------------------------------------------------------
-        # 4. Forensic Telemetry Corroboration Strength
+        # 4. Forensic Telemetry Corroboration Strength (Mutually exclusive tiers)
         # ---------------------------------------------------------------------
         if evidence_count >= 10:
             score += 8
@@ -198,6 +232,7 @@ class RiskAssessmentEngine:
                     points=8,
                     category="evidence",
                     description=f"Strong corroborating evidence ({evidence_count} logged events) substantiating detection.",
+                    supporting_evidence_ids=unique_all_evidence_ids[:10],
                 )
             )
         elif evidence_count >= 4:
@@ -209,6 +244,7 @@ class RiskAssessmentEngine:
                     points=5,
                     category="evidence",
                     description=f"{evidence_count} telemetry events ground the detected activity.",
+                    supporting_evidence_ids=unique_all_evidence_ids[:10],
                 )
             )
         elif evidence_count >= 1:
@@ -220,6 +256,7 @@ class RiskAssessmentEngine:
                     points=2,
                     category="evidence",
                     description=f"{evidence_count} telemetry event(s) recorded.",
+                    supporting_evidence_ids=unique_all_evidence_ids[:10],
                 )
             )
 

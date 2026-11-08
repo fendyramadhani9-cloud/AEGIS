@@ -28,6 +28,17 @@ from aegis_backend.schemas import AIAnalysisItem
 logger = logging.getLogger("aegis_backend.ai_provider")
 
 
+def is_rfc5737_testnet(ip: Optional[str]) -> bool:
+    """Detects RFC 5737 reserved documentation / benchmark test addresses."""
+    if not ip:
+        return False
+    return (
+        ip.startswith("198.51.100.")
+        or ip.startswith("203.0.113.")
+        or ip.startswith("192.0.2.")
+    )
+
+
 class BaseAIProvider(ABC):
     """Abstract contract for security analysis providers."""
 
@@ -160,6 +171,10 @@ class MockAIProvider(BaseAIProvider):
             )
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        notes = "Offline deterministic analysis based strictly on collected telemetry."
+        if is_rfc5737_testnet(context.source_ip):
+            notes += " (Notice: Source IP is in RFC 5737 TEST-NET range; represents synthetic test telemetry, not a live internet compromise)."
+
         return AIAnalysisItem(
             analysis_id=analysis_id,
             incident_id=context.incident_id,
@@ -185,7 +200,7 @@ class MockAIProvider(BaseAIProvider):
             impact_assessment="Potential unauthorized host access and administrative privilege compromise.",
             recommended_actions=recommended_actions,
             containment_recommendations=containment,
-            investigation_notes="Offline deterministic analysis based strictly on collected telemetry.",
+            investigation_notes=notes,
             provider="mock-evaluator",
             model=self.model_name,
             storage_backend="sqlite_local",
@@ -421,6 +436,10 @@ class GeminiProvider(BaseAIProvider):
             if not valid_citations and context.allowed_evidence_ids:
                 valid_citations = sorted(list(context.allowed_evidence_ids))
 
+            notes = "Live Google Gemini analysis verified against grounding telemetry."
+            if is_rfc5737_testnet(context.source_ip):
+                notes += " (Notice: Source IP is within RFC 5737 reserved TEST-NET documentation range; indicates synthetic test telemetry, not a confirmed real-world compromise)."
+
             return AIAnalysisItem(
                 analysis_id=analysis_id,
                 incident_id=context.incident_id,
@@ -446,7 +465,7 @@ class GeminiProvider(BaseAIProvider):
                 impact_assessment=parsed.get("impact_assessment", "Potential access violation."),
                 recommended_actions=parsed.get("recommended_actions", []),
                 containment_recommendations=parsed.get("containment_recommendations", []),
-                investigation_notes="Live Google Gemini analysis verified against grounding telemetry.",
+                investigation_notes=notes,
                 provider="gemini",
                 model=self.model_name,
                 storage_backend="sqlite_local",

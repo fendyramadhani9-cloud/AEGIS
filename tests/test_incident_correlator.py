@@ -232,3 +232,123 @@ def test_correlator_unrelated_admin_sudo_segregation():
     # Must NOT conflate unrelated admin sudo with external brute force against root!
     assert len(incidents) == 2
 
+
+def test_correlator_same_user_different_ips_not_merged_for_brute_force():
+    """
+    Two independent external brute-force attacks from different IPs against the same
+    common username ('ubuntu') must NOT be merged into a single incident.
+    """
+    correlator = IncidentCorrelator(time_window_seconds=1800)
+    now = datetime.now(timezone.utc)
+
+    alerts = [
+        {
+            "id": "ALT-BRUTE-IP1",
+            "host_id": "host-fenn",
+            "rule_id": "RULE-SSH-BRUTE",
+            "title": "SSH brute from IP1",
+            "severity": "high",
+            "detected_at": now.isoformat(),
+            "reason": "Failed SSH attempts for user 'ubuntu' from 198.51.100.10",
+        },
+        {
+            "id": "ALT-BRUTE-IP2",
+            "host_id": "host-fenn",
+            "rule_id": "RULE-SSH-BRUTE",
+            "title": "SSH brute from IP2",
+            "severity": "high",
+            "detected_at": (now + timedelta(minutes=3)).isoformat(),
+            "reason": "Failed SSH attempts for user 'ubuntu' from 203.0.113.99",
+        },
+    ]
+
+    incidents = correlator.correlate(alerts)
+    assert len(incidents) == 2, "Separate attacker IPs targeting the same common username must remain distinct."
+
+
+def test_correlator_admin_sudo_not_merged_with_unrelated_failed_brute_same_user():
+    """
+    If a brute force failed without an accepted login, an administrator later executing
+    sudo as the same account ('ubuntu') must NOT be attributed to the brute force attacker.
+    """
+    correlator = IncidentCorrelator(time_window_seconds=1800)
+    now = datetime.now(timezone.utc)
+
+    alerts = [
+        {
+            "id": "ALT-FAILED-BRUTE",
+            "host_id": "host-fenn",
+            "rule_id": "RULE-SSH-BRUTE",
+            "title": "SSH brute against ubuntu",
+            "severity": "high",
+            "detected_at": now.isoformat(),
+            "reason": "Multiple failed logins for user 'ubuntu' from 198.51.100.5",
+        },
+        {
+            "id": "ALT-LOCAL-ADMIN-SUDO",
+            "host_id": "host-fenn",
+            "rule_id": "RULE-SUSP-SUDO",
+            "title": "Local admin sudo",
+            "severity": "medium",
+            "detected_at": (now + timedelta(minutes=8)).isoformat(),
+            "reason": "Sudo command executed for user ubuntu: /usr/bin/systemctl restart nginx",
+        },
+    ]
+
+    incidents = correlator.correlate(alerts)
+    assert len(incidents) == 2, "Failed brute force without accepted auth must not absorb unrelated sudo by same user."
+
+
+def test_risk_assessment_boundary_zero_and_hundred():
+    """
+    Guarantees strict score bounding [0, 100] at both extrema.
+    """
+    engine = RiskAssessmentEngine()
+
+    # Lower bound: empty alerts
+    assert engine.evaluate([]).risk_score == 0
+
+    # Upper bound: Maxed out critical + multi-alert + kill chain + root shell + substantial evidence + posture
+    now = datetime.now(timezone.utc)
+    heavy_alerts = [
+        {
+            "id": f"ALT-{i}",
+            "host_id": "host-1",
+            "rule_id": "RULE-SSH-BRUTE" if i == 0 else "RULE-AUTH-003" if i == 1 else "RULE-SUSP-SUDO",
+            "severity": "critical",
+            "detected_at": (now + timedelta(minutes=i)).isoformat(),
+            "reason": "root shell /bin/bash chmod 777",
+            "evidence_ids": [f"EVD-{i}-1", f"EVD-{i}-2"],
+        }
+        for i in range(8)
+    ]
+    posture = [
+        {"check_id": "FW-001", "status": "fail"},
+        {"check_id": "SYS-002", "status": "fail"},
+        {"check_id": "ACC-004", "status": "fail"},
+    ]
+
+    res = engine.evaluate(alerts=heavy_alerts, evidence_count=15, posture_findings=posture)
+    assert res.risk_score == 100, f"Score must be capped at 100, got {res.risk_score}"
+    assert res.risk_level == "critical"
+
+
+def test_risk_assessment_severity_mutual_exclusivity():
+    """
+    Guarantees that multiple alerts of varying severities contribute only ONE Base severity factor
+    corresponding to the highest severity among them.
+    """
+    engine = RiskAssessmentEngine()
+    alerts = [
+        {"id": "A1", "rule_id": "R1", "severity": "medium", "reason": "med alert"},
+        {"id": "A2", "rule_id": "R2", "severity": "critical", "reason": "crit alert"},
+        {"id": "A3", "rule_id": "R3", "severity": "high", "reason": "high alert"},
+    ]
+
+    res = engine.evaluate(alerts=alerts, evidence_count=2)
+    sev_factors = [f for f in res.risk_factors if f.category == "severity"]
+    assert len(sev_factors) == 1, "Only one Base severity factor must exist."
+    assert sev_factors[0].factor_id == "SEV-CRITICAL"
+    assert sev_factors[0].points == 40
+
+

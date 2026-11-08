@@ -139,48 +139,72 @@ class IncidentCorrelator:
         alert_ips, alert_users = self._extract_entities(alert)
         alert_rule = alert.get("rule_id", "")
 
+        # Extract IP and User entities
+        alert_ips, alert_users = self._extract_entities(alert)
+        alert_rule = alert.get("rule_id", "")
+
         cluster_ips: Set[str] = set()
         cluster_users: Set[str] = set()
         cluster_rules: Set[str] = set()
+        cluster_auth_users: Set[str] = set()
+        has_auth_success = False
+
         for a in cluster:
             ips, users = self._extract_entities(a)
             cluster_ips.update(ips)
             cluster_users.update(users)
-            cluster_rules.add(a.get("rule_id", ""))
+            r = a.get("rule_id", "")
+            cluster_rules.add(r)
+            if r == "RULE-AUTH-003":
+                has_auth_success = True
+                cluster_auth_users.update(users)
 
-        # 1. Pivot: Shared Source IP
         shared_ips = alert_ips & cluster_ips
+        shared_users = alert_users & cluster_users
+
+        # 1. Independent Brute-Force Attacks Isolation
+        # If incoming alert is brute-force and cluster already has brute-force, require shared Source IP.
+        # Different IPs targeting common usernames (e.g. 'ubuntu', 'root') must remain distinct incidents.
+        if alert_rule == "RULE-SSH-BRUTE" and "RULE-SSH-BRUTE" in cluster_rules:
+            if shared_ips:
+                ip_str = ", ".join(sorted(shared_ips))
+                return True, f"Shared Source IP pivot ({ip_str}) in continuing brute-force campaign."
+            return False, None
+
+        # 2. Strict Causal Attack Progression: Failed Brute-Force -> Accepted Login
+        if ("RULE-SSH-BRUTE" in cluster_rules) and (alert_rule == "RULE-AUTH-003"):
+            if shared_ips:
+                ip_str = ", ".join(sorted(shared_ips))
+                return True, f"Causal attack chain progression: Repeated failed logins followed by successful authentication from {ip_str}."
+            if shared_users:
+                user_str = ", ".join(sorted(shared_users))
+                return True, f"Causal attack chain progression: Repeated failed logins followed by successful authentication for user '{user_str}'."
+            return False, None
+
+        # 3. Strict Causal Attack Progression: Accepted Login -> Suspicious Sudo Execution
+        if alert_rule == "RULE-SUSP-SUDO":
+            if has_auth_success:
+                # Require that sudo is executed by the user who just authenticated (or shared IP)
+                matching_users = alert_users & cluster_auth_users
+                if matching_users:
+                    user_str = ", ".join(sorted(matching_users))
+                    return True, f"Causal attack chain progression: Successful authentication followed by privileged sudo execution by user '{user_str}'."
+                if shared_ips:
+                    ip_str = ", ".join(sorted(shared_ips))
+                    return True, f"Causal attack chain progression: Activity from authenticated session origin {ip_str} followed by privileged sudo execution."
+            # If the cluster only has failed brute-force and NO accepted authentication,
+            # an unlinked sudo (even by 'ubuntu') must NOT be conflated with the brute force attacker!
+            return False, None
+
+        # 4. Shared Source IP Pivot across other detections
         if shared_ips:
             ip_str = ", ".join(sorted(shared_ips))
             return True, f"Shared Source IP pivot ({ip_str}) with activity occurring within {int(delta)}s."
 
-        # 2. Pivot: Shared Target User
-        shared_users = alert_users & cluster_users
-        if shared_users:
+        # 5. Shared Target User Pivot (Only for authenticated sessions or explicit user pivots)
+        if shared_users and (has_auth_success or alert_rule == "RULE-AUTH-003"):
             user_str = ", ".join(sorted(shared_users))
             return True, f"Shared Target User pivot ('{user_str}') across correlated detections."
-
-        # 3. Pivot: Causal Attack Progression on the same host
-        # Example: cluster has Brute Force or Auth Success, and incoming alert is Suspicious Sudo
-        is_initial_access = any(r in ("RULE-SSH-BRUTE", "RULE-AUTH-003") for r in cluster_rules)
-        is_sudo_alert = alert_rule == "RULE-SUSP-SUDO"
-
-        if is_initial_access and is_sudo_alert:
-            # If the user running sudo is the user targeted or the default compromised user (e.g. ubuntu/root)
-            if not alert_users or "ubuntu" in alert_users or "root" in alert_users or (alert_users & cluster_users):
-                return True, "Causal attack chain progression: Authentication activity followed by privileged sudo execution."
-
-        if ("RULE-SSH-BRUTE" in cluster_rules) and (alert_rule == "RULE-AUTH-003"):
-            return True, "Causal attack chain progression: Repeated failed logins followed by successful authentication."
-
-        # If incoming alert is brute-force from a different IP and user, do NOT merge
-        if alert_rule == "RULE-SSH-BRUTE" and "RULE-SSH-BRUTE" in cluster_rules:
-            if not shared_ips and not shared_users:
-                return False, None
-
-        # If incoming alert is sudo by an unrelated administrator with no shared entities, do NOT merge
-        if is_sudo_alert and not (alert_users & cluster_users):
-            return False, None
 
         return False, None
 
