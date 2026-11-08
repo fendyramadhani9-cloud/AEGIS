@@ -36,7 +36,8 @@ def audit():
     print(f"Cloud Alert IDs ({len(cloud_alerts)}): {list(cloud_alerts.keys())}")
 
     # 2. Inspect SQLite 136 records dependencies
-    conn = sqlite3.connect('data/vm_fenn_aegis_incidents.db')
+    db_path = 'data/aegis_incidents.db' if os.path.exists('data/aegis_incidents.db') else 'data/vm_fenn_aegis_incidents.db'
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
