@@ -113,3 +113,4 @@ def test_telemetry_sanitizer_quarantines_passwords_before_ingest():
     is_safe_2, violation_2 = TelemetrySanitizer.inspect_line(safe_line)
     assert is_safe_2 is True
     assert violation_2 is None
+

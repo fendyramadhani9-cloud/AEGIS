@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
     mirror_worker_task = None
 
     if settings.database_mode == "cloud_ssot":
-        # 1. Startup immediate catch-up replay
+        # 1. Startup immediate catch-up replay and unmirrored scan
         try:
             from aegis_backend.repository import get_repository
             repo = get_repository()
@@ -35,6 +35,10 @@ async def lifespan(app: FastAPI):
                 res = repo.replay_failed_mirrors()
                 if res.get("replayed", 0) > 0:
                     logger.info("Startup mirror replay recovered %d records: %s", res.get("replayed"), res)
+            if hasattr(repo, "catch_up_unmirrored_from_cloud"):
+                catch_res = repo.catch_up_unmirrored_from_cloud()
+                if catch_res.get("caught_up", 0) > 0:
+                    logger.info("Startup mirror catch-up recovered %d unmirrored records: %s", catch_res.get("caught_up"), catch_res)
         except Exception as e:
             logger.warning("Startup mirror replay encountered an error: %s", e)
 
@@ -49,6 +53,10 @@ async def lifespan(app: FastAPI):
                         res = repo.replay_failed_mirrors()
                         if res.get("replayed", 0) > 0:
                             logger.info("Background mirror worker recovered %d records: %s", res.get("replayed"), res)
+                    if hasattr(repo, "catch_up_unmirrored_from_cloud"):
+                        catch_res = repo.catch_up_unmirrored_from_cloud()
+                        if catch_res.get("caught_up", 0) > 0:
+                            logger.info("Background mirror worker caught up %d unmirrored records: %s", catch_res.get("caught_up"), catch_res)
                 except asyncio.CancelledError:
                     break
                 except Exception as ex:

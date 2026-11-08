@@ -103,7 +103,10 @@ terkini secara asinkron     sebelum gangguan terjadi                     |
 ```
 
 ### 4.1 Prosedur Planned Rollback (Cloud Masih Terbaca)
-1. Jalankan `python scripts/sync_cloud_to_sqlite.py --sync` untuk menyalin seluruh data dari Cloud ke SQLite lokal.
+1. Jalankan `python scripts/sync_cloud_to_sqlite.py --sync --confirm` untuk menyalin seluruh delta data dari Cloud ke SQLite lokal. Script ini secara otomatis:
+   - Membuat snapshot backup pre-sync di `data/backups/presync_backup_YYYYMMDD_HHMMSS.db` lengkap dengan verifikasi SHA-256 checksum.
+   - Menjalankan sinkronisasi dengan urutan topological DAG (parent sebelum child tables).
+   - Mendeteksi konflik timestamp dan membungkus seluruh mutasi dalam transaksi ACID dengan verifikasi foreign key (`PRAGMA foreign_key_check`).
 2. Ubah konfigurasi `/home/ubuntu/aegis/.env` menjadi `AEGIS_DATABASE_MODE=hybrid`.
 3. Restart layanan: `sudo systemctl restart aegis-backend.service`.
 4. Hasil: Data 100% konsisten, zero data loss, tidak ada inkonsistensi.
@@ -128,3 +131,4 @@ Layanan `aegis-collector.service` dirancang mandiri dari status backend:
   - Collector menahan cursor pada posisi sebelumnya.
   - Pada siklus berikutnya (interval 15 detik), collector mencoba ulang (*retry*) batch log yang sama.
   - **Hasil:** Nol baris log hilang atau terlewatkan selama backend restart.
+

@@ -66,15 +66,18 @@ AEGIS beralih dari arsitektur transisional **Hybrid Mode** (penyimpanan primer l
 - Seluruh endpoint baca (`GET`) dan tulis (`POST`, `PATCH`) membaca dan menulis langsung ke Supabase Cloud PostgreSQL.
 - Tidak ada data operasional yang disimpan atau dibaca dari SQLite secara eksklusif.
 
-### 2.2 Eliminasi Silent Fallback (Fail-Loud Guarantee)
+### 2.2 Eliminasi Silent Fallback (Fail-Loud Guarantee & Strict Fail-Closed)
 - Jika Supabase Cloud mengalami gangguan (network timeout, authentication failure, DNS issue), backend **DILARANG KERAS** beralih diam-diam (*silent fallback*) ke SQLite sebagai primary database.
 - Backend segera menolak permintaan dengan `HTTP 500 / 503` dan memunculkan `RuntimeError` pada logging internal.
+- Tidak ada mekanisme perpindahan otomatis (*automatic fallback*) ke SQLite saat Cloud mati. Failover ke SQLite lokal hanya dilakukan secara manual dan terencana oleh operator sistem melalui runbook rollback.
 - Hal ini mencegah fragmentasi data (*split-brain*) di mana sebagian operasi tersimpan di SQLite dan sebagian di Cloud.
 
-### 2.3 Peran SQLite: Local Forensic Archive & Cold Replica
+### 2.3 Peran SQLite: Local Forensic Archive & Cold Replica dengan Durable Mirror Queue
 - SQLite diturunkan fungsinya menjadi **asynchronous read-only forensic replica**.
 - Setiap operasi penulisan yang berhasil di Cloud akan dimirrorkan secara asinkron ke SQLite via `_execute_mirror(...)`.
-- Jika penulisan mirror ke SQLite gagal, kegagalan dicatat ke tabel `mirror_sync_log` dan direplay secara otomatis oleh `PeriodicMirrorWorker` (setiap 60 detik) tanpa mengganggu operasi Cloud primer.
+- **Durable Payload Queue:** Jika penulisan mirror ke SQLite gagal (misalnya lock timeout atau I/O busy), serialisasi payload JSON lengkap disimpan di disk dalam kolom `mirror_sync_log.payload`.
+- **Offline Replay:** `PeriodicMirrorWorker` dan `replay_failed_mirrors()` memproses antrean gagal langsung dari payload lokal tanpa bergantung pada koneksi jaringan Cloud.
+- **Startup Catch-Up:** Pada saat boot, backend memindai rekonsiliasi record Cloud terbaru via `catch_up_unmirrored_from_cloud()` untuk menjamin tidak ada record yang hilang akibat crash proses sebelum mirror dijadwalkan.
 
 ---
 
@@ -107,3 +110,4 @@ AEGIS beralih dari arsitektur transisional **Hybrid Mode** (penyimpanan primer l
 2. **Revocation Akses Publik/Anonim:** Seluruh hak akses `SELECT`, `INSERT`, `UPDATE`, `DELETE` dicabut (`REVOKE ALL`) dari role `anon` dan `authenticated`. Akses tanpa token resmi mengembalikan `HTTP 401 Unauthorized`.
 3. **Least Privilege Backend Service Role:** Backend berkomunikasi secara privat menggunakan `SUPABASE_SERVICE_ROLE_KEY` melalui HTTPS terenkripsi. Key ini tidak pernah diekspos ke frontend atau browser.
 4. **Proteksi Fungsi Atomik (RPC):** `fn_ingest_alert_with_evidence` didefinisikan dengan `SECURITY DEFINER` dan membatasi `search_path = public, pg_temp` untuk mengeliminasi kerentanan search path hijacking.
+

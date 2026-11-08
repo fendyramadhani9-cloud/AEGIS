@@ -24,11 +24,11 @@ def get_app_health():
     )
 
 
-@router.get("/database", response_model=DatabaseHealthResponse, summary="Database Connectivity Check")
+@router.get("/database", response_model=DatabaseHealthResponse, summary="Database Connectivity & SSoT Health Check")
 def get_database_health(repo: BaseAegisRepository = Depends(get_repository)):
     """
     Performs a lightweight, read-only query against Supabase system_status table.
-    Safely reports connection status without leaking credentials.
+    Safely reports connection status and SSoT observability indicators without leaking credentials.
     """
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -38,10 +38,21 @@ def get_database_health(repo: BaseAegisRepository = Depends(get_repository)):
             connected=False,
             checked_at=now_iso,
             message="Supabase credentials (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) are not configured in environment.",
+            database_mode=settings.database_mode,
+            authoritative_source="sqlite_local" if settings.database_mode == "hybrid" else "unconfigured",
+            failover_state="unconfigured",
         )
 
     connected, message, latency = repo.check_database_health()
     health_status = "healthy" if connected else "degraded"
+
+    # Mirror queue observability stats
+    mirror_stats = {}
+    if hasattr(repo, "get_mirror_sync_stats"):
+        try:
+            mirror_stats = repo.get_mirror_sync_stats()
+        except Exception:
+            pass
 
     return DatabaseHealthResponse(
         status=health_status,
@@ -49,5 +60,11 @@ def get_database_health(repo: BaseAegisRepository = Depends(get_repository)):
         checked_at=now_iso,
         message=message,
         latency_ms=latency,
+        database_mode=settings.database_mode,
+        authoritative_source="supabase_cloud" if settings.database_mode == "cloud_ssot" else "sqlite_local",
+        mirror_queue_depth=mirror_stats.get("queue_depth", 0),
+        oldest_pending_age_seconds=mirror_stats.get("oldest_pending_age_seconds"),
+        last_successful_mirror_at=mirror_stats.get("last_successful_mirror_at"),
+        failover_state="normal" if connected else "fail_closed_alerting",
     )
 

@@ -14,11 +14,12 @@ Seluruh rangkaian pengujian perangkat lunak, simulasi kegagalan, verifikasi priv
 
 | Kategori Pengujian | Lingkungan | Command Eksekusi | Exit Code | Hasil Pengujian | Status Klaim |
 | :--- | :--- | :--- | :---: | :---: | :---: |
-| **Backend Full Test Suite** | Workstation Python 3.13 | `.venv\Scripts\python -m pytest` | `0` | **195 / 195 PASSED** | **TESTED** |
-| **Frontend TypeScript & Vite Build** | Workstation Node.js | `npm run build` (in `dashboard/`) | `0` | **Built in 7.33s (0 errors)** | **TESTED** |
+| **Backend Full Test Suite** | Workstation Python 3.13 | `.venv\Scripts\python -m pytest` | `0` | **203 / 203 PASSED** | **TESTED** |
+| **Frontend TypeScript & Vite Build** | Workstation Node.js | `npm run build` (in `dashboard/`) | `0` | **Built in 1.94s (0 errors)** | **TESTED** |
 | **Cloud RLS & Privilege Verification** | Live Supabase Cloud | `python scripts/verify_supabase_privileges_live.py` | `0` | **12/12 tables + RPC verified** | **VERIFIED** |
 | **Deep Delta Reconciliation Audit** | SQLite vs Supabase | `python scripts/reconcile_delta_cutover.py` | `0` | **0 FK violations, 136 records matched** | **VERIFIED** |
-| **Reverse Sync Drill (Cloud -> SQLite)** | SQLite vs Supabase | `python scripts/sync_cloud_to_sqlite.py` | `0` | **136 records processed dry-run** | **TESTED** |
+| **Reverse Sync Hardening (Cloud -> SQLite)** | SQLite vs Supabase | `python scripts/sync_cloud_to_sqlite.py` | `0` | **Pre-sync SHA256 backup + DAG sync** | **TESTED** |
+| **Mirror Durability & Crash Recovery** | Fail-Injection Suite | `pytest tests/test_mirror_durability_and_recovery.py` | `0` | **7 / 7 crash scenarios passed (10 pts)** | **TESTED** |
 | **Collector Two-Phase Commit Test** | Simulation Suite | `pytest tests/test_collector.py` | `0` | **Cursor retained on 500/network drop** | **TESTED** |
 | **AI Adversarial Grounding Suite** | Simulation Suite | `pytest tests/test_ai_adversarial_validation.py` | `0` | **13 / 13 adversarial tests passed** | **TESTED** |
 | **VM Fenn Operational Baseline** | Host Ubuntu 24.04 | `systemctl is-active aegis-backend aegis-collector` | `0` | **Both services ACTIVE** | **VERIFIED** |
@@ -49,6 +50,15 @@ Seluruh rangkaian pengujian perangkat lunak, simulasi kegagalan, verifikasi priv
 ### 2.4 Cloud SSoT Failure Modes (tests/test_cloud_ssot_failure_modes.py)
 - **test_fail_loud_when_cloud_fails_in_ssot_mode:** Memastikan seluruh metode repository melempar `RuntimeError` saat Cloud gagal, tanpa silent fallback ke SQLite. [PASSED]
 - **test_collector_cursor_retention_on_transmission_failure:** Memastikan collector tidak memajukan kursor saat transmisi gagal. [PASSED]
+
+### 2.5 Mirror Durability & Crash Recovery Suite (tests/test_mirror_durability_and_recovery.py)
+- **test_crash_point_1_pre_write_failure_closed:** Menolak penulisan dengan RuntimeError tanpa residu lokal saat Cloud gagal sebelum tulis. [PASSED]
+- **test_crash_point_3_process_crash_before_mirror_catchup:** Worker rekonsiliasi startup memindai Cloud dan mengisi SQLite jika terjadi crash proses pasca-tulis Cloud. [PASSED]
+- **test_crash_points_4_to_6_mirror_failure_persists_payload:** Kegagalan mirror ke SQLite menyimpan serialisasi payload lengkap pada kolom `mirror_sync_log.payload`. [PASSED]
+- **test_crash_point_7_backend_restart_replays_from_payload:** Replay worker memulihkan seluruh antrean gagal langsung dari payload lokal tanpa dependensi jaringan Cloud. [PASSED]
+- **test_crash_point_8_concurrent_replay_and_mirror:** Eksekusi replay bersamaan dengan penulisan mirror baru berlangsung aman di bawah WAL mode SQLite. [PASSED]
+- **test_crash_point_9_sqlite_disk_full_resilience:** Backend tetap melayani penulisan primer Cloud SSoT secara normal saat disk lokal SQLite penuh. [PASSED]
+- **test_crash_point_10_health_check_state_transitions:** Health check mengekspos `failover_state`, `mirror_queue_depth`, dan `oldest_pending_age_seconds`. [PASSED]
 
 ---
 
@@ -112,3 +122,4 @@ dist/assets/index-BjOhj6Ac.js                                   356.22 kB │ gz
 ✓ built in 7.33s
 ```
 *Hasil:* 0 kesalahan tipe TypeScript, bundle aset produksi terbuat secara optimal.
+

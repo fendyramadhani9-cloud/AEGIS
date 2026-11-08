@@ -22,13 +22,13 @@ Prosedur rollback wajib segera diinisiasi jika salah satu kondisi berikut terjad
 
 Gunakan skenario ini jika Supabase Cloud masih dapat diakses secara read-only atau intermiten, sehingga data yang sempat ditulis ke Cloud saat masa cutover dapat disinkronkan kembali ke SQLite.
 
-### Langkah 1: Tarik Perubahan Data dari Cloud ke SQLite (Reverse Sync)
+### Langkah 1: Tarik Perubahan Data dari Cloud ke SQLite (Reverse Sync Terproteksi)
 ```bash
 cd /home/ubuntu/aegis
-python3 scripts/sync_cloud_to_sqlite.py --sync --db-path /home/ubuntu/aegis/data/aegis_incidents.db
+python3 scripts/sync_cloud_to_sqlite.py --sync --confirm
 ```
-**Expected Output:** `>>> COMMIT SUCCESSFUL: X records synchronized into SQLite. <<<`.  
-*Jaminan:* Tidak ada insiden atau finding baru yang tertinggal di Cloud.
+**Expected Output:** `[SUCCESS] Reverse sync completed successfully.`  
+*Jaminan:* Snapshot backup dibuat otomatis di `data/backups/presync_backup_*.db` dengan verifikasi SHA-256. Sinkronisasi berjalan dalam urutan topological DAG dan transaksi ACID. Tidak ada data yang hilang atau foreign key yang rusak.
 
 ### Langkah 2: Kembalikan Konfigurasi Lingkungan (`.env`) ke Hybrid
 ```bash
@@ -92,3 +92,4 @@ python3 scripts/reconcile_delta_cutover.py --sync-delta --confirm-mutation --db-
 | 2. Restart Layanan | `systemctl restart aegis-backend` | 4.8 detik |
 | 3. Verifikasi HTTP | `curl /api/health` | 0.2 detik |
 | 4. Total Waktu Rollback | — | **~6.0 detik (SLA < 180s)** |
+

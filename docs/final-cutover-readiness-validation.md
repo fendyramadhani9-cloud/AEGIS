@@ -220,3 +220,4 @@ Jika Project Owner memberikan instruksi persetujuan cutover produksi, pekerjaan 
 3. Pembaruan file `/home/ubuntu/aegis/.env` menjadi `AEGIS_DATABASE_MODE=cloud_ssot` dan `AEGIS_STORAGE_BACKEND=supabase`.
 4. Eksekusi `sudo systemctl restart aegis-backend.service` (downtime API ~5-10 detik; collector uninterrupted).
 5. Verifikasi live smoke test dan pemantauan telemetri streaming.
+

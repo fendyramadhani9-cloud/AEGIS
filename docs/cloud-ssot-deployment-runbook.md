@@ -110,3 +110,4 @@ Jalankan verifikasi fungsional segera setelah restart:
 
 - **Kondisi GO:** Semua 4 verifikasi pasca-cutover bernilai sukses dalam waktu < 2 menit sejak restart.
 - **Kondisi ABORT & ROLLBACK:** Terjadi kegagalan koneksi Cloud, health check berstatus degraded, atau API tidak merespon dalam waktu > 30 detik.
+

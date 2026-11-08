@@ -25,6 +25,12 @@ class DatabaseHealthResponse(BaseModel):
     checked_at: str
     message: str
     latency_ms: Optional[float] = None
+    database_mode: Optional[str] = None
+    authoritative_source: Optional[str] = None
+    mirror_queue_depth: Optional[int] = None
+    oldest_pending_age_seconds: Optional[float] = None
+    last_successful_mirror_at: Optional[str] = None
+    failover_state: Optional[str] = None
 
 
 class SystemStatusResponse(BaseModel):

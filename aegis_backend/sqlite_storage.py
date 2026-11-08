@@ -304,13 +304,14 @@ class SqliteIncidentStore:
 
                 conn.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION};")
 
-                # Mirror status tracking table for Cloud-to-SQLite synchronization auditing
+                # Mirror status tracking table for Cloud-to-SQLite synchronization auditing with durable payload
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS mirror_sync_log (
                         id TEXT PRIMARY KEY,
                         entity_type TEXT NOT NULL,
                         entity_id TEXT NOT NULL,
                         action TEXT NOT NULL,
+                        payload TEXT,
                         status TEXT NOT NULL,
                         retry_count INTEGER NOT NULL DEFAULT 0,
                         error_message TEXT,
@@ -319,6 +320,10 @@ class SqliteIncidentStore:
                     );
                 """)
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_mirror_status ON mirror_sync_log(status);")
+                try:
+                    conn.execute("ALTER TABLE mirror_sync_log ADD COLUMN payload TEXT;")
+                except Exception:
+                    pass
                 conn.commit()
 
     def log_mirror_attempt(
@@ -329,39 +334,71 @@ class SqliteIncidentStore:
         status: str,
         retry_count: int = 0,
         error_message: Optional[str] = None,
+        payload: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Records the status of a Cloud-to-SQLite mirror synchronization attempt."""
+        """Records the status of a Cloud-to-SQLite mirror synchronization attempt with durable payload."""
         now_iso = datetime.now(timezone.utc).isoformat()
         log_id = f"LOG-{entity_type}-{entity_id}"
+        payload_json = json.dumps(payload) if payload else None
         with self._lock:
             try:
                 with self._connection() as conn:
                     conn.execute("""
-                        INSERT INTO mirror_sync_log (id, entity_type, entity_id, action, status, retry_count, error_message, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO mirror_sync_log (id, entity_type, entity_id, action, payload, status, retry_count, error_message, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
+                            action = excluded.action,
+                            payload = COALESCE(excluded.payload, mirror_sync_log.payload),
                             status = excluded.status,
                             retry_count = excluded.retry_count,
                             error_message = excluded.error_message,
                             updated_at = excluded.updated_at;
-                    """, (log_id, entity_type, entity_id, action, status, retry_count, error_message, now_iso, now_iso))
+                    """, (log_id, entity_type, entity_id, action, payload_json, status, retry_count, error_message, now_iso, now_iso))
                     conn.commit()
             except Exception as e:
                 logger.warning("Failed to record mirror sync log: %s", e)
 
     def get_mirror_sync_stats(self) -> Dict[str, Any]:
-        """Returns aggregated mirror status counts and last failed records."""
+        """Returns aggregated mirror status counts, queue depth, latency, and last failed records."""
         with self._lock:
             with self._connection() as conn:
                 cur = conn.execute("SELECT status, count(*) FROM mirror_sync_log GROUP BY status;")
                 counts = {r[0]: r[1] for r in cur.fetchall()}
                 cur = conn.execute("SELECT entity_type, entity_id, error_message, updated_at FROM mirror_sync_log WHERE status != 'synced' ORDER BY updated_at DESC LIMIT 10;")
                 failures = [dict(r) for r in cur.fetchall()]
+                
+                # Observability calculations
+                cur = conn.execute("SELECT MIN(created_at) FROM mirror_sync_log WHERE status != 'synced';")
+                oldest_row = cur.fetchone()
+                oldest_pending_age_seconds = None
+                if oldest_row and oldest_row[0]:
+                    try:
+                        oldest_dt = datetime.fromisoformat(oldest_row[0])
+                        oldest_pending_age_seconds = round((datetime.now(timezone.utc) - oldest_dt).total_seconds(), 1)
+                    except Exception:
+                        pass
+
+                cur = conn.execute("SELECT MAX(updated_at) FROM mirror_sync_log WHERE status = 'synced';")
+                last_synced_row = cur.fetchone()
+                last_successful_mirror_at = last_synced_row[0] if last_synced_row else None
+
+                cur = conn.execute("SELECT MAX(updated_at) FROM mirror_sync_log WHERE status != 'synced';")
+                last_failed_row = cur.fetchone()
+                last_failed_mirror_at = last_failed_row[0] if last_failed_row else None
+
+                pending_cnt = counts.get("pending_retry", 0)
+                failed_cnt = counts.get("failed", 0)
+                queue_depth = pending_cnt + failed_cnt
+
                 return {
                     "total_logs": sum(counts.values()),
                     "synced": counts.get("synced", 0),
-                    "failed": counts.get("failed", 0),
-                    "pending_retry": counts.get("pending_retry", 0),
+                    "failed": failed_cnt,
+                    "pending_retry": pending_cnt,
+                    "queue_depth": queue_depth,
+                    "oldest_pending_age_seconds": oldest_pending_age_seconds,
+                    "last_successful_mirror_at": last_successful_mirror_at,
+                    "last_failed_mirror_at": last_failed_mirror_at,
                     "recent_failures": failures,
                 }
 
@@ -370,7 +407,7 @@ class SqliteIncidentStore:
         with self._lock:
             with self._connection() as conn:
                 cur = conn.execute(
-                    "SELECT id, entity_type, entity_id, action, status, retry_count, error_message, created_at, updated_at "
+                    "SELECT id, entity_type, entity_id, action, payload, status, retry_count, error_message, created_at, updated_at "
                     "FROM mirror_sync_log WHERE status != 'synced';"
                 )
                 return [dict(r) for r in cur.fetchall()]
