@@ -134,3 +134,4 @@ if __name__ == "__main__":
     reconciler = CloudSqliteReconciler(sqlite_db_path=args.sqlite_path, fix_drift=args.fix)
     rep = reconciler.run()
     print(json.dumps(rep, indent=2))
+

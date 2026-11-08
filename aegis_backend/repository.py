@@ -242,6 +242,11 @@ class BaseAegisRepository(ABC):
         """Returns statistics and logs of Cloud-to-SQLite mirror synchronization."""
         pass
 
+    @abstractmethod
+    def replay_failed_mirrors(self) -> Dict[str, Any]:
+        """Replays any failed mirror operations to local SQLite replica."""
+        pass
+
 
 
 class SupabaseRepository(BaseAegisRepository):
@@ -1146,6 +1151,50 @@ class SupabaseRepository(BaseAegisRepository):
         """Returns statistics and logs of Cloud-to-SQLite mirror synchronization."""
         return self.sqlite_store.get_mirror_sync_stats()
 
+    def replay_failed_mirrors(self) -> Dict[str, Any]:
+        """
+        Scans mirror_sync_log for failed synchronization attempts and replays them
+        from Supabase Cloud authoritative state to the local SQLite replica.
+        """
+        failed_logs = self.sqlite_store.get_failed_mirror_logs()
+        replayed = 0
+        still_failed = 0
+        for log in failed_logs:
+            entity_type = log.get("entity_type")
+            entity_id = log.get("entity_id")
+            action = log.get("action")
+            try:
+                if entity_type == "incident":
+                    inc = self.get_incident_by_id(entity_id)
+                    if inc:
+                        self.sqlite_store.upsert_incident(
+                            incident_data=inc,
+                            alert_ids=inc.get("alert_ids", []),
+                            risk_factors=inc.get("risk_factors", []),
+                        )
+                elif entity_type == "ai_analysis":
+                    analysis = self.get_ai_analysis(entity_id)
+                    if analysis:
+                        self.sqlite_store.save_ai_analysis(entity_id, analysis)
+                elif entity_type == "incident_status":
+                    inc = self.get_incident_by_id(entity_id)
+                    if inc:
+                        self.sqlite_store.update_incident_status(entity_id, inc.get("status", "open"))
+
+                self.sqlite_store.log_mirror_attempt(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    action=action,
+                    status="synced",
+                    retry_count=log.get("retry_count", 0) + 1,
+                )
+                replayed += 1
+            except Exception as e:
+                still_failed += 1
+                logger.warning("Replay mirror failed for %s:%s: %s", entity_type, entity_id, e)
+
+        return {"total_checked": len(failed_logs), "replayed": replayed, "still_failed": still_failed}
+
 
 
 class MockAegisRepository(BaseAegisRepository):
@@ -1951,6 +2000,50 @@ class MockAegisRepository(BaseAegisRepository):
     def get_mirror_sync_stats(self) -> Dict[str, Any]:
         """Returns statistics and logs of Cloud-to-SQLite mirror synchronization."""
         return self.sqlite_store.get_mirror_sync_stats()
+
+    def replay_failed_mirrors(self) -> Dict[str, Any]:
+        """
+        Scans mirror_sync_log for failed synchronization attempts and replays them
+        from Supabase Cloud authoritative state to the local SQLite replica.
+        """
+        failed_logs = self.sqlite_store.get_failed_mirror_logs()
+        replayed = 0
+        still_failed = 0
+        for log in failed_logs:
+            entity_type = log.get("entity_type")
+            entity_id = log.get("entity_id")
+            action = log.get("action")
+            try:
+                if entity_type == "incident":
+                    inc = self.get_incident_by_id(entity_id)
+                    if inc:
+                        self.sqlite_store.upsert_incident(
+                            incident_data=inc,
+                            alert_ids=inc.get("alert_ids", []),
+                            risk_factors=inc.get("risk_factors", []),
+                        )
+                elif entity_type == "ai_analysis":
+                    analysis = self.get_ai_analysis(entity_id)
+                    if analysis:
+                        self.sqlite_store.save_ai_analysis(entity_id, analysis)
+                elif entity_type == "incident_status":
+                    inc = self.get_incident_by_id(entity_id)
+                    if inc:
+                        self.sqlite_store.update_incident_status(entity_id, inc.get("status", "open"))
+
+                self.sqlite_store.log_mirror_attempt(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    action=action,
+                    status="synced",
+                    retry_count=log.get("retry_count", 0) + 1,
+                )
+                replayed += 1
+            except Exception as e:
+                still_failed += 1
+                logger.warning("Replay mirror failed for %s:%s: %s", entity_type, entity_id, e)
+
+        return {"total_checked": len(failed_logs), "replayed": replayed, "still_failed": still_failed}
 
 
 

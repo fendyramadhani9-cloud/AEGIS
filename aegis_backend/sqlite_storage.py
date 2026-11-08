@@ -365,6 +365,16 @@ class SqliteIncidentStore:
                     "recent_failures": failures,
                 }
 
+    def get_failed_mirror_logs(self) -> List[Dict[str, Any]]:
+        """Returns all mirror sync records that have not successfully synced."""
+        with self._lock:
+            with self._connection() as conn:
+                cur = conn.execute(
+                    "SELECT id, entity_type, entity_id, action, status, retry_count, error_message, created_at, updated_at "
+                    "FROM mirror_sync_log WHERE status != 'synced';"
+                )
+                return [dict(r) for r in cur.fetchall()]
+
     # =========================================================================
     # INCIDENT OPERATIONS
     # =========================================================================

@@ -270,3 +270,4 @@ if __name__ == "__main__":
     exporter = CloudToSqliteExporter(sqlite_db_path=args.sqlite_path, dry_run=args.dry_run)
     rep = exporter.run()
     print(json.dumps(rep, indent=2))
+

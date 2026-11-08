@@ -68,3 +68,4 @@ if __name__ == "__main__":
     target_path = sys.argv[1] if len(sys.argv) > 1 else local_db
     if target_path != local_db:
         target_stats = audit_db(target_path, "TARGET SQLITE")
+

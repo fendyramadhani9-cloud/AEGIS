@@ -7,6 +7,7 @@ and repository dependency injection.
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 import logging
 from aegis_backend.config import settings
 from aegis_backend.schemas import ErrorResponse
@@ -19,6 +20,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("aegis_backend")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager to run startup and shutdown procedures."""
+    logger.info("Initializing AEGIS Backend in database mode: %s", settings.database_mode)
+    if settings.database_mode in ("cloud_ssot", "unified_cloud"):
+        try:
+            from aegis_backend.dependencies import get_repository
+            repo = get_repository()
+            if hasattr(repo, "replay_failed_mirrors"):
+                res = repo.replay_failed_mirrors()
+                if res.get("replayed", 0) > 0:
+                    logger.info("Startup mirror replay recovered %d records: %s", res.get("replayed"), res)
+        except Exception as e:
+            logger.warning("Startup mirror replay encountered an error: %s", e)
+    yield
+    logger.info("Shutting down AEGIS Backend...")
+
 # Create FastAPI app
 app = FastAPI(
     title="AEGIS Security Monitoring & Incident Investigation Backend",
@@ -26,6 +44,7 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # CORS Middleware (Allows frontend development on Vite default ports)

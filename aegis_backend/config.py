@@ -48,6 +48,10 @@ class Settings:
         self.database_mode: str = os.getenv("AEGIS_DATABASE_MODE", "hybrid").lower()
 
     @property
+    def aegis_database_mode(self) -> str:
+        return self.database_mode
+
+    @property
     def is_supabase_configured(self) -> bool:
         """Returns True only if both URL and Service Role Key are provided."""
         return bool(

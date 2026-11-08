@@ -42,3 +42,4 @@ with open(out_path, "w", encoding="utf-8") as f:
 
 print(f"\nSuccessfully exported {total} operational records to {out_path}")
 conn.close()
+
