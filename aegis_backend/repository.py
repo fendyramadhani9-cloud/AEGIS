@@ -1407,7 +1407,7 @@ class SupabaseRepository(BaseAegisRepository):
             self.sqlite_store.record_catch_up_watermark("ai_analyses", len(analyses), caught_up, status="completed")
 
             # 5. Catch up incident status history
-            histories = self._fetch_all_paginated("incident_status_history", order_col="changed_at", batch_size=batch_size)
+            histories = self._fetch_all_paginated("incident_status_history", order_col="transitioned_at", batch_size=batch_size)
             scanned += len(histories)
             for hist in histories:
                 self.sqlite_store.upsert_incident_status_history(hist)

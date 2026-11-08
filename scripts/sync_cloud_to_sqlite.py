@@ -95,9 +95,9 @@ TABLE_POLICIES = {
     "incident_status_history": {
         "pk": "id",
         "parent": "incident_id",
-        "immutable_cols": {"id", "incident_id", "old_status", "new_status", "changed_at", "changed_by", "reason"},
+        "immutable_cols": {"id", "incident_id", "old_status", "new_status", "transitioned_at", "operator", "note"},
         "updatable_cols": set(),
-        "ts_col": "changed_at",
+        "ts_col": "transitioned_at",
         "fallback_ts_col": None,
     },
 }
