@@ -67,31 +67,74 @@ def test_anon_role_rejected() -> bool:
 
 def test_authenticated_role_rejected() -> bool:
     print("\n=================================================================")
-    print("2. Testing 'authenticated' Role Separation (Least-Privilege Audit)")
+    print("2. Testing 'authenticated' Role (Real Valid JWT Session Audit)")
     print("=================================================================")
-    # Simulate an authenticated JWT header that is not service_role
-    dummy_auth_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6InRlc3QtdXNlciJ9.signature"
-    headers = {
-        "apikey": dummy_auth_token,
-        "Authorization": f"Bearer {dummy_auth_token}",
-    }
+    from supabase import create_client
+    admin_client = create_client(SUPABASE_URL, SERVICE_KEY)
+    auth_client = create_client(SUPABASE_URL, SERVICE_KEY)
+
+    test_uid = uuid.uuid4().hex[:8]
+    test_email = f"audit_sec_test_{test_uid}@aegis-privilege-audit.internal"
+    test_pwd = f"S3cur3!_{uuid.uuid4().hex}#Z"
+    user_id = None
     all_passed = True
-    for t in ["incidents", "security_check_runs", "telemetry_events"]:
-        url = f"{SUPABASE_URL}/rest/v1/{t}?select=*"
-        resp = httpx.get(url, headers=headers)
-        if resp.status_code in (401, 403):
-            print(f" [PASS] 'authenticated' read on '{t}': Blocked with HTTP {resp.status_code}")
+
+    try:
+        # 1. Dynamically provision temporary authenticated user
+        created = admin_client.auth.admin.create_user({
+            "email": test_email,
+            "password": test_pwd,
+            "email_confirm": True,
+        })
+        user_id = created.user.id
+        print(" [SETUP] Temporary test user created for authenticated audit.")
+
+        # 2. Authenticate to obtain REAL valid user JWT
+        login_res = auth_client.auth.sign_in_with_password({
+            "email": test_email,
+            "password": test_pwd,
+        })
+        real_jwt = login_res.session.access_token
+        print(" [SETUP] Real valid JWT obtained from Supabase Auth service (role: authenticated).")
+
+        headers = {
+            "apikey": SERVICE_KEY,
+            "Authorization": f"Bearer {real_jwt}",
+        }
+
+        # 3. Test operational tables with real authenticated JWT
+        for t in OPERATIONAL_TABLES:
+            url = f"{SUPABASE_URL}/rest/v1/{t}?select=*"
+            resp = httpx.get(url, headers=headers)
+            # Expect HTTP 403 Forbidden with PostgreSQL error 42501 (permission denied for table)
+            if resp.status_code == 403 and resp.json().get("code") == "42501":
+                print(f" [PASS] 'authenticated' read on '{t}': Denied by DAC/RLS (HTTP 403, PG 42501)")
+            elif resp.status_code in (401, 403):
+                print(f" [PASS] 'authenticated' read on '{t}': Blocked with HTTP {resp.status_code}")
+            else:
+                print(f" [FAIL] 'authenticated' read on '{t}': UNEXPECTED {resp.status_code} ({resp.text[:80]})")
+                all_passed = False
+
+        # 4. Test RPC execution with real authenticated JWT
+        rpc_url = f"{SUPABASE_URL}/rest/v1/rpc/fn_ingest_alert_with_evidence"
+        resp_rpc = httpx.post(rpc_url, headers=headers, json={"p_alerts": [], "p_evidence": []})
+        if resp_rpc.status_code in (401, 403):
+            print(f" [PASS] 'authenticated' RPC execution: Denied by DAC/RLS (HTTP {resp_rpc.status_code})")
         else:
-            print(f" [FAIL] 'authenticated' read on '{t}': UNEXPECTED {resp.status_code}")
+            print(f" [FAIL] 'authenticated' RPC: UNEXPECTED {resp_rpc.status_code}")
             all_passed = False
 
-    rpc_url = f"{SUPABASE_URL}/rest/v1/rpc/fn_ingest_alert_with_evidence"
-    resp_rpc = httpx.post(rpc_url, headers=headers, json={"p_alerts": [], "p_evidence": []})
-    if resp_rpc.status_code in (401, 403):
-        print(f" [PASS] 'authenticated' RPC execution: Blocked with HTTP {resp_rpc.status_code}")
-    else:
-        print(f" [FAIL] 'authenticated' RPC: UNEXPECTED {resp_rpc.status_code}")
+    except Exception as e:
+        print(f" [ERROR] Authenticated test execution error: {e}")
         all_passed = False
+    finally:
+        # 5. Clean up temporary test user
+        if user_id:
+            try:
+                admin_client.auth.admin.delete_user(user_id)
+                print(" [CLEANUP] Temporary test user deleted cleanly from Supabase Auth.")
+            except Exception as e:
+                print(f" [WARN] Failed to clean up test user {user_id}: {e}")
 
     return all_passed
 

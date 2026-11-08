@@ -87,27 +87,17 @@ def test_crash_point_3_crash_after_cloud_ack_before_mirror(monkeypatch):
             "risk_factors": [],
         }
 
-        # Mock Cloud table calls
-        mock_order = MagicMock()
-        mock_limit = MagicMock()
-        mock_limit.execute.return_value = MagicMock(data=[{"id": "INC-ORPHAN-CLOUD-01"}])
-        mock_order.limit.return_value = mock_limit
-        mock_select = MagicMock()
-        mock_select.order.return_value = mock_order
-
-        mock_sc_limit = MagicMock()
-        mock_sc_limit.execute.return_value = MagicMock(data=[])
-        mock_sc_order = MagicMock()
-        mock_sc_order.limit.return_value = mock_sc_limit
-        mock_sc_select = MagicMock()
-        mock_sc_select.order.return_value = mock_sc_order
-
         def table_router(t_name):
             t_mock = MagicMock()
+            q = MagicMock()
+            q.select.return_value = q
+            q.order.return_value = q
+            q.eq.return_value = q
             if t_name == "incidents":
-                t_mock.select.return_value = mock_select
-            elif t_name == "security_check_runs":
-                t_mock.select.return_value = mock_sc_select
+                q.range.return_value.execute.return_value.data = [cloud_inc]
+            else:
+                q.range.return_value.execute.return_value.data = []
+            t_mock.select.return_value = q
             return t_mock
 
         mock_client.table.side_effect = table_router

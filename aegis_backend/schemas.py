@@ -31,6 +31,19 @@ class DatabaseHealthResponse(BaseModel):
     oldest_pending_age_seconds: Optional[float] = None
     last_successful_mirror_at: Optional[str] = None
     failover_state: Optional[str] = None
+    state_machine_state: Optional[str] = None
+    is_mutation_allowed: Optional[bool] = None
+    is_read_allowed: Optional[bool] = None
+    state_reason: Optional[str] = None
+
+
+class ReadinessResponse(BaseModel):
+    ready: bool
+    status: str
+    state: str
+    is_mutation_allowed: bool
+    authoritative_database: str
+    reason: str
 
 
 class SystemStatusResponse(BaseModel):

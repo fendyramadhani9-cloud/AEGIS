@@ -55,9 +55,28 @@ curl -s http://127.0.0.1:8000/api/incidents | jq '.total'
 
 Gunakan skenario ini jika Supabase Cloud mengalami pemadaman total (*total outage*) atau kabel jaringan putus, di mana backend tidak dapat menunggu proses sinkronisasi Cloud.
 
-### Langkah 1: Langsung Ubah Mode ke Hybrid di VM
+> [!CAUTION]
+> **Peringatan Integritas:** Mengubah `.env` ke `hybrid` tanpa memeriksa integritas SQLite lokal dapat menyebabkan inkonsistensi. Sebelum memotong mode ke Hybrid, verifikasi integritas SQLite dan antrean mirror durable.
+
+### Langkah 1: Verifikasi Integritas SQLite Lokal & Antrean Mirror
 ```bash
 ssh ubuntu@192.168.193.129
+cd /home/ubuntu/aegis
+python3 -c "from aegis_backend.sqlite_storage import SqliteIncidentStore; s = SqliteIncidentStore('data/aegis_incidents.db'); ok, m = s.check_integrity(); assert ok, m; print('SQLite integrity: OK')"
+```
+
+### Langkah 2: Ubah Mode ke Hybrid di VM
+```bash
+sed -i 's/^AEGIS_DATABASE_MODE=.*/AEGIS_DATABASE_MODE=hybrid/' /home/ubuntu/aegis/.env
+sed -i 's/^AEGIS_STORAGE_BACKEND=.*/AEGIS_STORAGE_BACKEND=sqlite/' /home/ubuntu/aegis/.env
+sudo systemctl restart aegis-backend.service
+```
+
+### Langkah 3: Verifikasi Kesiapan Layanan (Readiness Gate)
+```bash
+curl -s http://127.0.0.1:8000/api/health/ready | jq .
+# Expected: { "ready": true, "status": "ready", "state": "HYBRID", "authoritative_database": "sqlite_local" }
+```
 sed -i 's/^AEGIS_DATABASE_MODE=.*/AEGIS_DATABASE_MODE=hybrid/' /home/ubuntu/aegis/.env
 sed -i 's/^AEGIS_STORAGE_BACKEND=.*/AEGIS_STORAGE_BACKEND=hybrid/' /home/ubuntu/aegis/.env
 ```

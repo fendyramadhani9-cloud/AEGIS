@@ -14,11 +14,12 @@ Seluruh rangkaian pengujian perangkat lunak, simulasi kegagalan, verifikasi priv
 
 | Kategori Pengujian | Lingkungan | Command Eksekusi | Exit Code | Hasil Pengujian | Status Klaim |
 | :--- | :--- | :--- | :---: | :---: | :---: |
-| **Backend Full Test Suite** | Workstation Python 3.13 | `.venv\Scripts\python -m pytest` | `0` | **203 / 203 PASSED** | **TESTED** |
-| **Frontend TypeScript & Vite Build** | Workstation Node.js | `npm run build` (in `dashboard/`) | `0` | **Built in 1.94s (0 errors)** | **TESTED** |
-| **Cloud RLS & Privilege Verification** | Live Supabase Cloud | `python scripts/verify_supabase_privileges_live.py` | `0` | **12/12 tables + RPC verified** | **VERIFIED** |
-| **Deep Delta Reconciliation Audit** | SQLite vs Supabase | `python scripts/reconcile_delta_cutover.py` | `0` | **0 FK violations, 136 records matched** | **VERIFIED** |
-| **Reverse Sync Hardening (Cloud -> SQLite)** | SQLite vs Supabase | `python scripts/sync_cloud_to_sqlite.py` | `0` | **Pre-sync SHA256 backup + DAG sync** | **TESTED** |
+| **Backend Full Test Suite** | Workstation Python 3.13 | `.venv\Scripts\python -m pytest` | `0` | **213 / 213 PASSED** | **TESTED** |
+| **Frontend TypeScript & Vite Build** | Workstation Node.js | `npm run build` (in `dashboard/`) | `0` | **Built in 2.13s (0 errors)** | **TESTED** |
+| **Cloud RLS & Privilege Verification** | Live Supabase Cloud | `python scripts/verify_supabase_privileges_live.py` | `0` | **12/12 tables + RPC verified (Real JWT)** | **VERIFIED** |
+| **Deep Delta Reconciliation Audit** | SQLite vs Supabase | `python scripts/audit_post_stage1_reconciliation.py`| `0` | **0 FK violations, 136 records matched** | **VERIFIED** |
+| **Reverse Sync Hardening (Cloud -> SQLite)** | SQLite vs Supabase | `python scripts/sync_cloud_to_sqlite.py` | `0` | **Per-table conflict matrix + DAG sync** | **TESTED** |
+| **Safety Gate & Recovery Proof Suite** | Fail-Injection Suite | `pytest tests/test_safety_gate_and_recovery_proof.py`| `0` | **10 / 10 safety gate scenarios passed** | **TESTED** |
 | **Mirror Durability & Crash Recovery** | Fail-Injection Suite | `pytest tests/test_mirror_durability_and_recovery.py` | `0` | **7 / 7 crash scenarios passed (10 pts)** | **TESTED** |
 | **Collector Two-Phase Commit Test** | Simulation Suite | `pytest tests/test_collector.py` | `0` | **Cursor retained on 500/network drop** | **TESTED** |
 | **AI Adversarial Grounding Suite** | Simulation Suite | `pytest tests/test_ai_adversarial_validation.py` | `0` | **13 / 13 adversarial tests passed** | **TESTED** |
@@ -59,6 +60,18 @@ Seluruh rangkaian pengujian perangkat lunak, simulasi kegagalan, verifikasi priv
 - **test_crash_point_8_concurrent_replay_and_mirror:** Eksekusi replay bersamaan dengan penulisan mirror baru berlangsung aman di bawah WAL mode SQLite. [PASSED]
 - **test_crash_point_9_sqlite_disk_full_resilience:** Backend tetap melayani penulisan primer Cloud SSoT secara normal saat disk lokal SQLite penuh. [PASSED]
 - **test_crash_point_10_health_check_state_transitions:** Health check mengekspos `failover_state`, `mirror_queue_depth`, dan `oldest_pending_age_seconds`. [PASSED]
+
+### 2.6 Safety Gate & Recovery Proof Suite (tests/test_safety_gate_and_recovery_proof.py)
+- **test_catch_up_multi_page_pagination_over_1000_records:** Paginasi Cloud > 1.000 record tanpa batas record hilang. [PASSED]
+- **test_catch_up_crash_midway_and_resumability:** Resumability catch-up pasca-crash proses di tengah jalan. [PASSED]
+- **test_catch_up_multi_tier_relational_ordering:** Ingestion DAG bertingkat aman dari FK constraint violation. [PASSED]
+- **test_catch_up_substantive_content_divergence:** Rekonsiliasi perbedaan konten substantif (Cloud newer -> SQLite updated). [PASSED]
+- **test_catch_up_cloud_timeout_transitions_to_recovery_required:** Cloud timeout saat catch-up memicu transisi ke `RECOVERY_REQUIRED`. [PASSED]
+- **test_state_machine_transition_lifecycle:** Siklus hidup transisi state machine dan larangan transisi ilegal. [PASSED]
+- **test_traffic_gate_middleware_blocks_mutations_when_not_ready:** Traffic gate middleware menolak mutasi HTTP dengan 503 saat state tidak operasional. [PASSED]
+- **test_reverse_sync_conflict_matrix_and_report_generation:** Deteksi konflik reverse-sync timestamp, rollback atomik, dan dump laporan JSON. [PASSED]
+- **test_catch_up_sqlite_disk_full_transitions_to_recovery_required:** Kegagalan I/O disk lokal saat catch-up mengunci sistem ke `RECOVERY_REQUIRED`. [PASSED]
+- **test_hybrid_failover_isolated_simulation:** Simulasi end-to-end prosedur failover ke Hybrid SQLite. [PASSED]
 
 ---
 

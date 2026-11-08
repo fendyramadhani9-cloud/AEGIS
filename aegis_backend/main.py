@@ -12,6 +12,7 @@ import logging
 from aegis_backend.config import settings
 from aegis_backend.schemas import ErrorResponse
 from aegis_backend.routers import health, system, hosts, alerts, telemetry, security_checker, incidents
+from aegis_backend.state_machine import state_machine, DatabaseState
 
 # Setup logging
 logging.basicConfig(
@@ -39,8 +40,18 @@ async def lifespan(app: FastAPI):
                 catch_res = repo.catch_up_unmirrored_from_cloud()
                 if catch_res.get("caught_up", 0) > 0:
                     logger.info("Startup mirror catch-up recovered %d unmirrored records: %s", catch_res.get("caught_up"), catch_res)
+            
+            state_machine.transition_to(DatabaseState.CLOUD_SSoT, "Startup catch-up and mirror replay successfully completed", force=True)
+            state_machine.set_catch_up_completed(True)
         except Exception as e:
-            logger.warning("Startup mirror replay encountered an error: %s", e)
+            logger.critical("Startup consistency catch-up encountered fatal error: %s", e)
+            state_machine.transition_to(
+                DatabaseState.RECOVERY_REQUIRED,
+                reason=f"Startup catch-up failed: {e}",
+                error_message=str(e),
+                force=True,
+            )
+            state_machine.set_catch_up_completed(False)
 
         # 2. Continuous background worker for mirror recovery (every 60s)
         async def _periodic_mirror_worker():
@@ -64,6 +75,8 @@ async def lifespan(app: FastAPI):
 
         import asyncio
         mirror_worker_task = asyncio.create_task(_periodic_mirror_worker())
+    else:
+        state_machine.transition_to(DatabaseState.HYBRID, "Running in local Hybrid mode", force=True)
 
     yield
 
@@ -78,13 +91,36 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="AEGIS Security Monitoring & Incident Investigation Backend",
-    description="Official API gateway for AEGIS Linux Security Monitoring Platform.",
+    title="AEGIS Backend API",
+    description="AI-Powered Linux Security Monitoring and Incident Investigation API",
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+@app.middleware("http")
+async def enforce_database_state_gate(request: Request, call_next):
+    """
+    Traffic gate enforcing strict fail-closed and consistency:
+    Rejects mutating requests (POST, PUT, PATCH, DELETE) with HTTP 503 if the database
+    is in a non-operational or recovery-required state.
+    """
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        path = request.url.path
+        # Allow health checks and internal test overrides
+        if not path.startswith("/api/health"):
+            if not state_machine.is_mutation_allowed():
+                return JSONResponse(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    content={
+                        "error": "Database Mutation Rejected",
+                        "detail": f"System is currently in '{state_machine.current_state.value}' state. Mutations are suspended.",
+                        "state": state_machine.current_state.value,
+                        "reason": state_machine.reason,
+                        "authoritative_database": state_machine.get_authoritative_database(),
+                    },
+                )
+    return await call_next(request)
+
 
 # CORS Middleware (Allows frontend development on Vite default ports)
 app.add_middleware(

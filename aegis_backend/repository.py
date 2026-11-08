@@ -14,6 +14,7 @@ from supabase import create_client, Client
 from aegis_backend.config import settings
 from aegis_backend.sanitizer import TelemetrySanitizer
 from aegis_backend.sqlite_storage import SqliteIncidentStore
+from aegis_backend.state_machine import state_machine, DatabaseState
 
 logger = logging.getLogger(__name__)
 
@@ -259,8 +260,8 @@ class BaseAegisRepository(ABC):
         pass
 
     @abstractmethod
-    def catch_up_unmirrored_from_cloud(self, limit: int = 50) -> Dict[str, Any]:
-        """Scans Cloud for any records created before process crash and mirrors to SQLite."""
+    def catch_up_unmirrored_from_cloud(self, batch_size: int = 100) -> Dict[str, Any]:
+        """Scans Cloud with pagination for any records and reconciles them into SQLite."""
         pass
 
 
@@ -1276,61 +1277,157 @@ class SupabaseRepository(BaseAegisRepository):
 
         return {"total_checked": len(failed_logs), "replayed": replayed, "still_failed": still_failed}
 
-    def catch_up_unmirrored_from_cloud(self, limit: int = 50) -> Dict[str, Any]:
+    def _fetch_all_paginated(
+        self,
+        table_name: str,
+        order_col: Optional[str] = "created_at",
+        batch_size: int = 100,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetches all rows from a Supabase table with robust pagination."""
+        all_rows: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            query = self.client.table(table_name).select("*")
+            if filters:
+                for k, v in filters.items():
+                    query = query.eq(k, v)
+            if order_col:
+                query = query.order(order_col, desc=False)
+            res = query.range(offset, offset + batch_size - 1).execute()
+            batch = res.data or []
+            all_rows.extend(batch)
+            if len(batch) < batch_size:
+                break
+            offset += batch_size
+        return all_rows
+
+    def catch_up_unmirrored_from_cloud(self, batch_size: int = 100) -> Dict[str, Any]:
         """
-        Scans Supabase Cloud for recently created operational entities that might have been
-        written to Cloud before a backend crash occurred prior to local mirror logging.
-        Mirrors them to SQLite to guarantee crash recovery consistency.
+        Comprehensive, paginated, multi-table startup catch-up scanner.
+        Guarantees that all Cloud records created or modified prior to backend restart/crash
+        are accurately reconciled into local SQLite in topological order:
+        1. security_check_runs
+        2. security_findings (child of runs)
+        3. incidents
+        4. incident_alerts (child of incidents)
+        5. incident_risk_factors (child of incidents)
+        6. incident_timeline (child of incidents)
+        7. ai_analyses (child of incidents)
+        8. incident_status_history (child of incidents)
         """
         caught_up = 0
+        scanned = 0
         try:
-            # 1. Catch up incidents
-            res = self.client.table("incidents").select("id").order("created_at", desc=True).limit(limit).execute()
-            cloud_inc_ids = [r["id"] for r in (res.data or [])]
-            for inc_id in cloud_inc_ids:
+            # 1. Catch up security check runs & findings
+            runs = self._fetch_all_paginated("security_check_runs", order_col="started_at", batch_size=batch_size)
+            scanned += len(runs)
+            for run in runs:
+                run_id = run["id"]
+                local_run = self.sqlite_store.get_security_run_by_id(run_id)
+                needs_sync = False
+                if not local_run:
+                    needs_sync = True
+                elif local_run.get("status") != run.get("status") or str(local_run.get("completed_at")) != str(run.get("completed_at")):
+                    needs_sync = True
+
+                if needs_sync:
+                    findings = self._fetch_all_paginated("security_findings", order_col="checked_at", batch_size=batch_size, filters={"run_id": run_id})
+                    self.sqlite_store.upsert_security_check_run(run, findings)
+                    self.sqlite_store.log_mirror_attempt(
+                        entity_type="security_check_run",
+                        entity_id=run_id,
+                        action="catch_up",
+                        status="synced",
+                        retry_count=0,
+                        payload={"run_data": run, "findings": findings},
+                    )
+                    caught_up += 1
+
+            self.sqlite_store.record_catch_up_watermark("security_check_runs", len(runs), caught_up, status="completed")
+
+            # 2. Catch up incidents & relationships
+            incidents = self._fetch_all_paginated("incidents", order_col="created_at", batch_size=batch_size)
+            scanned += len(incidents)
+            for inc in incidents:
+                inc_id = inc["id"]
                 local_inc = self.sqlite_store.get_incident_by_id(inc_id)
+                needs_sync = False
                 if not local_inc:
-                    inc_data = self.get_incident_by_id(inc_id)
-                    if inc_data:
-                        self.sqlite_store.upsert_incident(
-                            incident_data=inc_data,
-                            alert_ids=inc_data.get("alert_ids", []),
-                            risk_factors=inc_data.get("risk_factors", []),
-                        )
-                        self.sqlite_store.log_mirror_attempt(
-                            entity_type="incident",
-                            entity_id=inc_id,
-                            action="catch_up",
-                            status="synced",
-                            retry_count=0,
-                        )
-                        caught_up += 1
+                    needs_sync = True
+                else:
+                    for f in ("status", "severity", "risk_score", "risk_level", "summary", "last_seen_at"):
+                        if str(local_inc.get(f, "")) != str(inc.get(f, "")):
+                            needs_sync = True
+                            break
 
-            # 2. Catch up security check runs
-            res_sc = self.client.table("security_check_runs").select("id").order("started_at", desc=True).limit(limit).execute()
-            cloud_sc_ids = [r["id"] for r in (res_sc.data or [])]
-            for sc_id in cloud_sc_ids:
-                local_sc = self.sqlite_store.get_security_run_by_id(sc_id)
-                if not local_sc:
-                    res_run = self.client.table("security_check_runs").select("*").eq("id", sc_id).limit(1).execute()
-                    if res_run.data:
-                        run_row = res_run.data[0]
-                        res_fnd = self.client.table("security_findings").select("*").eq("run_id", sc_id).execute()
-                        findings = res_fnd.data or []
-                        self.sqlite_store.upsert_security_check_run(run_row, findings)
-                        self.sqlite_store.log_mirror_attempt(
-                            entity_type="security_check_run",
-                            entity_id=sc_id,
-                            action="catch_up",
-                            status="synced",
-                            retry_count=0,
-                        )
-                        caught_up += 1
+                if needs_sync:
+                    res_alerts = self._fetch_all_paginated("incident_alerts", order_col="added_at", batch_size=batch_size, filters={"incident_id": inc_id})
+                    alert_ids = [r["alert_id"] for r in res_alerts]
+
+                    risk_factors = self._fetch_all_paginated("incident_risk_factors", order_col=None, batch_size=batch_size, filters={"incident_id": inc_id})
+
+                    self.sqlite_store.upsert_incident(inc, alert_ids, risk_factors)
+                    self.sqlite_store.log_mirror_attempt(
+                        entity_type="incident",
+                        entity_id=inc_id,
+                        action="catch_up",
+                        status="synced",
+                        retry_count=0,
+                        payload={"incident_data": inc, "alert_ids": alert_ids, "risk_factors": risk_factors},
+                    )
+                    caught_up += 1
+
+            self.sqlite_store.record_catch_up_watermark("incidents", len(incidents), caught_up, status="completed")
+
+            # 3. Catch up incident timeline events
+            timelines = self._fetch_all_paginated("incident_timeline", order_col="timestamp", batch_size=batch_size)
+            scanned += len(timelines)
+            for tl in timelines:
+                self.sqlite_store.upsert_incident_timeline_event(tl)
+
+            # 4. Catch up AI analyses
+            analyses = self._fetch_all_paginated("ai_analyses", order_col="created_at", batch_size=batch_size)
+            scanned += len(analyses)
+            for anl in analyses:
+                anl_id = anl.get("id")
+                local_anl = self.sqlite_store.get_analysis_by_id(anl_id)
+                if not local_anl:
+                    self.sqlite_store.save_ai_analysis(anl)
+                    self.sqlite_store.log_mirror_attempt(
+                        entity_type="ai_analysis",
+                        entity_id=anl_id,
+                        action="catch_up",
+                        status="synced",
+                        retry_count=0,
+                        payload=anl,
+                    )
+                    caught_up += 1
+
+            self.sqlite_store.record_catch_up_watermark("ai_analyses", len(analyses), caught_up, status="completed")
+
+            # 5. Catch up incident status history
+            histories = self._fetch_all_paginated("incident_status_history", order_col="changed_at", batch_size=batch_size)
+            scanned += len(histories)
+            for hist in histories:
+                self.sqlite_store.upsert_incident_status_history(hist)
+
+            self.sqlite_store.record_catch_up_watermark("incident_status_history", len(histories), caught_up, status="completed")
+
+            state_machine.set_catch_up_completed(True)
+            logger.info("Startup catch-up scan completed: %d total entities scanned, %d caught up to SQLite.", scanned, caught_up)
+            return {"status": "ok", "total_scanned": scanned, "caught_up": caught_up}
+
         except Exception as e:
-            logger.warning("Catch-up unmirrored scan encountered non-critical error: %s", e)
-
-        return {"caught_up": caught_up}
-
+            state_machine.set_catch_up_completed(False)
+            state_machine.transition_to(
+                DatabaseState.RECOVERY_REQUIRED,
+                reason=f"Startup catch-up scan failed: {e}",
+                error_message=str(e),
+                force=True,
+            )
+            logger.critical("Startup catch-up scan failed critically: %s", e)
+            raise RuntimeError(f"Startup catch-up consistency failure: {e}") from e
 
 
 class MockAegisRepository(BaseAegisRepository):
@@ -2236,60 +2333,20 @@ class MockAegisRepository(BaseAegisRepository):
 
         return {"total_checked": len(failed_logs), "replayed": replayed, "still_failed": still_failed}
 
-    def catch_up_unmirrored_from_cloud(self, limit: int = 50) -> Dict[str, Any]:
-        """
-        Scans Supabase Cloud for recently created operational entities that might have been
-        written to Cloud before a backend crash occurred prior to local mirror logging.
-        Mirrors them to SQLite to guarantee crash recovery consistency.
-        """
-        caught_up = 0
-        try:
-            # 1. Catch up incidents
-            res = self.client.table("incidents").select("id").order("created_at", desc=True).limit(limit).execute()
-            cloud_inc_ids = [r["id"] for r in (res.data or [])]
-            for inc_id in cloud_inc_ids:
-                local_inc = self.sqlite_store.get_incident_by_id(inc_id)
-                if not local_inc:
-                    inc_data = self.get_incident_by_id(inc_id)
-                    if inc_data:
-                        self.sqlite_store.upsert_incident(
-                            incident_data=inc_data,
-                            alert_ids=inc_data.get("alert_ids", []),
-                            risk_factors=inc_data.get("risk_factors", []),
-                        )
-                        self.sqlite_store.log_mirror_attempt(
-                            entity_type="incident",
-                            entity_id=inc_id,
-                            action="catch_up",
-                            status="synced",
-                            retry_count=0,
-                        )
-                        caught_up += 1
+    def catch_up_unmirrored_from_cloud(self, batch_size: int = 100) -> Dict[str, Any]:
+        """Mock implementation supporting failure injection and simulation tests."""
+        if getattr(self, "simulate_db_error", False):
+            state_machine.set_catch_up_completed(False)
+            state_machine.transition_to(
+                DatabaseState.RECOVERY_REQUIRED,
+                reason="Simulated Cloud timeout during catch-up",
+                error_message="Cloud connection timeout",
+                force=True,
+            )
+            raise RuntimeError("Simulated Cloud timeout during catch-up")
 
-            # 2. Catch up security check runs
-            res_sc = self.client.table("security_check_runs").select("id").order("started_at", desc=True).limit(limit).execute()
-            cloud_sc_ids = [r["id"] for r in (res_sc.data or [])]
-            for sc_id in cloud_sc_ids:
-                local_sc = self.sqlite_store.get_security_run_by_id(sc_id)
-                if not local_sc:
-                    res_run = self.client.table("security_check_runs").select("*").eq("id", sc_id).limit(1).execute()
-                    if res_run.data:
-                        run_row = res_run.data[0]
-                        res_fnd = self.client.table("security_findings").select("*").eq("run_id", sc_id).execute()
-                        findings = res_fnd.data or []
-                        self.sqlite_store.upsert_security_check_run(run_row, findings)
-                        self.sqlite_store.log_mirror_attempt(
-                            entity_type="security_check_run",
-                            entity_id=sc_id,
-                            action="catch_up",
-                            status="synced",
-                            retry_count=0,
-                        )
-                        caught_up += 1
-        except Exception as e:
-            logger.warning("Catch-up unmirrored scan encountered non-critical error: %s", e)
-
-        return {"caught_up": caught_up}
+        state_machine.set_catch_up_completed(True)
+        return {"status": "ok", "total_scanned": len(self.security_runs) + len(self.hosts), "caught_up": 0}
 
 
 

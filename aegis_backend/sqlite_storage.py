@@ -324,6 +324,18 @@ class SqliteIncidentStore:
                     conn.execute("ALTER TABLE mirror_sync_log ADD COLUMN payload TEXT;")
                 except Exception:
                     pass
+
+                # Catch-up watermark tracking table for crash-recovery state preservation
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS catch_up_watermark (
+                        entity_type TEXT PRIMARY KEY,
+                        last_synced_at TEXT NOT NULL,
+                        records_checked INTEGER NOT NULL DEFAULT 0,
+                        records_caught_up INTEGER NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'completed',
+                        completed_at TEXT NOT NULL
+                    );
+                """)
                 conn.commit()
 
     def log_mirror_attempt(
@@ -412,6 +424,86 @@ class SqliteIncidentStore:
                 )
                 return [dict(r) for r in cur.fetchall()]
 
+    def record_catch_up_watermark(
+        self,
+        entity_type: str,
+        records_checked: int,
+        records_caught_up: int,
+        status: str = "completed",
+    ) -> None:
+        """Persists or updates progress watermark for catch-up operations."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            try:
+                with self._connection() as conn:
+                    conn.execute("""
+                        INSERT INTO catch_up_watermark (
+                            entity_type, last_synced_at, records_checked, records_caught_up, status, completed_at
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(entity_type) DO UPDATE SET
+                            last_synced_at = excluded.last_synced_at,
+                            records_checked = excluded.records_checked,
+                            records_caught_up = excluded.records_caught_up,
+                            status = excluded.status,
+                            completed_at = excluded.completed_at;
+                    """, (entity_type, now_iso, records_checked, records_caught_up, status, now_iso))
+                    conn.commit()
+            except Exception as e:
+                logger.warning("Failed to record catch-up watermark for %s: %s", entity_type, e)
+
+    def get_catch_up_watermarks(self) -> Dict[str, Dict[str, Any]]:
+        """Returns all recorded catch-up watermarks."""
+        with self._lock:
+            with self._connection() as conn:
+                cur = conn.execute("SELECT entity_type, last_synced_at, records_checked, records_caught_up, status, completed_at FROM catch_up_watermark;")
+                return {row["entity_type"]: dict(row) for row in cur.fetchall()}
+
+    def upsert_incident_timeline_event(self, event_dict: Dict[str, Any]) -> None:
+        """Idempotently inserts or updates an incident timeline entry."""
+        ev_id = event_dict.get("id") or f"TL-{event_dict.get('incident_id')}-{int(datetime.now(timezone.utc).timestamp())}"
+        meta = event_dict.get("metadata_json") or event_dict.get("metadata")
+        meta_str = json.dumps(meta) if isinstance(meta, (dict, list)) else (str(meta) if meta else "{}")
+        with self._lock:
+            with self._connection() as conn:
+                conn.execute("""
+                    INSERT INTO incident_timeline (id, incident_id, timestamp, kind, title, description, severity, metadata_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        timestamp = excluded.timestamp,
+                        kind = excluded.kind,
+                        title = excluded.title,
+                        description = excluded.description,
+                        severity = excluded.severity,
+                        metadata_json = excluded.metadata_json;
+                """, (
+                    ev_id, event_dict.get("incident_id"), event_dict.get("timestamp"),
+                    event_dict.get("kind", "alert"), event_dict.get("title", ""),
+                    event_dict.get("description", ""), event_dict.get("severity", "medium"),
+                    meta_str,
+                ))
+                conn.commit()
+
+    def upsert_incident_status_history(self, history_dict: Dict[str, Any]) -> None:
+        """Idempotently inserts or updates an incident status audit history entry."""
+        hist_id = history_dict.get("id")
+        with self._lock:
+            with self._connection() as conn:
+                conn.execute("""
+                    INSERT INTO incident_status_history (id, incident_id, old_status, new_status, changed_at, changed_by, reason)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        old_status = excluded.old_status,
+                        new_status = excluded.new_status,
+                        changed_at = excluded.changed_at,
+                        changed_by = excluded.changed_by,
+                        reason = excluded.reason;
+                """, (
+                    hist_id, history_dict.get("incident_id"), history_dict.get("old_status"),
+                    history_dict.get("new_status"), history_dict.get("changed_at"),
+                    history_dict.get("changed_by", "system"), history_dict.get("reason"),
+                ))
+                conn.commit()
+
     # =========================================================================
     # INCIDENT OPERATIONS
     # =========================================================================
@@ -462,6 +554,7 @@ class SqliteIncidentStore:
                         severity = excluded.severity,
                         risk_level = excluded.risk_level,
                         risk_score = excluded.risk_score,
+                        status = excluded.status,
                         primary_alert_id = excluded.primary_alert_id,
                         alert_count = excluded.alert_count,
                         source_ip = excluded.source_ip,
