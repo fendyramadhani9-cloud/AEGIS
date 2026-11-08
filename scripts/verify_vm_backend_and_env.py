@@ -79,7 +79,7 @@ def main():
         ("Incidents List", f"{base_url}/incidents?limit=50"),
         ("Incidents Summary", f"{base_url}/incidents/summary"),
         ("Security Checker Health", f"{base_url}/security-checker/health"),
-        ("Security Findings", f"{base_url}/security-checker/hosts/host-fenn-ubuntu/findings"),
+        ("Security Findings", f"{base_url}/security-checker/findings?host_id=host-fenn-ubuntu"),
     ]
 
     api_results = {}
@@ -95,7 +95,7 @@ def main():
     # 4. Compare SQLite vs API Counts
     print(f"\n[4] Data Consistency Audit (SQLite vs API):")
     inc_api = api_results.get("Incidents List", {}).get("data", {})
-    api_total_inc = inc_api.get("total_incidents") if isinstance(inc_api, dict) else len(inc_api) if isinstance(inc_api, list) else None
+    api_total_inc = inc_api.get("total") if isinstance(inc_api, dict) else len(inc_api) if isinstance(inc_api, list) else None
     sqlite_inc = sqlite_counts.get("incidents")
     print(f"  - Incidents: SQLite={sqlite_inc} | API={api_total_inc}")
     if sqlite_inc == api_total_inc:
@@ -105,7 +105,7 @@ def main():
         all_passed = False
 
     findings_api = api_results.get("Security Findings", {}).get("data", {})
-    api_total_findings = findings_api.get("total_findings") if isinstance(findings_api, dict) else len(findings_api) if isinstance(findings_api, list) else None
+    api_total_findings = findings_api.get("total") if isinstance(findings_api, dict) else len(findings_api) if isinstance(findings_api, list) else None
     sqlite_findings = sqlite_counts.get("security_findings")
     print(f"  - Security Findings: SQLite={sqlite_findings} | API={api_total_findings}")
     if sqlite_findings == api_total_findings:
