@@ -168,56 +168,35 @@ Dirancang agar dapat beroperasi pada server dengan keterbatasan sumber daya maup
 
 ## Authors & Collaborators
 
+Platform AEGIS dirancang dan dikembangkan bersama sebagai sebuah tim pertahanan siber terpadu:
+
 <div align="center">
 
-<table style="border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; border-collapse: separate; border-spacing: 24px; background: rgba(15, 23, 42, 0.65); padding: 16px;">
+<table style="border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; border-collapse: separate; border-spacing: 28px; background: rgba(15, 23, 42, 0.65); padding: 18px;">
   <tr align="center">
-    <td align="center" width="220" style="vertical-align: top;">
+    <td align="center" width="200" style="vertical-align: top;">
       <a href="https://github.com/yasss31">
         <img src="docs/assets/team/dias.jpg" width="130" height="130" style="border-radius: 6px; object-fit: cover; box-shadow: 0 4px 12px rgba(0,0,0,0.4);" alt="Diaz / Yazz" /><br /><br />
-        <b>Diaz / Yazz</b>
-      </a><br />
-      <a href="https://github.com/yasss31">
-        <img src="https://img.shields.io/badge/Project-Lead-0052cc?style=flat" alt="Project Lead" />
-      </a>
-      <a href="https://github.com/yasss31">
-        <img src="https://img.shields.io/badge/AI%20Architect-Forensics-7c3aed?style=flat" alt="AI Architect" />
+        <b style="font-size: 1.05rem;">Diaz / Yazz</b><br />
+        <span style="color: #93c5fd; font-size: 0.9rem;">@yasss31</span>
       </a>
     </td>
-    <td align="center" width="220" style="vertical-align: top;">
+    <td align="center" width="200" style="vertical-align: top;">
       <a href="https://github.com/fendyramadhani9-cloud">
         <img src="docs/assets/team/fendy.jpg" width="130" height="130" style="border-radius: 6px; object-fit: cover; box-shadow: 0 4px 12px rgba(0,0,0,0.4);" alt="Fendy Ramadhani" /><br /><br />
-        <b>Fendy Ramadhani</b>
-      </a><br />
-      <a href="https://github.com/fendyramadhani9-cloud">
-        <img src="https://img.shields.io/badge/Developer-Lead-007acc?style=flat" alt="Developer Lead" />
-      </a>
-      <a href="https://github.com/fendyramadhani9-cloud">
-        <img src="https://img.shields.io/badge/Zero--Trust-Core%20Engine-2ea44f?style=flat" alt="Zero-Trust Core" />
+        <b style="font-size: 1.05rem;">Fendy Ramadhani</b><br />
+        <span style="color: #93c5fd; font-size: 0.9rem;">@fendyramadhani9-cloud</span>
       </a>
     </td>
-    <td align="center" width="220" style="vertical-align: top;">
+    <td align="center" width="200" style="vertical-align: top;">
       <a href="https://github.com/Aseppclwk">
         <img src="docs/assets/team/apri.jpg" width="130" height="130" style="border-radius: 6px; object-fit: cover; box-shadow: 0 4px 12px rgba(0,0,0,0.4);" alt="Apri" /><br /><br />
-        <b>Apri</b>
-      </a><br />
-      <a href="https://github.com/Aseppclwk">
-        <img src="https://img.shields.io/badge/DevOps-Deployment%20%26%20CI%2FCD-2ea44f?style=flat" alt="DevOps Deployment" />
-      </a>
-      <a href="https://github.com/Aseppclwk">
-        <img src="https://img.shields.io/badge/Compliance-CIS%20%7C%20DISA%20STIG-ea580c?style=flat" alt="Compliance" />
+        <b style="font-size: 1.05rem;">Apri</b><br />
+        <span style="color: #93c5fd; font-size: 0.9rem;">@Aseppclwk</span>
       </a>
     </td>
   </tr>
 </table>
-
-<br />
-
-| Kontributor | Peran & Tanggung Jawab Utama | Fokus Kontribusi Teknis |
-| :---: | :---: | :--- |
-| **Diaz / Yazz**<br/>[`@yasss31`](https://github.com/yasss31) | **Project Lead & AI Security Architect** | • Memimpin visi strategis, desain konseptual, dan roadmap platform AEGIS.<br/>• Arsitektur korelasi ancaman berbasis AI & multi-key failover (`AEGIS1..3`).<br/>• Penegakan *Forensic Grounding* dan mitigasi serangan *prompt injection* pada AI.<br/>• Evaluasi model dan validasi adversarial pengujian kualitas investigasi. |
-| **Fendy Ramadhani**<br/>[`@fendyramadhani9-cloud`](https://github.com/fendyramadhani9-cloud) | **Lead Core Engineer & Zero-Trust Architect** | • Perancangan arsitektur keamanan *Hard Multi-Tenancy* & isolasi data mutlak.<br/>• Pengembangan FastAPI Backend Core, Gateway Router, dan State Machine SSoT.<br/>• Implementasi 15 aturan deteksi ancaman MITRE ATT&CK & sanitizer kredensial.<br/>• Pengerasan keamanan (*Security Hardening* 35 kerentanan audit). |
-| **Apri**<br/>[`@Aseppclwk`](https://github.com/Aseppclwk) | **DevOps & Infrastructure Security Engineer** | • Implementasi 12 modul audit postur kepatuhan CIS Benchmark & DISA STIG.<br/>• Pembuatan skrip installer otomatis agen Linux (`install_agent.sh` daemon systemd).<br/>• Rekayasa kontainer Docker *Ultra-Low RAM Footprint* (< 135 MB memori).<br/>• Otomasi pipeline CI/CD, regression testing harness, dan pemulihan data konsisten. |
 
 </div>
 
