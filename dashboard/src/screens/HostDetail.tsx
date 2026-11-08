@@ -1,14 +1,10 @@
 import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
-  AlertTriangle,
-  CheckCircle2,
   CircleHelp,
   ListTree,
-  Play,
   Radio,
   RefreshCw,
-  RotateCw,
   ShieldCheck,
   Unplug,
 } from 'lucide-react';
@@ -39,8 +35,6 @@ export function HostDetailScreen() {
   const { id = '' } = useParams();
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'alerts';
-  const [triggering, setTriggering] = useState(false);
-  const [triggerNotice, setTriggerNotice] = useState<{ tone: 'healthy' | 'critical'; text: string } | null>(null);
   const { when, dateTime } = useTimeFormat();
   const [scanning, setScanning] = useState(false);
 

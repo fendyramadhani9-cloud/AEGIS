@@ -438,10 +438,10 @@ function mapBackendAlert(a: BackendAlertItem, allAlerts?: BackendAlertItem[]): A
 
 interface BackendFindingItem {
   id: string;
-  run_id: string;
+  run_id?: string;
   host_id: string;
   check_id: string;
-  category: string;
+  category?: string;
   severity: string;
   status: string;
   title: string;
@@ -455,9 +455,19 @@ interface BackendFindingItem {
   execution_time_ms?: number;
   evidence?: Record<string, unknown>;
   checked_at: string;
+  indicators?: string[];
+  limits?: string;
+  ai_state?: string;
+  ai_role?: string;
+  ai_generated_at?: string | null;
+  ai_summary?: string | null;
+  ai_evidence_refs?: string[];
+  ai_uncertainty?: string | null;
+  ai_next_steps?: string[];
 }
 
 function mapBackendFinding(f: BackendFindingItem): Finding {
+  const cachedAi = liveAiCache.get(f.id);
   const statusMap: Record<string, FindingStatus> = {
     pass: 'pass',
     fail: 'fail',
@@ -466,18 +476,40 @@ function mapBackendFinding(f: BackendFindingItem): Finding {
     error: 'error',
     not_checked: 'not_checked',
   };
-  const status = statusMap[f.status?.toLowerCase()] || 'fail';
+  const status = statusMap[f.status?.toLowerCase()] || (f.status as FindingStatus) || 'fail';
   const validSeverities: Severity[] = ['critical', 'high', 'medium', 'low', 'info'];
   const severity = validSeverities.includes(f.severity?.toLowerCase() as Severity)
     ? (f.severity.toLowerCase() as Severity)
     : 'medium';
 
-  const indicators: string[] = [];
-  if (f.actual_value) indicators.push(`Actual: ${f.actual_value}`);
-  if (f.expected_value) indicators.push(`Expected: ${f.expected_value}`);
+  const indicators: string[] = f.indicators && f.indicators.length > 0 ? [...f.indicators] : [];
+  if (f.actual_value && !indicators.some((ind) => ind.includes(f.actual_value!))) {
+    indicators.push(`Actual: ${f.actual_value}`);
+  }
+  if (f.expected_value && !indicators.some((ind) => ind.includes(f.expected_value!))) {
+    indicators.push(`Expected: ${f.expected_value}`);
+  }
   if (f.evidence && Object.keys(f.evidence).length > 0) {
     if (f.evidence.output) indicators.push(String(f.evidence.output));
   }
+
+  const aiObj: AiAnalysis =
+    cachedAi ??
+    (f.ai_state === 'ready'
+      ? {
+          state: 'ready',
+          role: 'SC Analysis Agent',
+          generatedAt: f.ai_generated_at ?? undefined,
+          summary: f.ai_summary ?? undefined,
+          evidenceRefs: f.ai_evidence_refs ?? [],
+          uncertainty: f.ai_uncertainty ?? undefined,
+          nextSteps: f.ai_next_steps ?? [],
+        }
+      : f.ai_state === 'pending'
+        ? { state: 'pending', role: 'SC Analysis Agent' }
+        : f.ai_state === 'failed'
+          ? { state: 'failed', role: 'SC Analysis Agent' }
+          : { state: 'not_requested', role: 'SC Analysis Agent' });
 
   return {
     kind: 'finding',
@@ -488,6 +520,7 @@ function mapBackendFinding(f: BackendFindingItem): Finding {
     category: f.category,
     status,
     severity,
+    confidence: 'confirmed',
     hostId: f.host_id,
     checkedAt: f.checked_at,
     actualValue: f.actual_value || undefined,
@@ -499,11 +532,8 @@ function mapBackendFinding(f: BackendFindingItem): Finding {
     evidenceSummary: f.evidence && Object.keys(f.evidence).length > 0 ? JSON.stringify(f.evidence, null, 2) : undefined,
     remediationReference: f.cis_reference || f.mitre_reference || undefined,
     indicators: indicators.length > 0 ? indicators : [f.actual_value || 'No indicators collected'],
-    limits: 'Read-only check executed locally on host.',
-    ai: {
-      state: 'not_requested',
-      role: 'SC Analysis Agent',
-    },
+    limits: f.limits || 'Read-only check executed locally on host.',
+    ai: aiObj,
   };
 }
 
@@ -596,58 +626,6 @@ function mapBackendSystemStatus(s: BackendSystemStatus): SystemStatus {
     aiProvider: s.ai_provider,
     aiProviderNote: s.ai_provider_note ?? undefined,
     checkedAt: s.checked_at ?? new Date().toISOString(),
-  };
-}
-
-interface BackendFindingItem {
-  id: string;
-  host_id: string;
-  check_id: string;
-  title: string;
-  status: string;
-  severity: string;
-  checked_at: string;
-  indicators: string[];
-  limits: string;
-  ai_state?: string;
-  ai_role?: string;
-  ai_generated_at?: string | null;
-  ai_summary?: string | null;
-  ai_evidence_refs?: string[];
-  ai_uncertainty?: string | null;
-  ai_next_steps?: string[];
-}
-
-function mapBackendFinding(f: BackendFindingItem): Finding {
-  const cachedAi = liveAiCache.get(f.id);
-  return {
-    kind: 'finding',
-    id: f.id,
-    checkId: f.check_id,
-    title: f.title,
-    status: (f.status as FindingStatus) || 'fail',
-    severity: (f.severity as Severity) || 'medium',
-    confidence: 'confirmed',
-    hostId: f.host_id,
-    checkedAt: f.checked_at,
-    indicators: f.indicators || [],
-    limits: f.limits,
-    ai:
-      cachedAi ??
-      (f.ai_state === 'ready'
-        ? {
-            state: 'ready',
-            role: 'SC Analysis Agent',
-            generatedAt: f.ai_generated_at ?? undefined,
-            summary: f.ai_summary ?? undefined,
-            evidenceRefs: f.ai_evidence_refs ?? [],
-            uncertainty: f.ai_uncertainty ?? undefined,
-            nextSteps: f.ai_next_steps ?? [],
-          }
-        : {
-            state: 'not_requested',
-            role: 'SC Analysis Agent',
-          }),
   };
 }
 
@@ -820,12 +798,12 @@ export const api = {
       return structuredClone(db.findings.find((f) => f.id === id) ?? null);
     }
     try {
-      const res = await requestBackend<BackendFindingItem>(/api/security-checker/findings/);
+      const res = await requestBackend<BackendFindingItem>(`/api/security-checker/findings/${encodeURIComponent(id)}`);
       return mapBackendFinding(res);
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 404) {
         try {
-          const raw = await requestBackend<BackendFindingItem>(/api/findings/);
+          const raw = await requestBackend<BackendFindingItem>(`/api/findings/${encodeURIComponent(id)}`);
           return mapBackendFinding(raw);
         } catch {
           return null;
