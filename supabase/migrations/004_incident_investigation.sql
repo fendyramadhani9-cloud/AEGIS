@@ -213,7 +213,15 @@ ALTER TABLE public.incident_timeline ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ai_analyses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.incident_status_history ENABLE ROW LEVEL SECURITY;
 
--- 8. Grant backend service_role and postgres permissions
+-- 8. Least Privilege Access Control: Explicitly revoke public, anon, authenticated
+REVOKE ALL ON TABLE public.incidents FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.incident_alerts FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.incident_risk_factors FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.incident_timeline FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.ai_analyses FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.incident_status_history FROM PUBLIC, anon, authenticated;
+
+-- 9. Grant backend service_role and postgres permissions
 DO $$
 BEGIN
     GRANT ALL ON TABLE public.incidents TO service_role, postgres;

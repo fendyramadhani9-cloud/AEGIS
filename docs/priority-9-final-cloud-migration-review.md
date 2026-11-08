@@ -367,11 +367,26 @@ Jika terjadi kegagalan fatal pada langkah mana pun di atas, lakukan prosedur rol
 
 ---
 
-## 13. Rekomendasi Final
+## 13. Hasil Targeted Risk Audit (Penutupan 4 Risiko Terarah)
+Sebagai tindak lanjut atas arahan penelaahan khusus dari Project Owner, telah dilakukan audit terarah tambahan yang didokumentasikan lengkap pada [Lampiran Audit Risiko Terarah (`priority-9-targeted-risk-audit-appendix.md`)](file:///d:/AEGIS/docs/priority-9-targeted-risk-audit-appendix.md):
+1. **RLS & Role Security:** Terbukti via `test_targeted_rls_and_roles.cjs` bahwa `anon` dan `authenticated` ditolak total (`permission denied`), sedangkan `service_role` memiliki kewenangan operasional penuh.
+2. **Dependensi Cloud Baseline:** Terbukti via `audit_cloud_dependencies.py` bahwa 100% dari 136 record SQLite memiliki parent yang valid di Cloud (1 host `host-fenn-ubuntu`, 13 alerts, 23 evidence links). Zero missing parents, zero cross-host violations.
+3. **Mirror Worker Concurrency:** Terbukti via `test_mirror_worker_concurrency.py` (4/4 tests passed): bebas race condition pada multi-worker, penanganan kegagalan disk SQLite aman tanpa status 'synced' palsu, startup recovery terbukti, dan arah replikasi 100% satu arah dari Cloud ke SQLite (zero mutasi Cloud).
+4. **Perhitungan Retensi Telemetri:** Terukur secara empiris di VM `fenn` bahwa journald menggunakan 184 MB dari 997,9 MB batas (headroom 813,9 MB). Mampu menampung log operasional normal hingga **62,3 hari** atau serangan siber ekstrem (100 auth attempts/sec) hingga **118,5 menit**. Downtime 5 menit terbukti aman dari resiko telemetry loss.
 
-Berdasarkan seluruh hasil audit statis, hardening SQL, uji coba perilaku di PostgreSQL engine terisolasi, verifikasi rekonsiliasi data 136 record, serta pengujian resiliensi collector dan mirror:
+---
+
+## 14. Rekomendasi Final & Sikap Operasional
+
+Berdasarkan seluruh hasil audit statis, hardening SQL, uji coba perilaku di PostgreSQL engine terisolasi, verifikasi rekonsiliasi data 136 record, pengujian konkurensi mirror worker, serta pengukuran empiris retensi telemetri Linux:
 
 Status Prioritas 9 dinyatakan:
 # **`READY FOR FINAL APPROVAL`**
+*(Catatan: Status ini adalah kesiapan dokumen dan bukti teknis untuk peninjauan persetujuan, dan **BUKAN** merupakan izin untuk langsung mengeksekusi cutover produksi).*
 
-Tim pelaksana telah menghentikan seluruh aktivitas teknis dan tidak akan melakukan mutasi apa pun pada Supabase Cloud maupun VM `fenn` sampai Anda memberikan persetujuan eksplisit untuk mengeksekusi Tahap Cutover Produksi.
+Sikap operasional tim pelaksana:
+- **Mode Operasional:** Tetap berjalan pada **`hybrid`** di VM `fenn`.
+- **Layanan:** `aegis-backend.service` dan `aegis-collector.service` tetap aktif melayani sistem.
+- **Supabase Cloud:** Tetap **100% perawan (Untouched)** tanpa mutasi DDL atau data.
+- **Tindakan Lanjutan:** **STOP & STANDBY** menunggu keputusan akhir dan instruksi persetujuan resmi dari Project Owner.
+
