@@ -119,11 +119,19 @@ async function testIncidentMigration() {
   if (parseInt(hosts.rows[0].c, 10) !== 1) throw new Error('Host lost during rollback');
   if (parseInt(alerts.rows[0].c, 10) !== 2) throw new Error('Alerts lost during rollback');
 
-  // Verify incident tables are dropped
-  const checkInc = await db.query(`
-    SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'incidents') as ex;
-  `);
-  if (checkInc.rows[0].ex) throw new Error('Incidents table should be dropped after rollback');
+  // Verify 004 tables are dropped
+  const checkTables = (await db.query(`
+    SELECT table_name FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name IN ('incident_risk_factors', 'incident_alerts', 'incident_timeline', 'ai_analyses', 'incident_status_history');
+  `)).rows;
+  if (checkTables.length !== 0) throw new Error(`Rollback failed to drop 004 tables: ${JSON.stringify(checkTables)}`);
+
+  // Verify columns on incidents were reverted (primary_alert_id should be gone)
+  const checkCols = (await db.query(`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'incidents' AND column_name IN ('primary_alert_id', 'risk_score');
+  `)).rows;
+  if (checkCols.length !== 0) throw new Error(`Rollback failed to revert columns on incidents: ${JSON.stringify(checkCols)}`);
 
   console.log('  [PASS] Rollback cleanly dropped new tables while preserving hosts and alerts.\n');
 
