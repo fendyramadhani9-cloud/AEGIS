@@ -180,11 +180,19 @@ class IncidentService:
         except Exception:
             pass
 
+        risk_factors = incident_data.get("risk_factors") or []
+        if not risk_factors:
+            try:
+                risk_factors = self.repo.get_incident_risk_factors(incident_id)
+            except Exception:
+                risk_factors = []
+
         context = IncidentContextBuilder.build(
             incident=incident_data,
             alerts=alerts_data,
             evidence_items=evidence_items,
             posture_findings=posture_findings,
+            risk_factors=risk_factors,
         )
 
         # Call AI Provider

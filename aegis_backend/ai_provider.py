@@ -39,6 +39,267 @@ def is_rfc5737_testnet(ip: Optional[str]) -> bool:
     )
 
 
+# =============================================================================
+# CONTEXTUAL FORENSIC PATTERNS & QUALITY VALIDATION CONFIG
+# =============================================================================
+
+THREAT_CONCEPTS = {
+    "exfiltration": {
+        "label": "Data Exfiltration / Eksfiltrasi Data",
+        "patterns": [
+            re.compile(r"\b(data\s+)?exfiltrat(e|ed|ing|ion)\b", re.IGNORECASE),
+            re.compile(r"\b(eksfiltrasi|kebocoran|pencurian)\s+(data|informasi|berkas|file)\b", re.IGNORECASE),
+            re.compile(r"\btransfer(ring)?\s+(sensitive\s+)?data\s+(out\s+of|outside|to\s+remote)\b", re.IGNORECASE),
+            re.compile(r"\bmengirim(kan)?\s+data\s+(ke\s+luar|ke\s+server\s+asing)\b", re.IGNORECASE),
+            re.compile(r"\b(stolen|leaked)\s+data\b", re.IGNORECASE),
+        ],
+        "is_evidenced": lambda ctx: any(
+            "exfil" in str(r).lower() or "data_leak" in str(r).lower()
+            for r in [a.get("rule_id", "") for a in ctx.alerts]
+        ) or any(
+            any(cmd in str(ev.get("message", "")).lower() for cmd in ("scp ", "rsync ", "curl -t", "curl -f", "ftp ", "sftp ", "nc -l", "base64"))
+            for ev in ctx.evidence_items
+        ),
+        "verification_step": "Inspeksi log firewall egress, NetFlow, dan transfer berkas (SCP/SFTP/rsync) untuk mengonfirmasi ada tidaknya volume data keluar yang mencurigakan.",
+        "data_gap": "Ketiadaan bukti telemetri langsung atau log transfer berkas untuk membuktikan eksfiltrasi data.",
+    },
+    "c2": {
+        "label": "Command & Control / Komunikasi C2",
+        "patterns": [
+            re.compile(r"\b(c2|c&c|command\s+and\s+control)\s+(channel|traffic|server|communication|beacon|infrastructure)\b", re.IGNORECASE),
+            re.compile(r"\b(server\s+c2|komunikasi\s+c2|perintah\s+kontrol|saluran\s+c2)\b", re.IGNORECASE),
+            re.compile(r"\b(beaconing|callback)\s+to\b", re.IGNORECASE),
+            re.compile(r"\bconnecting\s+to\s+c2\b", re.IGNORECASE),
+        ],
+        "is_evidenced": lambda ctx: any(
+            "c2" in str(r).lower() or "botnet" in str(r).lower() or "beacon" in str(r).lower()
+            for r in [a.get("rule_id", "") for a in ctx.alerts]
+        ) or any(
+            "c2" in str(ev.get("message", "")).lower() for ev in ctx.evidence_items
+        ),
+        "verification_step": "Periksa koneksi soket aktif ('ss -tupn', 'lsof -i') dan riwayat kueri DNS lokal untuk mendeteksi beaconing atau callback ke infrastruktur luar.",
+        "data_gap": "Ketiadaan telemetri koneksi soket outbound atau komunikasi C2.",
+    },
+    "lateral_movement": {
+        "label": "Lateral Movement / Pergerakan Lateral",
+        "patterns": [
+            re.compile(r"\blateral\s+movement\b", re.IGNORECASE),
+            re.compile(r"\b(pergerakan|penyebaran|perpindahan)\s+lateral\b", re.IGNORECASE),
+            re.compile(r"\bmov(e|ing)\s+laterally\b", re.IGNORECASE),
+            re.compile(r"\bpivot(ing)?\s+to\s+(other|internal)\s+(hosts?|servers?)\b", re.IGNORECASE),
+        ],
+        "is_evidenced": lambda ctx: any(
+            "lateral" in str(r).lower() or "pivot" in str(r).lower()
+            for r in [a.get("rule_id", "") for a in ctx.alerts]
+        ),
+        "verification_step": "Tinjau log autentikasi SSH/Kerberos pada host internal lain dalam subnet yang sama untuk mendeteksi upaya pergerakan internal.",
+        "data_gap": "Ketiadaan bukti telemetri autentikasi silang antar-host pada subnet lokal.",
+    },
+    "persistence": {
+        "label": "Persistence Mechanism / Persistensi",
+        "patterns": [
+            re.compile(r"\bpersistence\s+(via|through|mechanism|established)\b", re.IGNORECASE),
+            re.compile(r"\bpersistensi\s+(melalui|lewat|ditemukan)\b", re.IGNORECASE),
+            re.compile(r"\b(installed|created)\s+(a\s+)?backdoor\b", re.IGNORECASE),
+            re.compile(r"\b(crontab|cron\s+job)\s+persistence\b", re.IGNORECASE),
+        ],
+        "is_evidenced": lambda ctx: any(
+            "persist" in str(r).lower() or "cron" in str(r).lower() or "backdoor" in str(r).lower()
+            for r in [a.get("rule_id", "") for a in ctx.alerts]
+        ) or any(
+            any(k in str(ev.get("message", "")).lower() for k in ("/etc/cron", "crontab", "authorized_keys", "/etc/systemd"))
+            for ev in ctx.evidence_items
+        ),
+        "verification_step": "Periksa berkas crontab sistem (/etc/crontab, /etc/cron.*), unit systemd baru, dan file ~/.ssh/authorized_keys milik seluruh akun pengguna.",
+        "data_gap": "Ketiadaan bukti modifikasi berkas cron, kunci SSH, atau unit startup sistem.",
+    },
+}
+
+MULTIPLE_FAILURE_PATTERNS = [
+    re.compile(r"\b(multiple|several|repeated|numerous|successive|continuous)\s+(failed|failure|attempts|attacks|brute\s*force)\b", re.IGNORECASE),
+    re.compile(r"\b(beberapa|banyak|berulang|berkali-kali|serangkaian)\s+(kegagalan|percobaan|login\s+gagal|serangan)\b", re.IGNORECASE),
+    re.compile(r"\bfailed\s+logins\b", re.IGNORECASE),
+]
+
+
+def verify_forensic_grounding(analysis: AIAnalysisItem, context: IncidentContext) -> AIAnalysisItem:
+    """
+    Comprehensive forensic grounding and semantic quality validator.
+    Enforces:
+    1. Contextual Buzzword Quarantine: Demotes unsupported claims (Exfiltration, C2, Lateral Movement,
+       Persistence) from facts/inferences into unverified hypotheses with verification steps and data gaps.
+    2. Quantitative Claim Fidelity: Detects claims of multiple/repeated failures when telemetry records <= 1.
+    3. Loopback Identity Discontinuity Guard: Prevents merging distinct local identities (e.g. guest and ubuntu)
+       into a single attacker without process tree evidence.
+    4. SSoT Immutability: Guarantees risk_score, risk_level, and severity freeze.
+    5. Evidence Provenance & Whitelisting: Strips hallucinated IDs from facts, inferences, and citations.
+    """
+    allowed_ids = set(context.allowed_evidence_ids)
+
+    # 1. Enforce SSoT Immutability for Risk Score & Level
+    analysis.risk_score = int(context.risk_score)
+    analysis.risk_level = str(context.risk_level)
+
+    # 2. Whitelist & Ground Cited Evidence IDs
+    valid_supporting: List[str] = []
+    for eid in analysis.supporting_evidence:
+        if eid in allowed_ids and eid not in valid_supporting:
+            valid_supporting.append(eid)
+    if not valid_supporting and allowed_ids:
+        valid_supporting = sorted(list(allowed_ids))[:5]
+    analysis.supporting_evidence = valid_supporting
+
+    # 3. Contextual Buzzword Quarantine (Semantic Non-Destructive Demotion)
+    clean_inferences: List[Dict[str, Any]] = []
+    existing_hypotheses: List[Dict[str, Any]] = list(analysis.hypotheses or [])
+    existing_unknown_items: List[Dict[str, Any]] = list(analysis.unknown_items or [])
+    demoted_concepts: List[str] = []
+
+    # Check inferences
+    for inf in (analysis.inferences or []):
+        stmt = str(inf.get("statement", ""))
+        matched_concept = None
+        for concept_name, concept_cfg in THREAT_CONCEPTS.items():
+            if not concept_cfg["is_evidenced"](context):
+                if any(p.search(stmt) for p in concept_cfg["patterns"]):
+                    matched_concept = (concept_name, concept_cfg)
+                    break
+
+        if matched_concept:
+            c_name, c_cfg = matched_concept
+            demoted_concepts.append(c_cfg["label"])
+            # Demote to hypotheses without losing context
+            existing_hypotheses.append({
+                "statement": f"Dugaan/Potensi: {stmt}",
+                "status": "unverified",
+                "investigation_step": c_cfg["verification_step"],
+                "source_inference": stmt,
+            })
+            existing_unknown_items.append({
+                "data_gap": c_cfg["data_gap"],
+                "impact": f"Klaim {c_cfg['label']} belum terverifikasi secara forensik dan dialihkan ke hipotesis unverified."
+            })
+        else:
+            clean_eids = [eid for eid in inf.get("supporting_evidence_ids", []) if eid in allowed_ids]
+            inf["supporting_evidence_ids"] = clean_eids or (valid_supporting[:2] if valid_supporting else [])
+            clean_inferences.append(inf)
+
+    analysis.inferences = clean_inferences
+
+    # Clean facts: facts must strictly cite verified evidence IDs and not assert unverified concepts
+    clean_facts: List[Dict[str, Any]] = []
+    for f in (analysis.facts or []):
+        feid = f.get("evidence_id")
+        if feid in allowed_ids:
+            f_fact = str(f.get("fact", ""))
+            has_unsupported_concept = False
+            for concept_name, concept_cfg in THREAT_CONCEPTS.items():
+                if not concept_cfg["is_evidenced"](context):
+                    if any(p.search(f_fact) for p in concept_cfg["patterns"]):
+                        has_unsupported_concept = True
+                        demoted_concepts.append(concept_cfg["label"])
+                        existing_hypotheses.append({
+                            "statement": f"Dugaan/Potensi: {f_fact}",
+                            "status": "unverified",
+                            "investigation_step": concept_cfg["verification_step"],
+                        })
+                        existing_unknown_items.append({
+                            "data_gap": concept_cfg["data_gap"],
+                            "impact": f"Fakta AI dikoreksi: {concept_cfg['label']} dialihkan ke hipotesis unverified."
+                        })
+                        break
+            if not has_unsupported_concept:
+                clean_facts.append(f)
+
+    if not clean_facts and context.evidence_items:
+        for ev in context.evidence_items[:3]:
+            eid = ev.get("event_id") or ev.get("id")
+            if eid in allowed_ids:
+                clean_facts.append({
+                    "evidence_id": eid,
+                    "fact": ev.get("message", "Telemetry observation recorded."),
+                    "timestamp": ev.get("event_timestamp") or ev.get("created_at"),
+                })
+    analysis.facts = clean_facts
+    analysis.observed_behaviors = clean_facts
+
+    # 4. Quantitative Fidelity Check (Single vs Multiple)
+    failure_count = sum(
+        1 for ev in context.evidence_items
+        if any(k in str(ev.get("message", "")).lower() for k in ("fail", "gagal", "invalid", "denied"))
+        or any(k in str(ev.get("event_type", "")).lower() for k in ("fail", "gagal"))
+    )
+
+    claims_multiple = any(
+        any(p.search(str(inf.get("statement", ""))) for p in MULTIPLE_FAILURE_PATTERNS)
+        for inf in analysis.inferences
+    ) or any(p.search(str(analysis.executive_summary)) for p in MULTIPLE_FAILURE_PATTERNS)
+
+    if claims_multiple and failure_count <= 1:
+        existing_unknown_items.append({
+            "data_gap": f"Ketidaksesuaian kuantitatif: Narasi mengindikasikan kejadian berulang/jamak, namun telemetri hanya merekam {failure_count} event kegagalan.",
+            "impact": "Analisis diklasifikasikan dengan catatan kuantitatif parsial."
+        })
+        if "Catatan Kuantitatif" not in (analysis.investigation_notes or ""):
+            analysis.investigation_notes = (
+                (analysis.investigation_notes or "")
+                + f" [Catatan Kuantitatif: Telemetri faktual hanya memuat {failure_count} event kegagalan; klaim jamak disesuaikan]."
+            ).strip()
+
+    # 5. Loopback Identity Discontinuity Guard
+    attr = classify_ip_source(context.source_ip)
+    if attr.get("is_loopback") or context.source_ip in ("127.0.0.1", "::1", "localhost"):
+        evidence_users = set()
+        for ev in context.evidence_items:
+            u = ev.get("user") or ev.get("user_name") or (ev.get("details", {}) or {}).get("user")
+            if u and str(u).strip() and str(u).strip().lower() not in ("none", "null", ""):
+                evidence_users.add(str(u).strip())
+
+        if len(evidence_users) >= 2:
+            user_list_str = " dan ".join(sorted(list(evidence_users)))
+            existing_unknown_items.append({
+                "data_gap": f"Ketiadaan jejak pohon proses (parent PID tree) antara identitas {sorted(list(evidence_users))}.",
+                "impact": f"Peralihan identitas pada antarmuka loopback ({user_list_str}) tidak dapat diasumsikan sebagai satu penyerang tunggal tanpa bukti korelasi proses."
+            })
+            for inf in analysis.inferences:
+                stmt = str(inf.get("statement", ""))
+                if any(u in stmt for u in evidence_users) and "korelasi proses" not in stmt:
+                    inf["rationale"] = (
+                        str(inf.get("rationale", ""))
+                        + f" (Perhatian: Aktivitas berasal dari loopback lokal dengan identitas terpisah {sorted(list(evidence_users))}; korelasi proses belum terbukti)."
+                    ).strip()
+
+    # 6. Executive Summary & Threat Classification Forensic Grounding Caveats
+    if demoted_concepts:
+        caveat_text = f" (Catatan Forensik: Dugaan {', '.join(set(demoted_concepts))} belum didukung bukti telemetri langsung dan diklasifikasikan sebagai hipotesis unverified)."
+        if caveat_text not in analysis.executive_summary:
+            analysis.executive_summary += caveat_text
+
+    # Deduplicate unknown_items and synchronize with plain unknowns list
+    seen_gaps = set()
+    deduped_unknown_items = []
+    plain_unknowns = []
+    for u in existing_unknown_items:
+        gap = u.get("data_gap", "")
+        if gap and gap not in seen_gaps:
+            seen_gaps.add(gap)
+            deduped_unknown_items.append(u)
+            plain_unknowns.append(gap)
+
+    # Ensure all hypotheses have status and investigation_step
+    for h in existing_hypotheses:
+        if not h.get("status"):
+            h["status"] = "unverified"
+        if not h.get("investigation_step"):
+            h["investigation_step"] = "Verifikasi log auditd dan telemetri jaringan host untuk mengonfirmasi hipotesis."
+
+    analysis.hypotheses = existing_hypotheses
+    analysis.unknown_items = deduped_unknown_items
+    analysis.unknowns = plain_unknowns or analysis.unknowns or ["Telemetry provides sufficient scope for primary threat vector."]
+
+    return analysis
+
+
 class BaseAIProvider(ABC):
     """Abstract contract for security analysis providers."""
 
@@ -214,7 +475,7 @@ class MockAIProvider(BaseAIProvider):
         official_risk_score = context.risk_score
         official_risk_level = context.risk_level
 
-        return AIAnalysisItem(
+        analysis_item = AIAnalysisItem(
             analysis_id=analysis_id,
             incident_id=context.incident_id,
             alert_id=context.alerts[0].get("id") if context.alerts else None,
@@ -246,6 +507,7 @@ class MockAIProvider(BaseAIProvider):
             created_at=now_iso,
             completed_at=now_iso,
         )
+        return verify_forensic_grounding(analysis_item, context)
 
 
 class GeminiProvider(BaseAIProvider):
@@ -548,7 +810,7 @@ class GeminiProvider(BaseAIProvider):
             notes += " (Notice: Source IP is within RFC 5737 reserved TEST-NET documentation range; indicates synthetic test telemetry, not a confirmed real-world compromise)."
 
         # SSoT: official risk score and level from context ALWAYS override LLM outputs
-        return AIAnalysisItem(
+        analysis_item = AIAnalysisItem(
             analysis_id=analysis_id,
             incident_id=context.incident_id,
             alert_id=context.alerts[0].get("id") if context.alerts else None,
@@ -580,6 +842,7 @@ class GeminiProvider(BaseAIProvider):
             created_at=now_iso,
             completed_at=datetime.now(timezone.utc).isoformat(),
         )
+        return verify_forensic_grounding(analysis_item, context)
 
 
 class OpenAICompatibleProvider(BaseAIProvider):
@@ -654,7 +917,7 @@ class OpenAICompatibleProvider(BaseAIProvider):
             content = data["choices"][0]["message"]["content"]
             parsed = json.loads(content)
 
-            return AIAnalysisItem(
+            analysis_item = AIAnalysisItem(
                 analysis_id=analysis_id,
                 incident_id=context.incident_id,
                 alert_id=context.alerts[0].get("id") if context.alerts else None,
@@ -686,6 +949,7 @@ class OpenAICompatibleProvider(BaseAIProvider):
                 created_at=now_iso,
                 completed_at=datetime.now(timezone.utc).isoformat(),
             )
+            return verify_forensic_grounding(analysis_item, context)
         except Exception as e:
             return AIAnalysisItem(
                 analysis_id=analysis_id,

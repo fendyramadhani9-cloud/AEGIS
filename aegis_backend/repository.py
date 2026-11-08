@@ -180,6 +180,11 @@ class BaseAegisRepository(ABC):
         pass
 
     @abstractmethod
+    def get_incident_risk_factors(self, incident_id: str) -> List[Dict[str, Any]]:
+        """Returns risk factors for the incident."""
+        pass
+
+    @abstractmethod
     def list_incidents(
         self,
         limit: int = 50,
@@ -749,7 +754,22 @@ class SupabaseRepository(BaseAegisRepository):
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to fetch incident %s: %s", incident_id, e)
                 raise RuntimeError(f"Cloud SSoT incident lookup failed: {e}") from e
-        return self.sqlite_store.get_incident_by_id(incident_id)
+        inc = self.sqlite_store.get_incident_by_id(incident_id)
+        if inc and not inc.get("risk_factors"):
+            try:
+                inc["risk_factors"] = self.sqlite_store.get_incident_risk_factors(incident_id)
+            except Exception:
+                inc["risk_factors"] = []
+        return inc
+
+    def get_incident_risk_factors(self, incident_id: str) -> List[Dict[str, Any]]:
+        if self.mode == "cloud_ssot" and self.client:
+            try:
+                rf_res = self.client.table("incident_risk_factors").select("*").eq("incident_id", incident_id).execute()
+                return rf_res.data or []
+            except Exception:
+                pass
+        return self.sqlite_store.get_incident_risk_factors(incident_id)
 
     def list_incidents(
         self,
@@ -1606,7 +1626,22 @@ class MockAegisRepository(BaseAegisRepository):
             except Exception as e:
                 logger.error("FATAL [Cloud SSoT]: Failed to fetch incident %s: %s", incident_id, e)
                 raise RuntimeError(f"Cloud SSoT incident lookup failed: {e}") from e
-        return self.sqlite_store.get_incident_by_id(incident_id)
+        inc = self.sqlite_store.get_incident_by_id(incident_id)
+        if inc and not inc.get("risk_factors"):
+            try:
+                inc["risk_factors"] = self.sqlite_store.get_incident_risk_factors(incident_id)
+            except Exception:
+                inc["risk_factors"] = []
+        return inc
+
+    def get_incident_risk_factors(self, incident_id: str) -> List[Dict[str, Any]]:
+        if self.mode == "cloud_ssot" and self.client:
+            try:
+                rf_res = self.client.table("incident_risk_factors").select("*").eq("incident_id", incident_id).execute()
+                return rf_res.data or []
+            except Exception:
+                pass
+        return self.sqlite_store.get_incident_risk_factors(incident_id)
 
     def list_incidents(
         self,

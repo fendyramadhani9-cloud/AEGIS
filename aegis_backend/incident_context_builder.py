@@ -33,6 +33,8 @@ class IncidentContext:
         risk_score: int = 0,
         risk_level: str = "low",
         provenance: str = "genuine_host_telemetry",
+        risk_factors: Optional[List[Dict[str, Any]]] = None,
+        allowed_evidence_ids: Optional[Set[str]] = None,
     ):
         self.incident_id = incident_id
         self.host_id = host_id
@@ -47,12 +49,17 @@ class IncidentContext:
         self.risk_score = risk_score
         self.risk_level = risk_level
         self.provenance = provenance
+        self.risk_factors = risk_factors or []
         self.source_attribution = classify_ip_source(self.source_ip)
-        self.allowed_evidence_ids: Set[str] = {
+        self.allowed_evidence_ids: Set[str] = allowed_evidence_ids or {
             ev.get("event_id") or ev.get("id") for ev in evidence_items if (ev.get("event_id") or ev.get("id"))
         }
 
     def to_dict(self) -> Dict[str, Any]:
+        risk_factor_summary = [
+            f"[{rf.get('category', 'general').upper()}] {rf.get('factor_name', rf.get('name', 'Risk Factor'))} (+{rf.get('points', 0)} pts): {rf.get('description', '')}"
+            for rf in self.risk_factors
+        ]
         return {
             "incident_id": self.incident_id,
             "host_id": self.host_id,
@@ -60,6 +67,8 @@ class IncidentContext:
             "severity": self.severity,
             "official_risk_score": self.risk_score,
             "official_risk_level": self.risk_level,
+            "risk_factors": self.risk_factors,
+            "risk_factor_summary": risk_factor_summary,
             "provenance": self.provenance,
             "source_attribution": classify_ip_source(self.source_ip),
             "alerts": self.alerts,
@@ -84,18 +93,30 @@ class IncidentContextBuilder:
         alerts: List[Dict[str, Any]],
         evidence_items: List[Dict[str, Any]],
         posture_findings: Optional[List[Dict[str, Any]]] = None,
+        risk_factors: Optional[List[Dict[str, Any]]] = None,
     ) -> IncidentContext:
         sanitizer = TelemetrySanitizer()
 
         # Sanitize alerts
         sanitized_alerts: List[Dict[str, Any]] = []
+        alert_referenced_evidence_ids: Set[str] = set()
         for a in alerts:
             clean_a = dict(a)
             if "reason" in clean_a:
                 clean_a["reason"] = sanitizer.mask_text(str(clean_a["reason"]))
             sanitized_alerts.append(clean_a)
+            for eid in clean_a.get("evidence_ids", []) or []:
+                if eid:
+                    alert_referenced_evidence_ids.add(str(eid))
 
-        # Sanitize evidence items
+        # Build complete set of allowed evidence IDs before any budgeting
+        all_allowed_ids: Set[str] = set()
+        for ev in evidence_items:
+            eid = ev.get("event_id") or ev.get("id")
+            if eid:
+                all_allowed_ids.add(str(eid))
+
+        # Sanitize and prioritize evidence items (token budgeting: max 15 prioritized items)
         sanitized_evidence: List[Dict[str, Any]] = []
         for ev in evidence_items:
             clean_ev = dict(ev)
@@ -105,8 +126,22 @@ class IncidentContextBuilder:
                 clean_ev["details"] = sanitizer.mask_dict(clean_ev["details"])
             # Normalize event_id key
             ev_id = clean_ev.get("event_id") or clean_ev.get("id")
-            clean_ev["event_id"] = ev_id
+            clean_ev["event_id"] = str(ev_id) if ev_id else None
             sanitized_evidence.append(clean_ev)
+
+        # Prioritization: trigger / alert-referenced > failure/escalation > others
+        def _evidence_priority(item: Dict[str, Any]) -> int:
+            eid = item.get("event_id")
+            score = 0
+            if eid and eid in alert_referenced_evidence_ids:
+                score += 10
+            msg = str(item.get("message", "")).lower()
+            if any(k in msg for k in ("fail", "invalid", "root", "sudo", "error", "denied")):
+                score += 5
+            return score
+
+        sanitized_evidence.sort(key=_evidence_priority, reverse=True)
+        budgeted_evidence = sanitized_evidence[:15]
 
         # Filter relevant posture findings for this host
         host_id = incident.get("host_id", "")
@@ -123,13 +158,15 @@ class IncidentContextBuilder:
                         "expected_value": str(pf.get("expected_value", "")),
                     })
 
+        resolved_risk_factors = risk_factors or incident.get("risk_factors") or []
+
         return IncidentContext(
             incident_id=incident.get("id", ""),
             host_id=host_id,
             title=incident.get("title", ""),
             severity=incident.get("severity", "medium"),
             alerts=sanitized_alerts,
-            evidence_items=sanitized_evidence,
+            evidence_items=budgeted_evidence,
             posture_findings=relevant_posture,
             source_ip=incident.get("source_ip"),
             target_user=incident.get("target_user"),
@@ -137,4 +174,6 @@ class IncidentContextBuilder:
             risk_score=incident.get("risk_score", 0),
             risk_level=incident.get("risk_level", incident.get("severity", "medium")),
             provenance=incident.get("provenance", "genuine_host_telemetry"),
+            risk_factors=resolved_risk_factors,
+            allowed_evidence_ids=all_allowed_ids,
         )
