@@ -12,6 +12,8 @@ Defines explicit, deterministic operational states for the AEGIS database subsys
 - RESTORED: Reconciliation completed and verified, ready for transition to target operational state.
 """
 
+import os
+import json
 from enum import Enum
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
@@ -143,7 +145,41 @@ class DatabaseStateMachine:
             "DATABASE STATE TRANSITION: [%s] -> [%s] | Operator: %s | Reason: %s",
             prev.value, target_state.value, operator, reason,
         )
+        self.persist_state()
         return True
+
+    def persist_state(self, filepath: Optional[str] = None) -> bool:
+        """Persists current state to disk for operator auditing and crash recovery."""
+        target_path = filepath or os.getenv("AEGIS_STATE_FILE", "data/.database_state.json")
+        try:
+            parent_dir = os.path.dirname(target_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
+            with open(target_path, "w", encoding="utf-8") as f:
+                json.dump(self.get_health_summary(), f, indent=2)
+            return True
+        except Exception as e:
+            logger.debug("Failed to persist state file: %s", e)
+            return False
+
+    def load_persisted_state(self, filepath: Optional[str] = None) -> bool:
+        """Loads persisted state from disk if available."""
+        target_path = filepath or os.getenv("AEGIS_STATE_FILE", "data/.database_state.json")
+        if not os.path.exists(target_path):
+            return False
+        try:
+            with open(target_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            loaded_state = DatabaseState(data["current_state"])
+            self._state = loaded_state
+            self._reason = data.get("reason", "Loaded from persisted disk state")
+            self._operator = data.get("operator", "disk_recovery")
+            self._last_error = data.get("last_error")
+            self._catch_up_completed = data.get("catch_up_completed", False)
+            return True
+        except Exception as e:
+            logger.warning("Failed to load persisted state from %s: %s", target_path, e)
+            return False
 
     def is_mutation_allowed(self) -> bool:
         """
@@ -194,3 +230,4 @@ class DatabaseStateMachine:
 
 # Global singleton instance
 state_machine = DatabaseStateMachine()
+

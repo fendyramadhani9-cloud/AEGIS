@@ -447,3 +447,29 @@ def test_hybrid_failover_isolated_simulation(temp_sqlite_db):
     assert state_machine.current_state == DatabaseState.HYBRID
     assert state_machine.is_mutation_allowed() is True
     assert state_machine.get_authoritative_database() == "sqlite_local"
+
+
+def test_state_machine_disk_persistence_and_reload(tmp_path):
+    """Proves that DatabaseStateMachine can persist state to disk and restore it upon restart."""
+    from aegis_backend.state_machine import DatabaseStateMachine, DatabaseState
+    state_file = str(tmp_path / "test_state.json")
+
+    sm1 = DatabaseStateMachine(initial_state=DatabaseState.HYBRID)
+    sm1.transition_to(
+        DatabaseState.RECOVERY_REQUIRED,
+        reason="Consistency violation detected during test",
+        operator="sec_engineer",
+        force=True,
+    )
+    assert sm1.persist_state(filepath=state_file) is True
+
+    # Fresh state machine simulates backend restarting
+    sm2 = DatabaseStateMachine(initial_state=DatabaseState.HYBRID)
+    assert sm2.current_state == DatabaseState.HYBRID
+
+    # Load persisted state
+    assert sm2.load_persisted_state(filepath=state_file) is True
+    assert sm2.current_state == DatabaseState.RECOVERY_REQUIRED
+    assert sm2.reason == "Consistency violation detected during test"
+    assert sm2.is_mutation_allowed() is False
+    assert sm2.get_authoritative_database() == "none_recovery_required"

@@ -25,6 +25,7 @@ load_dotenv()
 
 TABLES_TO_AUDIT = [
     ("hosts", "id", None),
+    ("system_status", "id", None),
     ("alerts", "id", "host_id"),
     ("alert_evidence", None, "alert_id"),  # Composite PK: (alert_id, event_id)
     ("telemetry_events", "id", "host_id"),
@@ -153,3 +154,4 @@ def run_reconciliation_audit(sqlite_path: str = "data/vm_fenn_aegis_incidents.db
 if __name__ == "__main__":
     db_path = sys.argv[1] if len(sys.argv) > 1 else "data/vm_fenn_aegis_incidents.db"
     res = run_reconciliation_audit(db_path)
+
