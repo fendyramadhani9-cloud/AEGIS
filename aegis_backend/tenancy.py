@@ -811,6 +811,9 @@ class TenantScopedRepository(BaseAegisRepository):
     def replay_failed_mirrors(self) -> Dict[str, Any]:
         raise PermissionError("Platform administration is restricted to superadmin.")
 
+    def catch_up_unmirrored_from_cloud(self, batch_size: int = 100) -> Dict[str, Any]:
+        raise PermissionError("Platform administration is restricted to superadmin.")
+
     # ---- hosts -----------------------------------------------------------------
     def list_hosts(self, limit: int = 20, offset: int = 0, status: Optional[str] = None):
         rows = [h for h in self._drain(self._base.list_hosts, status=status) if self._ok(h.get("id"))]
