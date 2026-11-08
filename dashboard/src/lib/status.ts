@@ -5,6 +5,7 @@
  */
 import {
   Ban,
+  CircleAlert,
   CircleCheck,
   CircleDashed,
   CircleDot,
@@ -17,10 +18,10 @@ import {
   LoaderCircle,
   OctagonAlert,
   Radio,
-  TriangleAlert,
-  CircleAlert,
-  Unplug,
+  Search,
   ShieldCheck,
+  TriangleAlert,
+  Unplug,
   CheckCircle2,
   AlertTriangle,
   HelpCircle,
@@ -34,6 +35,7 @@ import type {
   EvidenceStatus,
   FindingStatus,
   InvestigationStatus,
+  IncidentStatus,
   ReportStatus,
   Severity,
   SourceStatus,
@@ -67,6 +69,9 @@ export const severityMeta: Record<Severity, StatusMeta> = {
 export const findingStatusMeta: Record<FindingStatus, StatusMeta> = {
   fail: { label: 'Failed', tone: 'high', icon: TriangleAlert },
   pass: { label: 'Passed', tone: 'healthy', icon: CircleCheck },
+  warning: { label: 'Warning', tone: 'warning', icon: CircleAlert, hint: 'Potentially insecure configuration requiring review' },
+  not_applicable: { label: 'N/A', tone: 'disabled', icon: CircleMinus, hint: 'Check not applicable to this host distribution or profile' },
+  error: { label: 'Error', tone: 'critical', icon: Ban, hint: 'Inspection failed or target configuration unreadable' },
   not_checked: {
     label: 'Not checked',
     tone: 'unknown',
@@ -132,6 +137,15 @@ export const investigationStatusMeta: Record<InvestigationStatus, StatusMeta> = 
   contained: { label: 'Contained', tone: 'info', icon: ShieldCheck, hint: 'Threat activity isolated pending full verification' },
   escalated: { label: 'Escalated', tone: 'critical', icon: TriangleAlert, hint: 'Escalated to senior incident response' },
   closed: { label: 'Closed', tone: 'healthy', icon: CircleCheck, hint: 'Investigation formally archived' },
+};
+
+export const incidentStatusMeta: Record<IncidentStatus, StatusMeta> = {
+  open: { label: 'Open', tone: 'critical', icon: OctagonAlert, hint: 'Newly correlated incident requiring review' },
+  investigating: { label: 'Investigating', tone: 'high', icon: Search, hint: 'Active investigation in progress' },
+  mitigated: { label: 'Mitigated', tone: 'warning', icon: CircleAlert, hint: 'Threat contained, remediation pending verification' },
+  resolved: { label: 'Resolved', tone: 'healthy', icon: ShieldCheck, hint: 'Incident resolved and verified' },
+  closed: { label: 'Closed', tone: 'disabled', icon: CircleCheck, hint: 'Archived and completed' },
+  false_positive: { label: 'False Positive', tone: 'disabled', icon: Ban, hint: 'Dismissed as non-malicious' },
 };
 
 export const sourceLabel: Record<string, string> = {

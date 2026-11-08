@@ -125,7 +125,7 @@ class AegisTelemetryCollector:
             return
 
         try:
-            cmd = ["journalctl", "-u", "ssh", "-n", "1", "--show-cursor", "--no-pager"]
+            cmd = ["journalctl", "_SYSTEMD_UNIT=ssh.service", "+", "_COMM=sudo", "-n", "1", "--show-cursor", "--no-pager"]
             res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
             cursor = self._extract_cursor(res.stdout)
             if cursor:
@@ -150,7 +150,9 @@ class AegisTelemetryCollector:
         try:
             cmd = [
                 "journalctl",
-                "-u", "ssh",
+                "_SYSTEMD_UNIT=ssh.service",
+                "+",
+                "_COMM=sudo",
                 f"--after-cursor={current_cursor}",
                 "--show-cursor",
                 "-n", "100",

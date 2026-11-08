@@ -1,10 +1,33 @@
 import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { CircleHelp, ListTree, Radio, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CircleHelp,
+  ListTree,
+  Play,
+  Radio,
+  RefreshCw,
+  RotateCw,
+  ShieldCheck,
+  Unplug,
+} from 'lucide-react';
 import { Screen } from '../components/AppShell';
 import { AlertRow, EvidenceBanner, FindingRow, GapRow } from '../components/domain';
 import { EmptyState, QueryView, SkeletonBlock } from '../components/states';
-import { Badge, Button, Group, KeyValues, LinkButton, Notice, Row, Section, Segmented, Tag, Unavailable } from '../components/ui';
+import {
+  Badge,
+  Button,
+  Group,
+  KeyValues,
+  LinkButton,
+  Notice,
+  Row,
+  Section,
+  Segmented,
+  Tag,
+  Unavailable,
+} from '../components/ui';
 import { actions, api } from '../data/api';
 import { useQuery } from '../lib/hooks';
 import { agentStatusMeta, sourceLabel, sourceStatusMeta } from '../lib/status';
@@ -16,6 +39,8 @@ export function HostDetailScreen() {
   const { id = '' } = useParams();
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'alerts';
+  const [triggering, setTriggering] = useState(false);
+  const [triggerNotice, setTriggerNotice] = useState<{ tone: 'healthy' | 'critical'; text: string } | null>(null);
   const { when, dateTime } = useTimeFormat();
   const [scanning, setScanning] = useState(false);
 

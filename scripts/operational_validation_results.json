@@ -1,0 +1,248 @@
+{
+  "execution_timestamp": "2026-11-08T03:51:06.016991+00:00",
+  "host": "fenn",
+  "scenarios": {
+    "scenario_a_ssh_failure": {
+      "target_ip": "127.0.0.1",
+      "username": "sec_test_user",
+      "attempts_made": 3,
+      "results": [
+        {
+          "attempt": 1,
+          "status": "failed_as_expected"
+        },
+        {
+          "attempt": 2,
+          "status": "failed_as_expected"
+        },
+        {
+          "attempt": 3,
+          "status": "failed_as_expected"
+        }
+      ],
+      "status": "PASS"
+    },
+    "scenario_b_ssh_success": {
+      "target_ip": "127.0.0.1",
+      "username": "ubuntu",
+      "auth_method": "publickey",
+      "result": {
+        "status": "success",
+        "session_output": "ubuntu\nfenn"
+      },
+      "status": "PASS"
+    },
+    "scenario_c_normal_sudo": {
+      "commands": [
+        {
+          "command": "/usr/bin/uptime",
+          "returncode": 0,
+          "stdout": "10:51:35 up  1:28,  2 users,  load average: 0.00, 0.01, 0.00"
+        },
+        {
+          "command": "/usr/bin/systemctl status ssh",
+          "returncode": 0
+        }
+      ],
+      "status": "PASS"
+    },
+    "scenario_d_suspicious_sudo": {
+      "executed_command": "sudo /bin/bash -c \"echo 'controlled_aegis_test_execution_by_ubuntu'\"",
+      "result": {
+        "command": "/bin/bash -c ...",
+        "returncode": 0,
+        "stdout": "controlled_aegis_test_execution_by_ubuntu"
+      },
+      "status": "PASS"
+    }
+  },
+  "pipeline_verification": {},
+  "alerts_verification": {
+    "total_alerts": 13,
+    "rule_ssh_brute_count": 3,
+    "rule_auth_003_count": 4,
+    "rule_susp_sudo_count": 6,
+    "benign_sudo_uptime_alerts": 0,
+    "false_positive_rate": 0.0,
+    "rule_ssh_brute_triggered": true,
+    "rule_auth_003_triggered": true,
+    "rule_susp_sudo_triggered": true,
+    "sample_alerts": [
+      {
+        "id": "ALT-SUDO-0a21c23cbbec71de",
+        "host_id": "host-fenn-ubuntu",
+        "rule_id": "RULE-SUSP-SUDO",
+        "rule_version": "1.0",
+        "title": "Suspicious Root Shell / Script Execution via Sudo",
+        "severity": "high",
+        "detected_at": "2026-11-08T10:51:55+00:00",
+        "reason": "Privileged execution of interactive shell or remote script by user 'ubuntu': '/bin/bash -c 'echo \\'controlled_aegis_test_execution_by_ubuntu\\'''.",
+        "created_at": "2026-11-08T03:52:05.915448+00:00"
+      },
+      {
+        "id": "ALT-AUTH-dec0a3a8e5797104",
+        "host_id": "host-fenn-ubuntu",
+        "rule_id": "RULE-AUTH-003",
+        "rule_version": "1.0",
+        "title": "Multiple Failed Logins Followed by Success",
+        "severity": "high",
+        "detected_at": "2026-11-08T10:51:20+00:00",
+        "reason": "Authentication success on host 'host-fenn-ubuntu' for IP '127.0.0.1', user 'ubuntu' preceded by 1 failed attempt(s) within 3s.",
+        "created_at": "2026-11-08T03:51:33.099044+00:00"
+      },
+      {
+        "id": "ALT-SUDO-30c0979d380cc88b",
+        "host_id": "host-fenn-ubuntu",
+        "rule_id": "RULE-SUSP-SUDO",
+        "rule_version": "1.0",
+        "title": "Suspicious Root Shell / Script Execution via Sudo",
+        "severity": "high",
+        "detected_at": "2026-11-08T10:49:47+00:00",
+        "reason": "Privileged execution of interactive shell or remote script by user 'ubuntu': '/bin/bash -c 'echo \\'controlled_aegis_test_execution_by_ubuntu\\'''.",
+        "created_at": "2026-11-08T03:50:00.226979+00:00"
+      },
+      {
+        "id": "ALT-BRUTE-102882af5908b339",
+        "host_id": "host-fenn-ubuntu",
+        "rule_id": "RULE-SSH-BRUTE",
+        "rule_version": "1.0",
+        "title": "SSH Repeated Authentication Failures (Brute-Force)",
+        "severity": "high",
+        "detected_at": "2026-11-08T10:49:09+00:00",
+        "reason": "Observed 3 consecutive SSH authentication failures within 9s correlated by source IP '127.0.0.1'.",
+        "created_at": "2026-11-08T03:49:10.600444+00:00"
+      },
+      {
+        "id": "ALT-SUDO-d3949a8042c107a3",
+        "host_id": "host-fenn-ubuntu",
+        "rule_id": "RULE-SUSP-SUDO",
+        "rule_version": "1.0",
+        "title": "Suspicious Root Shell / Script Execution via Sudo",
+        "severity": "high",
+        "detected_at": "2026-11-07T16:30:00+00:00",
+        "reason": "Privileged execution of interactive shell or remote script by user 'ubuntu': '/bin/bash'.",
+        "created_at": "2026-11-07T08:58:45.459294+00:00"
+      }
+    ]
+  },
+  "incident_verification": {
+    "total_incidents": 14,
+    "synthetic_benchmark_count": 8,
+    "controlled_operational_test_count": 2,
+    "genuine_host_telemetry_count": 4,
+    "operational_incidents": [
+      {
+        "id": "INC-host-fenn-ubuntu-8c09ddcc6166",
+        "host_id": "host-fenn-ubuntu",
+        "title": "Multi-Stage Brute-Force to Privileged Sudo Shell on host-fenn-ubuntu",
+        "severity": "high",
+        "risk_level": "high",
+        "risk_score": 82,
+        "status": "new",
+        "primary_alert_id": "ALT-BRUTE-102882af5908b339",
+        "alert_count": 3,
+        "source_ip": "127.0.0.1",
+        "target_user": "ubuntu",
+        "attack_scenario": "Adversary launched automated SSH authentication brute-force from 127.0.0.1, succeeded in authenticating as user 'ubuntu', and executed privileged root shell via sudo.",
+        "correlation_reason": "Causal attack chain progression: Repeated failed logins followed by successful authentication from 127.0.0.1.; Causal attack chain progression: Successful authentication followed by privileged sudo execution by user 'ubuntu'.",
+        "assigned_to": null,
+        "first_seen_at": "2026-11-08T10:49:09+00:00",
+        "last_seen_at": "2026-11-08T10:51:55+00:00",
+        "created_at": "2026-11-08T03:52:22.819609+00:00",
+        "updated_at": "2026-11-08T03:52:22.819609+00:00",
+        "storage_backend": "sqlite_local",
+        "provenance": "controlled_operational_test"
+      },
+      {
+        "id": "INC-host-fenn-ubuntu-1062a452b040",
+        "host_id": "host-fenn-ubuntu",
+        "title": "Repeated SSH Authentication Failures (Brute-Force) on host-fenn-ubuntu",
+        "severity": "high",
+        "risk_level": "low",
+        "risk_score": 32,
+        "status": "new",
+        "primary_alert_id": "ALT-BRUTE-102882af5908b339",
+        "alert_count": 1,
+        "source_ip": "127.0.0.1",
+        "target_user": null,
+        "attack_scenario": "External source IP 127.0.0.1 generated repeated authentication failures against SSH.",
+        "correlation_reason": "Single isolated security detection on host.",
+        "assigned_to": null,
+        "first_seen_at": "2026-11-08T10:49:09+00:00",
+        "last_seen_at": "2026-11-08T10:49:09+00:00",
+        "created_at": "2026-11-08T03:50:13.775658+00:00",
+        "updated_at": "2026-11-08T03:50:13.775658+00:00",
+        "storage_backend": "sqlite_local",
+        "provenance": "controlled_operational_test"
+      }
+    ],
+    "synthetic_incidents_preserved": true,
+    "status": "PASS"
+  },
+  "ai_investigation_verification": {
+    "incident_id": "INC-host-fenn-ubuntu-8c09ddcc6166",
+    "provider": "gemini",
+    "model": "gemini-3.5-flash-lite",
+    "threat_classification": "T1110.001 - Brute Force: Password Guessing & T1548.003 - Abuse Elevation Control Mechanism: Sudo",
+    "risk_score": 85,
+    "risk_level": "high",
+    "facts_count": 6,
+    "inferences_count": 2,
+    "hypotheses_count": 1,
+    "unknown_items_count": 1,
+    "real_ip_referenced": true,
+    "synthetic_ip_hallucinated": false,
+    "sample_facts": [
+      {
+        "evidence_id": "EVT-host-fenn-ubuntu-AUTH-FAIL-47691",
+        "fact": "Failed SSH authentication for user 'sec_test_user' from 127.0.0.1:60736 due to invalid_password.",
+        "timestamp": "2026-11-08T10:49:00+00:00"
+      },
+      {
+        "evidence_id": "EVT-host-fenn-ubuntu-AUTH-FAIL-47696",
+        "fact": "Failed SSH authentication for user 'sec_test_user' from 127.0.0.1:47458 due to invalid_password.",
+        "timestamp": "2026-11-08T10:49:05+00:00"
+      },
+      {
+        "evidence_id": "EVT-host-fenn-ubuntu-AUTH-FAIL-47700",
+        "fact": "Failed SSH authentication for user 'sec_test_user' from 127.0.0.1:47466 due to invalid_password.",
+        "timestamp": "2026-11-08T10:49:09+00:00"
+      }
+    ],
+    "sample_inferences": [
+      {
+        "statement": "The rapid succession of failed SSH login attempts represents a brute-force or automated password guessing routine originating from localhost.",
+        "supporting_evidence_ids": [
+          "EVT-host-fenn-ubuntu-AUTH-FAIL-47691",
+          "EVT-host-fenn-ubuntu-AUTH-FAIL-47696",
+          "EVT-host-fenn-ubuntu-AUTH-FAIL-47700",
+          "EVT-host-fenn-ubuntu-AUTH-FAIL-47830"
+        ],
+        "rationale": "Multiple failures occurred within short time windows from the same source IP (127.0.0.1) targeting an invalid password configuration."
+      },
+      {
+        "statement": "The session successfully transitioned to user 'ubuntu' via public key authentication shortly after the authentication failures.",
+        "supporting_evidence_ids": [
+          "EVT-host-fenn-ubuntu-AUTH-SUCCESS-47834"
+        ],
+        "rationale": "SSH daemon logs show an accepted publickey authentication event for 'ubuntu' from 127.0.0.1."
+      }
+    ],
+    "recommended_actions": [
+      {
+        "priority": "high",
+        "action": "Verify with the security and operations teams whether the execution and brute-force attempts correspond to a scheduled penetration test or validation script."
+      },
+      {
+        "priority": "medium",
+        "action": "Review SSH configuration to restrict unnecessary local or remote login access if not required."
+      },
+      {
+        "priority": "medium",
+        "action": "Audit sudoers configuration to ensure user 'ubuntu' has appropriate and restricted privileges."
+      }
+    ],
+    "status": "PASS"
+  },
+  "conclusions": {}
+}

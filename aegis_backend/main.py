@@ -7,10 +7,20 @@ and repository dependency injection.
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 import logging
 from aegis_backend.config import settings
 from aegis_backend.schemas import ErrorResponse
-from aegis_backend.routers import health, system, hosts, alerts, telemetry, operations
+from aegis_backend.routers import (
+    health,
+    system,
+    hosts,
+    alerts,
+    telemetry,
+    operations,
+    security_checker,
+    incidents,
+)
 
 # Setup logging
 logging.basicConfig(
@@ -19,6 +29,54 @@ logging.basicConfig(
 )
 logger = logging.getLogger("aegis_backend")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager to run startup, background tasks, and shutdown procedures."""
+    logger.info("Initializing AEGIS Backend in database mode: %s", settings.database_mode)
+    mirror_worker_task = None
+
+    if settings.database_mode == "cloud_ssot":
+        # 1. Startup immediate catch-up replay
+        try:
+            from aegis_backend.repository import get_repository
+            repo = get_repository()
+            if hasattr(repo, "replay_failed_mirrors"):
+                res = repo.replay_failed_mirrors()
+                if res.get("replayed", 0) > 0:
+                    logger.info("Startup mirror replay recovered %d records: %s", res.get("replayed"), res)
+        except Exception as e:
+            logger.warning("Startup mirror replay encountered an error: %s", e)
+
+        # 2. Continuous background worker for mirror recovery (every 60s)
+        async def _periodic_mirror_worker():
+            import asyncio
+            while True:
+                try:
+                    await asyncio.sleep(60)
+                    repo = get_repository()
+                    if hasattr(repo, "replay_failed_mirrors"):
+                        res = repo.replay_failed_mirrors()
+                        if res.get("replayed", 0) > 0:
+                            logger.info("Background mirror worker recovered %d records: %s", res.get("replayed"), res)
+                except asyncio.CancelledError:
+                    break
+                except Exception as ex:
+                    logger.debug("Background mirror worker non-critical error: %s", ex)
+
+        import asyncio
+        mirror_worker_task = asyncio.create_task(_periodic_mirror_worker())
+
+    yield
+
+    if mirror_worker_task:
+        mirror_worker_task.cancel()
+        try:
+            await mirror_worker_task
+        except Exception:
+            pass
+
+    logger.info("Shutting down AEGIS Backend...")
+
 # Create FastAPI app
 app = FastAPI(
     title="AEGIS Security Monitoring & Incident Investigation Backend",
@@ -26,6 +84,7 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # CORS Middleware (Configurable via AEGIS_CORS_ORIGINS)
@@ -74,6 +133,8 @@ app.include_router(hosts.router)
 app.include_router(alerts.router)
 app.include_router(telemetry.router)
 app.include_router(operations.router)
+app.include_router(security_checker.router)
+app.include_router(incidents.router)
 
 
 @app.get("/", include_in_schema=False)

@@ -12,6 +12,7 @@ import logging
 from supabase import create_client, Client
 from aegis_backend.config import settings
 from aegis_backend.sanitizer import TelemetrySanitizer
+from aegis_backend.sqlite_storage import SqliteIncidentStore
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,18 @@ class BaseAegisRepository(ABC):
                 is_safe, _ = TelemetrySanitizer.inspect_line(v)
                 cleaned[k] = v if is_safe else "[REDACTED]"
             elif isinstance(v, dict):
-                cleaned[k] = BaseAegisRepository._sanitize_details(v) if hasattr(BaseAegisRepository, '_sanitize_details') else v
+                cleaned[k] = BaseAegisRepository._sanitize_details(v)
+            elif isinstance(v, list):
+                cleaned_list = []
+                for item in v:
+                    if isinstance(item, dict):
+                        cleaned_list.append(BaseAegisRepository._sanitize_details(item))
+                    elif isinstance(item, str):
+                        is_safe, _ = TelemetrySanitizer.inspect_line(item)
+                        cleaned_list.append(item if is_safe else "[REDACTED]")
+                    else:
+                        cleaned_list.append(item)
+                cleaned[k] = cleaned_list
             else:
                 cleaned[k] = v
         return cleaned
@@ -109,6 +121,137 @@ class BaseAegisRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    def insert_security_check_run(
+        self,
+        run_data: Dict[str, Any],
+        findings: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Persists security check run and associated findings."""
+        pass
+
+    @abstractmethod
+    def list_security_findings(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        category: Optional[str] = None,
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Returns paginated security findings matching filters and total count."""
+        pass
+
+    @abstractmethod
+    def get_security_finding_by_id(self, finding_id: str) -> Optional[Dict[str, Any]]:
+        """Returns single finding by ID or None."""
+        pass
+
+    @abstractmethod
+    def list_security_runs(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Returns paginated security check execution runs and total count."""
+        pass
+
+    @abstractmethod
+    def get_security_run_by_id(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """Returns run by ID with its summary or None."""
+        pass
+
+    @abstractmethod
+    def get_security_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        """Returns aggregated posture counters (total, pass, fail, warning, etc.)."""
+        pass
+
+    @abstractmethod
+    def get_host_security_history(self, host_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Returns recent security runs for a host to enable history comparison."""
+        pass
+
+    @abstractmethod
+    def get_incident_by_id(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        """Returns single incident by ID or None."""
+        pass
+
+    @abstractmethod
+    def get_incident_risk_factors(self, incident_id: str) -> List[Dict[str, Any]]:
+        """Returns risk factors for the incident."""
+        pass
+
+    @abstractmethod
+    def list_incidents(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        status: Optional[str] = None,
+        severity: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Returns paginated incidents matching filters and total count."""
+        pass
+
+    @abstractmethod
+    def upsert_incident(
+        self,
+        incident_data: Dict[str, Any],
+        alert_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Creates or updates an incident and links its correlated alerts."""
+        pass
+
+    @abstractmethod
+    def update_incident_status(
+        self,
+        incident_id: str,
+        status: str,
+        note: Optional[str] = None,
+        operator: str = "admin",
+    ) -> Optional[Dict[str, Any]]:
+        """Updates incident status and logs transition in history."""
+        pass
+
+    @abstractmethod
+    def get_incident_alerts(self, incident_id: str) -> List[Dict[str, Any]]:
+        """Returns all alerts linked to an incident."""
+        pass
+
+    @abstractmethod
+    def save_ai_analysis(self, analysis_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Saves an AI analysis result linked to an incident or alert."""
+        pass
+
+    @abstractmethod
+    def get_latest_ai_analysis(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        """Returns the most recent AI analysis for an incident or None."""
+        pass
+
+    @abstractmethod
+    def get_incident_timeline(self, incident_id: str) -> List[Dict[str, Any]]:
+        """Returns chronological timeline items for an incident."""
+        pass
+
+    @abstractmethod
+    def get_incidents_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        """Returns aggregated incident lifecycle metrics and risk distribution."""
+        pass
+
+    @abstractmethod
+    def get_mirror_sync_stats(self) -> Dict[str, Any]:
+        """Returns statistics and logs of Cloud-to-SQLite mirror synchronization."""
+        pass
+
+    @abstractmethod
+    def replay_failed_mirrors(self) -> Dict[str, Any]:
+        """Replays any failed mirror operations to local SQLite replica."""
+        pass
+
 
 
 class SupabaseRepository(BaseAegisRepository):
@@ -118,12 +261,51 @@ class SupabaseRepository(BaseAegisRepository):
     """
 
     def __init__(self, client: Optional[Client] = None):
+        self.simulate_db_error = False
+        self.sqlite_store = SqliteIncidentStore(settings.sqlite_db_path)
         if client:
             self.client = client
         else:
             if not settings.is_supabase_configured:
                 raise ValueError("Cannot initialize SupabaseRepository: Supabase credentials not configured in environment.")
             self.client: Client = create_client(settings.supabase_url, settings.supabase_service_role_key)
+
+    def _execute_mirror(self, entity_type: str, entity_id: str, action: str, mirror_fn) -> None:
+        """
+        Executes local SQLite mirroring with retry (up to 3 attempts with exponential backoff)
+        and deterministic tracking in mirror_sync_log. Prevents silent synchronization drift.
+        """
+        attempts = 0
+        max_retries = 3
+        last_err = None
+        while attempts < max_retries:
+            attempts += 1
+            try:
+                mirror_fn()
+                self.sqlite_store.log_mirror_attempt(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    action=action,
+                    status="synced",
+                    retry_count=attempts - 1,
+                )
+                return
+            except Exception as e:
+                last_err = e
+                time.sleep(0.05 * (2 ** (attempts - 1)))
+
+        logger.error(
+            "SQLite mirror sync failed for %s:%s after %d retries: %s",
+            entity_type, entity_id, max_retries, last_err,
+        )
+        self.sqlite_store.log_mirror_attempt(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action=action,
+            status="pending_retry",
+            retry_count=max_retries,
+            error_message=str(last_err),
+        )
 
     def check_database_health(self) -> Tuple[bool, str, Optional[float]]:
         start_t = time.perf_counter()
@@ -207,7 +389,18 @@ class SupabaseRepository(BaseAegisRepository):
                 is_safe, _ = TelemetrySanitizer.inspect_line(v)
                 cleaned[k] = v if is_safe else "[REDACTED]"
             elif isinstance(v, dict):
-                cleaned[k] = BaseAegisRepository._sanitize_details(v) if hasattr(BaseAegisRepository, '_sanitize_details') else v
+                cleaned[k] = BaseAegisRepository._sanitize_details(v)
+            elif isinstance(v, list):
+                cleaned_list = []
+                for item in v:
+                    if isinstance(item, dict):
+                        cleaned_list.append(BaseAegisRepository._sanitize_details(item))
+                    elif isinstance(item, str):
+                        is_safe, _ = TelemetrySanitizer.inspect_line(item)
+                        cleaned_list.append(item if is_safe else "[REDACTED]")
+                    else:
+                        cleaned_list.append(item)
+                cleaned[k] = cleaned_list
             else:
                 cleaned[k] = v
         return cleaned
@@ -357,6 +550,678 @@ class SupabaseRepository(BaseAegisRepository):
 
         return inserted_alerts, inserted_evidence
 
+    def insert_security_check_run(
+        self,
+        run_data: Dict[str, Any],
+        findings: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Persists security check execution runs and findings.
+        Attempts Supabase Cloud table write first. If migration 003 is not deployed
+        (PGRST205 relation does not exist) or cloud is unreachable, falls back to
+        the persistent, disk-backed SQLite store.
+        If both fail, raises RuntimeError to prevent silent in-memory data loss.
+        """
+        try:
+            self.client.table("security_check_runs").upsert(
+                run_data,
+                on_conflict="id",
+            ).execute()
+
+            if findings:
+                self.client.table("security_findings").upsert(
+                    findings,
+                    on_conflict="run_id,check_id",
+                ).execute()
+
+            # Update host last_sc_run_at
+            if run_data.get("completed_at"):
+                self.client.table("hosts").update({
+                    "last_sc_run_at": run_data["completed_at"]
+                }).eq("id", run_data["host_id"]).execute()
+
+            # Mirror to local SQLite store with retry and audit logging
+            self._execute_mirror(
+                "security_check_run",
+                run_data["id"],
+                "upsert",
+                lambda: self.sqlite_store.upsert_security_check_run(run_data, findings),
+            )
+
+            return run_data
+        except Exception as e:
+            if settings.database_mode == "cloud_ssot":
+                logger.error("FATAL [Cloud SSoT]: Security check run write failed on Supabase Cloud: %s", e)
+                raise RuntimeError(f"Cloud SSoT write failed for security check run: {e}") from e
+            err_code = self._extract_postgrest_error_code(e)
+            logger.warning(
+                "Supabase security check run write unavailable (code: %s: %s). "
+                "Persisting to disk-backed SQLite storage.",
+                err_code,
+                e,
+            )
+            try:
+                return self.sqlite_store.upsert_security_check_run(run_data, findings)
+            except Exception as sqlite_err:
+                logger.critical("FATAL: Both Supabase and SQLite storage failed for security check run: %s", sqlite_err)
+                raise RuntimeError(f"Database write failed on both Supabase and SQLite: {sqlite_err}") from sqlite_err
+
+    def list_security_findings(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        category: Optional[str] = None,
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        try:
+            query = self.client.table("security_findings").select("*", count="exact")
+            if host_id:
+                query = query.eq("host_id", host_id)
+            if category:
+                query = query.eq("category", category)
+            if severity:
+                query = query.eq("severity", severity)
+            if status:
+                query = query.eq("status", status)
+            if search:
+                query = query.ilike("check_name", f"%{search}%")
+            query = query.order("checked_at", desc=True).range(offset, offset + limit - 1)
+            res = query.execute()
+            total = res.count if res.count is not None else len(res.data or [])
+            return res.data or [], total
+        except Exception as e:
+            if settings.database_mode == "cloud_ssot":
+                logger.error("FATAL [Cloud SSoT]: Failed to query security findings from Supabase Cloud: %s", e)
+                raise RuntimeError(f"Cloud SSoT query failed for security findings: {e}") from e
+            err_code = self._extract_postgrest_error_code(e)
+            logger.debug("Supabase security_findings unavailable (%s). Reading from persistent SQLite store.", err_code)
+            return self.sqlite_store.list_security_findings(
+                limit=limit,
+                offset=offset,
+                host_id=host_id,
+                category=category,
+                severity=severity,
+                status=status,
+                search=search,
+            )
+
+    def get_security_finding_by_id(self, finding_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            res = self.client.table("security_findings").select("*").eq("id", finding_id).limit(1).execute()
+            if res.data and len(res.data) > 0:
+                return res.data[0]
+            if settings.database_mode == "cloud_ssot":
+                return None
+            return self.sqlite_store.get_security_finding_by_id(finding_id)
+        except Exception as e:
+            if settings.database_mode == "cloud_ssot":
+                logger.error("FATAL [Cloud SSoT]: Failed to fetch security finding %s: %s", finding_id, e)
+                raise RuntimeError(f"Cloud SSoT lookup failed for security finding: {e}") from e
+            err_code = self._extract_postgrest_error_code(e)
+            logger.debug("Supabase finding lookup unavailable (%s). Reading from persistent SQLite store.", err_code)
+            return self.sqlite_store.get_security_finding_by_id(finding_id)
+
+    def list_security_runs(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        try:
+            query = self.client.table("security_check_runs").select("*", count="exact")
+            if host_id:
+                query = query.eq("host_id", host_id)
+            query = query.order("started_at", desc=True).range(offset, offset + limit - 1)
+            res = query.execute()
+            total = res.count if res.count is not None else len(res.data or [])
+            return res.data or [], total
+        except Exception as e:
+            if settings.database_mode == "cloud_ssot":
+                logger.error("FATAL [Cloud SSoT]: Failed to list security runs from Supabase: %s", e)
+                raise RuntimeError(f"Cloud SSoT query failed for security runs: {e}") from e
+            err_code = self._extract_postgrest_error_code(e)
+            logger.debug("Supabase security_check_runs unavailable (%s). Reading from persistent SQLite store.", err_code)
+            return self.sqlite_store.list_security_runs(limit=limit, offset=offset, host_id=host_id)
+
+    def get_security_run_by_id(self, run_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            res = self.client.table("security_check_runs").select("*").eq("id", run_id).limit(1).execute()
+            if res.data and len(res.data) > 0:
+                return res.data[0]
+            if settings.database_mode == "cloud_ssot":
+                return None
+            return self.sqlite_store.get_security_run_by_id(run_id)
+        except Exception as e:
+            if settings.database_mode == "cloud_ssot":
+                logger.error("FATAL [Cloud SSoT]: Failed to fetch security run %s: %s", run_id, e)
+                raise RuntimeError(f"Cloud SSoT lookup failed for security run: {e}") from e
+            err_code = self._extract_postgrest_error_code(e)
+            logger.debug("Supabase security run lookup unavailable (%s). Reading from persistent SQLite store.", err_code)
+            return self.sqlite_store.get_security_run_by_id(run_id)
+
+    def get_security_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        findings, _ = self.list_security_findings(limit=1000, offset=0, host_id=host_id)
+        _, total_hosts = self.list_hosts(limit=100)
+        
+        last_run_time = None
+        runs, _ = self.list_security_runs(limit=1, offset=0, host_id=host_id)
+        if runs:
+            last_run_time = runs[0].get("completed_at") or runs[0].get("started_at")
+
+        return {
+            "total_checks": len(findings),
+            "passed": sum(1 for f in findings if f.get("status") == "pass"),
+            "failed": sum(1 for f in findings if f.get("status") == "fail"),
+            "warning": sum(1 for f in findings if f.get("status") == "warning"),
+            "not_applicable": sum(1 for f in findings if f.get("status") == "not_applicable"),
+            "error": sum(1 for f in findings if f.get("status") == "error"),
+            "total_hosts": total_hosts,
+            "last_checked_at": last_run_time,
+            "critical_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "critical"),
+            "high_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "high"),
+            "medium_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "medium"),
+            "low_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "low"),
+        }
+
+    def get_host_security_history(self, host_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        runs, _ = self.list_security_runs(limit=limit, offset=0, host_id=host_id)
+        return runs
+
+    # ==========================================
+    # INCIDENT INVESTIGATION & AI ANALYSIS (SQLITE PERSISTENT)
+    # ==========================================
+
+    def get_incident_by_id(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incident.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                res = self.client.table("incidents").select("*").eq("id", incident_id).limit(1).execute()
+                if not res.data or len(res.data) == 0:
+                    return None
+                inc = res.data[0]
+                rel_res = self.client.table("incident_alerts").select("alert_id").eq("incident_id", incident_id).execute()
+                inc["alert_ids"] = [r["alert_id"] for r in (rel_res.data or [])]
+                if not inc["alert_ids"] and inc.get("primary_alert_id"):
+                    inc["alert_ids"] = [inc["primary_alert_id"]]
+                inc["alert_count"] = len(inc["alert_ids"])
+                rf_res = self.client.table("incident_risk_factors").select("*").eq("incident_id", incident_id).execute()
+                inc["risk_factors"] = rf_res.data or []
+                return inc
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to fetch incident %s: %s", incident_id, e)
+                raise RuntimeError(f"Cloud SSoT incident lookup failed: {e}") from e
+        inc = self.sqlite_store.get_incident_by_id(incident_id)
+        if inc and not inc.get("risk_factors"):
+            try:
+                inc["risk_factors"] = self.sqlite_store.get_incident_risk_factors(incident_id)
+            except Exception:
+                inc["risk_factors"] = []
+        return inc
+
+    def get_incident_risk_factors(self, incident_id: str) -> List[Dict[str, Any]]:
+        if self.mode == "cloud_ssot" and self.client:
+            try:
+                rf_res = self.client.table("incident_risk_factors").select("*").eq("incident_id", incident_id).execute()
+                return rf_res.data or []
+            except Exception:
+                pass
+        return self.sqlite_store.get_incident_risk_factors(incident_id)
+
+    def list_incidents(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        status: Optional[str] = None,
+        severity: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on list incidents.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                query = self.client.table("incidents").select("*", count="exact")
+                if host_id:
+                    query = query.eq("host_id", host_id)
+                if status:
+                    query = query.eq("status", status)
+                if severity:
+                    query = query.eq("risk_level", severity)
+                query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
+                res = query.execute()
+                items = res.data or []
+                total = res.count if res.count is not None else len(items)
+                if search:
+                    s_low = search.lower()
+                    items = [
+                        i for i in items
+                        if s_low in i.get("id", "").lower()
+                        or s_low in i.get("title", "").lower()
+                        or s_low in (i.get("attack_scenario") or "").lower()
+                    ]
+                return items, total
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to list incidents: %s", e)
+                raise RuntimeError(f"Cloud SSoT list incidents failed: {e}") from e
+
+        items, total = self.sqlite_store.list_incidents(
+            limit=limit,
+            offset=offset,
+            status=status,
+            risk_level=severity,
+            host_id=host_id,
+        )
+        if search:
+            s_low = search.lower()
+            items = [
+                i for i in items
+                if s_low in i.get("id", "").lower()
+                or s_low in i.get("title", "").lower()
+                or s_low in i.get("attack_scenario", "").lower()
+            ]
+        return items, total
+
+    def upsert_incident(
+        self,
+        incident_data: Dict[str, Any],
+        alert_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on upsert incident.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                inc_record = {
+                    "id": incident_data["id"],
+                    "host_id": incident_data.get("host_id") or "host-fenn-ubuntu",
+                    "title": incident_data.get("title", "Untitled Incident"),
+                    "severity": incident_data.get("severity", "medium"),
+                    "status": incident_data.get("status", "new"),
+                    "risk_level": incident_data.get("risk_level", "medium"),
+                    "risk_score": int(incident_data.get("risk_score", 50)),
+                    "alert_count": int(incident_data.get("alert_count", len(alert_ids or []))),
+                    "primary_alert_id": incident_data.get("primary_alert_id") or ((alert_ids or [])[0] if alert_ids else None),
+                    "source_ip": incident_data.get("source_ip"),
+                    "target_user": incident_data.get("target_user"),
+                    "attack_scenario": incident_data.get("attack_scenario"),
+                    "correlation_reason": incident_data.get("correlation_reason"),
+                    "provenance": incident_data.get("provenance", "synthetic_benchmark"),
+                    "source_category": incident_data.get("source_category", "unknown"),
+                    "source_label": incident_data.get("source_label"),
+                    "threat_actor_context": incident_data.get("threat_actor_context"),
+                    "first_seen_at": incident_data.get("first_seen_at") or now_iso,
+                    "last_seen_at": incident_data.get("last_seen_at") or now_iso,
+                    "created_at": incident_data.get("created_at") or now_iso,
+                    "updated_at": now_iso,
+                }
+                if "assigned_to" in incident_data:
+                    inc_record["assigned_to"] = incident_data["assigned_to"]
+
+                self.client.table("incidents").upsert(inc_record, on_conflict="id").execute()
+
+                all_alert_ids = list(dict.fromkeys((alert_ids or []) + ([inc_record["primary_alert_id"]] if inc_record.get("primary_alert_id") else [])))
+                if all_alert_ids:
+                    links = [
+                        {
+                            "id": f"REL-{incident_data['id']}-{aid}",
+                            "incident_id": incident_data["id"],
+                            "alert_id": aid,
+                            "created_at": now_iso,
+                        }
+                        for aid in all_alert_ids
+                    ]
+                    self.client.table("incident_alerts").upsert(links, on_conflict="incident_id,alert_id").execute()
+
+                risk_factors = incident_data.get("risk_factors") or []
+                if risk_factors:
+                    rf_rows = []
+                    for rf in risk_factors:
+                        fid = rf.get("factor_id") or rf.get("name") or "factor"
+                        rf_rows.append({
+                            "id": f"RF-{incident_data['id']}-{fid}",
+                            "incident_id": incident_data["id"],
+                            "factor_id": fid,
+                            "factor_name": rf.get("factor_name") or rf.get("name", fid),
+                            "points": int(rf.get("points", 0)),
+                            "category": rf.get("category", "base"),
+                            "description": rf.get("description", ""),
+                            "supporting_evidence_ids": rf.get("supporting_evidence_ids", []),
+                            "created_at": now_iso,
+                        })
+                    self.client.table("incident_risk_factors").upsert(rf_rows, on_conflict="incident_id,factor_id").execute()
+
+                self._execute_mirror(
+                    "incident",
+                    incident_data["id"],
+                    "upsert",
+                    lambda: self.sqlite_store.upsert_incident(incident_data, alert_ids, risk_factors),
+                )
+
+                return incident_data
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to upsert incident %s: %s", incident_data.get("id"), e)
+                raise RuntimeError(f"Cloud SSoT upsert incident failed: {e}") from e
+
+        return self.sqlite_store.upsert_incident(
+            incident_data=incident_data,
+            alert_ids=alert_ids,
+            risk_factors=incident_data.get("risk_factors", []),
+        )
+
+    def update_incident_status(
+        self,
+        incident_id: str,
+        status: str,
+        note: Optional[str] = None,
+        operator: str = "admin",
+    ) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on update incident status.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                curr = self.get_incident_by_id(incident_id)
+                if not curr:
+                    return None
+                old_st = curr.get("status", "new")
+                now_iso = datetime.now(timezone.utc).isoformat()
+                self.client.table("incidents").update({"status": status, "updated_at": now_iso}).eq("id", incident_id).execute()
+                hist_row = {
+                    "id": f"SH-{int(time.time()*1000)}",
+                    "incident_id": incident_id,
+                    "old_status": old_st,
+                    "new_status": status,
+                    "note": note,
+                    "operator": operator,
+                    "transitioned_at": now_iso,
+                }
+                self.client.table("incident_status_history").insert(hist_row).execute()
+                tl_row = {
+                    "id": f"TL-ST-{int(time.time()*1000)}",
+                    "incident_id": incident_id,
+                    "timestamp": now_iso,
+                    "kind": "status_change",
+                    "title": f"Status changed to {status}",
+                    "description": note or f"Status transitioned from {old_st} to {status} by {operator}",
+                    "severity": curr.get("severity", "medium"),
+                    "metadata": {"operator": operator, "old_status": old_st, "new_status": status},
+                    "created_at": now_iso,
+                }
+                self.client.table("incident_timeline").insert(tl_row).execute()
+                self._execute_mirror(
+                    "incident_status",
+                    incident_id,
+                    "update_status",
+                    lambda: self.sqlite_store.update_incident_status(incident_id, status, note, operator),
+                )
+                return self.get_incident_by_id(incident_id)
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to update status: %s", e)
+                raise RuntimeError(f"Cloud SSoT status update failed: {e}") from e
+
+        return self.sqlite_store.update_incident_status(
+            incident_id=incident_id,
+            status=status,
+            note=note,
+            operator=operator,
+        )
+
+    def get_incident_alerts(self, incident_id: str) -> List[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incident alerts.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                res = self.client.table("incident_alerts").select("alert_id").eq("incident_id", incident_id).execute()
+                alert_ids = [r["alert_id"] for r in (res.data or [])]
+                if not alert_ids:
+                    inc = self.get_incident_by_id(incident_id)
+                    if inc and inc.get("primary_alert_id"):
+                        alert_ids = [inc["primary_alert_id"]]
+                out = []
+                for aid in alert_ids:
+                    a = self.get_alert_by_id(aid)
+                    if a:
+                        out.append(a)
+                return out
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to get incident alerts: %s", e)
+                raise RuntimeError(f"Cloud SSoT get incident alerts failed: {e}") from e
+
+        alert_ids = self.sqlite_store.get_incident_alerts(incident_id)
+        if not alert_ids:
+            inc = self.sqlite_store.get_incident_by_id(incident_id)
+            if inc and inc.get("primary_alert_id"):
+                alert_ids = [inc["primary_alert_id"]]
+
+        out = []
+        for aid in alert_ids:
+            a = self.get_alert_by_id(aid)
+            if a:
+                out.append(a)
+        return out
+
+    def save_ai_analysis(self, analysis_data: Dict[str, Any]) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on save ai analysis.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                row = {
+                    "id": analysis_data["id"],
+                    "incident_id": analysis_data.get("incident_id"),
+                    "alert_id": analysis_data.get("alert_id"),
+                    "host_id": analysis_data.get("host_id") or "host-fenn-ubuntu",
+                    "analysis_status": analysis_data.get("analysis_status", "completed"),
+                    "threat_classification": analysis_data.get("threat_classification", "Unclassified"),
+                    "executive_summary": analysis_data.get("executive_summary", ""),
+                    "attack_scenario": analysis_data.get("attack_scenario", ""),
+                    "observed_behaviors": analysis_data.get("observed_behaviors", []),
+                    "timeline": analysis_data.get("timeline", []),
+                    "risk_level": analysis_data.get("risk_level", "medium"),
+                    "risk_score": int(analysis_data.get("risk_score", 50)),
+                    "confidence_level": analysis_data.get("confidence_level", "medium"),
+                    "confidence_reason": analysis_data.get("confidence_reason", ""),
+                    "facts": analysis_data.get("facts", []),
+                    "inferences": analysis_data.get("inferences", []),
+                    "hypotheses": analysis_data.get("hypotheses", []),
+                    "unknowns": analysis_data.get("unknowns", []),
+                    "unknown_items": analysis_data.get("unknown_items", []),
+                    "supporting_evidence": analysis_data.get("supporting_evidence", []),
+                    "contradicting_evidence": analysis_data.get("contradicting_evidence", []),
+                    "impact_assessment": analysis_data.get("impact_assessment", ""),
+                    "recommended_actions": analysis_data.get("recommended_actions", []),
+                    "containment_recommendations": analysis_data.get("containment_recommendations", []),
+                    "investigation_notes": analysis_data.get("investigation_notes"),
+                    "provider": analysis_data.get("provider", "gemini"),
+                    "model": analysis_data.get("model", "gemini-2.5-flash"),
+                    "created_at": analysis_data.get("created_at") or now_iso,
+                    "completed_at": analysis_data.get("completed_at") or now_iso,
+                }
+                self.client.table("ai_analyses").upsert(row, on_conflict="id").execute()
+                self._execute_mirror(
+                    "ai_analysis",
+                    analysis_data["id"],
+                    "save",
+                    lambda: self.sqlite_store.save_ai_analysis(analysis_data),
+                )
+                return analysis_data
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to save AI analysis: %s", e)
+                raise RuntimeError(f"Cloud SSoT save AI analysis failed: {e}") from e
+
+        return self.sqlite_store.save_ai_analysis(analysis_data)
+
+    def get_latest_ai_analysis(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get latest ai analysis.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                res = self.client.table("ai_analyses").select("*").eq("incident_id", incident_id).order("created_at", desc=True).limit(1).execute()
+                if res.data and len(res.data) > 0:
+                    return res.data[0]
+                return None
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to get latest AI analysis: %s", e)
+                raise RuntimeError(f"Cloud SSoT get latest AI analysis failed: {e}") from e
+
+        return self.sqlite_store.get_latest_ai_analysis(incident_id)
+
+    def get_incident_timeline(self, incident_id: str) -> List[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incident timeline.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                res = self.client.table("incident_timeline").select("*").eq("incident_id", incident_id).order("timestamp", desc=False).execute()
+                items = res.data or []
+                alerts = self.get_incident_alerts(incident_id)
+                for a in alerts:
+                    aid = a.get("id")
+                    if aid:
+                        evs = self.get_alert_evidence(aid) or []
+                        for ev in evs:
+                            items.append({
+                                "id": f"TL-EVT-{ev.get('event_id') or ev.get('id')}",
+                                "incident_id": incident_id,
+                                "timestamp": ev.get("event_timestamp") or ev.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                                "kind": "event",
+                                "title": f"Telemetry: {ev.get('source_id') or 'auth'}",
+                                "description": ev.get("message", ""),
+                                "severity": a.get("severity"),
+                                "metadata": {
+                                    "source_ip": ev.get("source_ip"),
+                                    "user_name": ev.get("user_name"),
+                                    "alert_id": aid,
+                                },
+                            })
+                items.sort(key=lambda x: x.get("timestamp", ""))
+                return items
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to get incident timeline: %s", e)
+                raise RuntimeError(f"Cloud SSoT get timeline failed: {e}") from e
+
+        items = self.sqlite_store.get_incident_timeline(incident_id)
+        alerts = self.get_incident_alerts(incident_id)
+        for a in alerts:
+            aid = a.get("id")
+            if aid:
+                evs = self.get_alert_evidence(aid) or []
+                for ev in evs:
+                    items.append({
+                        "id": f"TL-EVT-{ev.get('event_id') or ev.get('id')}",
+                        "incident_id": incident_id,
+                        "timestamp": ev.get("event_timestamp") or ev.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                        "kind": "event",
+                        "title": f"Telemetry: {ev.get('source_id') or 'auth'}",
+                        "description": ev.get("message", ""),
+                        "severity": a.get("severity"),
+                        "metadata": {
+                            "source_ip": ev.get("source_ip"),
+                            "user_name": ev.get("user_name"),
+                            "alert_id": aid,
+                        },
+                    })
+        items.sort(key=lambda x: x.get("timestamp", ""))
+        return items
+
+    def get_incidents_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incidents summary.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                query = self.client.table("incidents").select("id, status, risk_level, risk_score, created_at")
+                if host_id:
+                    query = query.eq("host_id", host_id)
+                res = query.execute()
+                incs = res.data or []
+                total = len(incs)
+                open_c = sum(1 for i in incs if i.get("status") in ("new", "investigating", "confirmed", "open"))
+                investigating = sum(1 for i in incs if i.get("status") == "investigating")
+                contained = sum(1 for i in incs if i.get("status") == "contained")
+                resolved = sum(1 for i in incs if i.get("status") in ("resolved", "closed"))
+                fp = sum(1 for i in incs if i.get("status") == "false_positive")
+                crit = sum(1 for i in incs if i.get("risk_level") == "critical")
+                high = sum(1 for i in incs if i.get("risk_level") == "high")
+                med = sum(1 for i in incs if i.get("risk_level") == "medium")
+                low = sum(1 for i in incs if i.get("risk_level") == "low")
+                avg_risk = round(sum(i.get("risk_score", 50) for i in incs) / max(total, 1), 1)
+
+                return {
+                    "total_incidents": total,
+                    "open_incidents": open_c,
+                    "investigating_incidents": investigating,
+                    "contained_incidents": contained,
+                    "resolved_incidents": resolved,
+                    "false_positives": fp,
+                    "critical_incidents": crit,
+                    "high_incidents": high,
+                    "medium_incidents": med,
+                    "low_incidents": low,
+                    "avg_risk_score": avg_risk,
+                }
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to get incidents summary: %s", e)
+                raise RuntimeError(f"Cloud SSoT summary failed: {e}") from e
+
+        return self.sqlite_store.get_incident_summary()
+
+    def get_mirror_sync_stats(self) -> Dict[str, Any]:
+        """Returns statistics and logs of Cloud-to-SQLite mirror synchronization."""
+        return self.sqlite_store.get_mirror_sync_stats()
+
+    def replay_failed_mirrors(self) -> Dict[str, Any]:
+        """
+        Scans mirror_sync_log for failed synchronization attempts and replays them
+        from Supabase Cloud authoritative state to the local SQLite replica.
+        """
+        failed_logs = self.sqlite_store.get_failed_mirror_logs()
+        replayed = 0
+        still_failed = 0
+        for log in failed_logs:
+            entity_type = log.get("entity_type")
+            entity_id = log.get("entity_id")
+            action = log.get("action")
+            try:
+                if entity_type == "incident":
+                    inc = self.get_incident_by_id(entity_id)
+                    if inc:
+                        self.sqlite_store.upsert_incident(
+                            incident_data=inc,
+                            alert_ids=inc.get("alert_ids", []),
+                            risk_factors=inc.get("risk_factors", []),
+                        )
+                elif entity_type == "ai_analysis":
+                    analysis = self.get_ai_analysis(entity_id)
+                    if analysis:
+                        self.sqlite_store.save_ai_analysis(entity_id, analysis)
+                elif entity_type == "incident_status":
+                    inc = self.get_incident_by_id(entity_id)
+                    if inc:
+                        self.sqlite_store.update_incident_status(entity_id, inc.get("status", "open"))
+                elif entity_type == "security_check_run":
+                    res_run = self.client.table("security_check_runs").select("*").eq("id", entity_id).limit(1).execute()
+                    if res_run.data:
+                        run_row = res_run.data[0]
+                        res_fnd = self.client.table("security_findings").select("*").eq("run_id", entity_id).execute()
+                        findings = res_fnd.data or []
+                        self.sqlite_store.save_security_check_run(run_row, findings)
+
+                self.sqlite_store.log_mirror_attempt(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    action=action,
+                    status="synced",
+                    retry_count=log.get("retry_count", 0) + 1,
+                )
+                replayed += 1
+            except Exception as e:
+                still_failed += 1
+                logger.warning("Replay mirror failed for %s:%s: %s", entity_type, entity_id, e)
+
+        return {"total_checked": len(failed_logs), "replayed": replayed, "still_failed": still_failed}
+
 
 
 class MockAegisRepository(BaseAegisRepository):
@@ -367,6 +1232,9 @@ class MockAegisRepository(BaseAegisRepository):
 
     def __init__(self, simulate_db_error: bool = False):
         self.simulate_db_error = simulate_db_error
+        self.sqlite_store = SqliteIncidentStore(settings.sqlite_db_path)
+        self.security_runs: List[Dict[str, Any]] = []
+        self.security_findings: List[Dict[str, Any]] = []
         self.system_status = {
             "id": 1,
             "collector": "ok",
@@ -519,7 +1387,18 @@ class MockAegisRepository(BaseAegisRepository):
                 is_safe, _ = TelemetrySanitizer.inspect_line(v)
                 cleaned[k] = v if is_safe else "[REDACTED]"
             elif isinstance(v, dict):
-                cleaned[k] = BaseAegisRepository._sanitize_details(v) if hasattr(BaseAegisRepository, '_sanitize_details') else v
+                cleaned[k] = BaseAegisRepository._sanitize_details(v)
+            elif isinstance(v, list):
+                cleaned_list = []
+                for item in v:
+                    if isinstance(item, dict):
+                        cleaned_list.append(BaseAegisRepository._sanitize_details(item))
+                    elif isinstance(item, str):
+                        is_safe, _ = TelemetrySanitizer.inspect_line(item)
+                        cleaned_list.append(item if is_safe else "[REDACTED]")
+                    else:
+                        cleaned_list.append(item)
+                cleaned[k] = cleaned_list
             else:
                 cleaned[k] = v
         return cleaned
@@ -600,6 +1479,620 @@ class MockAegisRepository(BaseAegisRepository):
                 new_evidence += 1
 
         return new_alerts, new_evidence
+
+    def insert_security_check_run(
+        self,
+        run_data: Dict[str, Any],
+        findings: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on security check run insert.")
+        
+        # Check host exists
+        if not any(h["id"] == run_data.get("host_id") for h in self.hosts):
+            raise ValueError(f"Foreign key violation: Host '{run_data.get('host_id')}' not found.")
+
+        # Upsert run
+        self.security_runs = [r for r in self.security_runs if r["id"] != run_data["id"]]
+        self.security_runs.append(dict(run_data))
+
+        # Upsert findings
+        existing_keys = {(f["run_id"], f["check_id"]) for f in self.security_findings}
+        for f in findings:
+            key = (f["run_id"], f["check_id"])
+            if key in existing_keys:
+                self.security_findings = [ef for ef in self.security_findings if (ef["run_id"], ef["check_id"]) != key]
+            self.security_findings.append(dict(f))
+            existing_keys.add(key)
+
+        # Update host last_sc_run_at
+        for h in self.hosts:
+            if h["id"] == run_data.get("host_id"):
+                h["last_sc_run_at"] = run_data.get("completed_at") or datetime.now(timezone.utc).isoformat()
+
+        return run_data
+
+    def list_security_findings(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        category: Optional[str] = None,
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on security findings list.")
+
+        filtered = list(self.security_findings)
+        if host_id:
+            filtered = [f for f in filtered if f.get("host_id") == host_id]
+        if category:
+            filtered = [f for f in filtered if f.get("category") == category]
+        if severity:
+            filtered = [f for f in filtered if f.get("severity") == severity]
+        if status:
+            filtered = [f for f in filtered if f.get("status") == status]
+        if search:
+            s_lower = search.lower()
+            filtered = [
+                f for f in filtered
+                if s_lower in f.get("check_name", "").lower() or s_lower in f.get("check_id", "").lower()
+            ]
+
+        filtered.sort(key=lambda x: x.get("checked_at", ""), reverse=True)
+        total = len(filtered)
+        paginated = filtered[offset : offset + limit]
+        return paginated, total
+
+    def get_security_finding_by_id(self, finding_id: str) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get finding.")
+        for f in self.security_findings:
+            if f["id"] == finding_id:
+                return dict(f)
+        return None
+
+    def list_security_runs(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on list security runs.")
+        filtered = [r for r in self.security_runs if not host_id or r.get("host_id") == host_id]
+        filtered.sort(key=lambda x: x.get("started_at", ""), reverse=True)
+        total = len(filtered)
+        return filtered[offset : offset + limit], total
+
+    def get_security_run_by_id(self, run_id: str) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get security run.")
+        for r in self.security_runs:
+            if r["id"] == run_id:
+                return dict(r)
+        return None
+
+    def get_security_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on security summary.")
+        findings = [f for f in self.security_findings if not host_id or f.get("host_id") == host_id]
+        runs = [r for r in self.security_runs if not host_id or r.get("host_id") == host_id]
+        runs.sort(key=lambda x: x.get("started_at", ""), reverse=True)
+        last_checked = runs[0].get("completed_at") or runs[0].get("started_at") if runs else None
+
+        return {
+            "total_checks": len(findings),
+            "passed": sum(1 for f in findings if f.get("status") == "pass"),
+            "failed": sum(1 for f in findings if f.get("status") == "fail"),
+            "warning": sum(1 for f in findings if f.get("status") == "warning"),
+            "not_applicable": sum(1 for f in findings if f.get("status") == "not_applicable"),
+            "error": sum(1 for f in findings if f.get("status") == "error"),
+            "total_hosts": len(self.hosts),
+            "last_checked_at": last_checked,
+            "critical_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "critical"),
+            "high_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "high"),
+            "medium_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "medium"),
+            "low_fails": sum(1 for f in findings if f.get("status") == "fail" and f.get("severity") == "low"),
+        }
+
+    def get_host_security_history(self, host_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        runs, _ = self.list_security_runs(limit=limit, offset=0, host_id=host_id)
+        return runs
+
+    # ==========================================
+    # INCIDENT INVESTIGATION & AI ANALYSIS (SQLITE PERSISTENT)
+    # ==========================================
+
+    def get_incident_by_id(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incident.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                res = self.client.table("incidents").select("*").eq("id", incident_id).limit(1).execute()
+                if not res.data or len(res.data) == 0:
+                    return None
+                inc = res.data[0]
+                rel_res = self.client.table("incident_alerts").select("alert_id").eq("incident_id", incident_id).execute()
+                inc["alert_ids"] = [r["alert_id"] for r in (rel_res.data or [])]
+                if not inc["alert_ids"] and inc.get("primary_alert_id"):
+                    inc["alert_ids"] = [inc["primary_alert_id"]]
+                inc["alert_count"] = len(inc["alert_ids"])
+                rf_res = self.client.table("incident_risk_factors").select("*").eq("incident_id", incident_id).execute()
+                inc["risk_factors"] = rf_res.data or []
+                return inc
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to fetch incident %s: %s", incident_id, e)
+                raise RuntimeError(f"Cloud SSoT incident lookup failed: {e}") from e
+        inc = self.sqlite_store.get_incident_by_id(incident_id)
+        if inc and not inc.get("risk_factors"):
+            try:
+                inc["risk_factors"] = self.sqlite_store.get_incident_risk_factors(incident_id)
+            except Exception:
+                inc["risk_factors"] = []
+        return inc
+
+    def get_incident_risk_factors(self, incident_id: str) -> List[Dict[str, Any]]:
+        if self.mode == "cloud_ssot" and self.client:
+            try:
+                rf_res = self.client.table("incident_risk_factors").select("*").eq("incident_id", incident_id).execute()
+                return rf_res.data or []
+            except Exception:
+                pass
+        return self.sqlite_store.get_incident_risk_factors(incident_id)
+
+    def list_incidents(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        host_id: Optional[str] = None,
+        status: Optional[str] = None,
+        severity: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on list incidents.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                query = self.client.table("incidents").select("*", count="exact")
+                if host_id:
+                    query = query.eq("host_id", host_id)
+                if status:
+                    query = query.eq("status", status)
+                if severity:
+                    query = query.eq("risk_level", severity)
+                query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
+                res = query.execute()
+                items = res.data or []
+                total = res.count if res.count is not None else len(items)
+                if search:
+                    s_low = search.lower()
+                    items = [
+                        i for i in items
+                        if s_low in i.get("id", "").lower()
+                        or s_low in i.get("title", "").lower()
+                        or s_low in (i.get("attack_scenario") or "").lower()
+                    ]
+                return items, total
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to list incidents: %s", e)
+                raise RuntimeError(f"Cloud SSoT list incidents failed: {e}") from e
+
+        items, total = self.sqlite_store.list_incidents(
+            limit=limit,
+            offset=offset,
+            status=status,
+            risk_level=severity,
+            host_id=host_id,
+        )
+        if search:
+            s_low = search.lower()
+            items = [
+                i for i in items
+                if s_low in i.get("id", "").lower()
+                or s_low in i.get("title", "").lower()
+                or s_low in i.get("attack_scenario", "").lower()
+            ]
+        return items, total
+
+    def upsert_incident(
+        self,
+        incident_data: Dict[str, Any],
+        alert_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on upsert incident.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                inc_record = {
+                    "id": incident_data["id"],
+                    "host_id": incident_data.get("host_id") or "host-fenn-ubuntu",
+                    "title": incident_data.get("title", "Untitled Incident"),
+                    "severity": incident_data.get("severity", "medium"),
+                    "status": incident_data.get("status", "new"),
+                    "risk_level": incident_data.get("risk_level", "medium"),
+                    "risk_score": int(incident_data.get("risk_score", 50)),
+                    "alert_count": int(incident_data.get("alert_count", len(alert_ids or []))),
+                    "primary_alert_id": incident_data.get("primary_alert_id") or ((alert_ids or [])[0] if alert_ids else None),
+                    "source_ip": incident_data.get("source_ip"),
+                    "target_user": incident_data.get("target_user"),
+                    "attack_scenario": incident_data.get("attack_scenario"),
+                    "correlation_reason": incident_data.get("correlation_reason"),
+                    "provenance": incident_data.get("provenance", "synthetic_benchmark"),
+                    "source_category": incident_data.get("source_category", "unknown"),
+                    "source_label": incident_data.get("source_label"),
+                    "threat_actor_context": incident_data.get("threat_actor_context"),
+                    "first_seen_at": incident_data.get("first_seen_at") or now_iso,
+                    "last_seen_at": incident_data.get("last_seen_at") or now_iso,
+                    "created_at": incident_data.get("created_at") or now_iso,
+                    "updated_at": now_iso,
+                }
+                if "assigned_to" in incident_data:
+                    inc_record["assigned_to"] = incident_data["assigned_to"]
+
+                self.client.table("incidents").upsert(inc_record, on_conflict="id").execute()
+
+                all_alert_ids = list(dict.fromkeys((alert_ids or []) + ([inc_record["primary_alert_id"]] if inc_record.get("primary_alert_id") else [])))
+                if all_alert_ids:
+                    links = [
+                        {
+                            "id": f"REL-{incident_data['id']}-{aid}",
+                            "incident_id": incident_data["id"],
+                            "alert_id": aid,
+                            "created_at": now_iso,
+                        }
+                        for aid in all_alert_ids
+                    ]
+                    self.client.table("incident_alerts").upsert(links, on_conflict="incident_id,alert_id").execute()
+
+                risk_factors = incident_data.get("risk_factors") or []
+                if risk_factors:
+                    rf_rows = []
+                    for rf in risk_factors:
+                        fid = rf.get("factor_id") or rf.get("name") or "factor"
+                        rf_rows.append({
+                            "id": f"RF-{incident_data['id']}-{fid}",
+                            "incident_id": incident_data["id"],
+                            "factor_id": fid,
+                            "factor_name": rf.get("factor_name") or rf.get("name", fid),
+                            "points": int(rf.get("points", 0)),
+                            "category": rf.get("category", "base"),
+                            "description": rf.get("description", ""),
+                            "supporting_evidence_ids": rf.get("supporting_evidence_ids", []),
+                            "created_at": now_iso,
+                        })
+                    self.client.table("incident_risk_factors").upsert(rf_rows, on_conflict="incident_id,factor_id").execute()
+
+                self._execute_mirror(
+                    "incident",
+                    incident_data["id"],
+                    "upsert",
+                    lambda: self.sqlite_store.upsert_incident(incident_data, alert_ids, risk_factors),
+                )
+
+                return incident_data
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to upsert incident %s: %s", incident_data.get("id"), e)
+                raise RuntimeError(f"Cloud SSoT upsert incident failed: {e}") from e
+
+        return self.sqlite_store.upsert_incident(
+            incident_data=incident_data,
+            alert_ids=alert_ids,
+            risk_factors=incident_data.get("risk_factors", []),
+        )
+
+    def update_incident_status(
+        self,
+        incident_id: str,
+        status: str,
+        note: Optional[str] = None,
+        operator: str = "admin",
+    ) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on update incident status.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                curr = self.get_incident_by_id(incident_id)
+                if not curr:
+                    return None
+                old_st = curr.get("status", "new")
+                now_iso = datetime.now(timezone.utc).isoformat()
+                self.client.table("incidents").update({"status": status, "updated_at": now_iso}).eq("id", incident_id).execute()
+                hist_row = {
+                    "id": f"SH-{int(time.time()*1000)}",
+                    "incident_id": incident_id,
+                    "old_status": old_st,
+                    "new_status": status,
+                    "note": note,
+                    "operator": operator,
+                    "transitioned_at": now_iso,
+                }
+                self.client.table("incident_status_history").insert(hist_row).execute()
+                tl_row = {
+                    "id": f"TL-ST-{int(time.time()*1000)}",
+                    "incident_id": incident_id,
+                    "timestamp": now_iso,
+                    "kind": "status_change",
+                    "title": f"Status changed to {status}",
+                    "description": note or f"Status transitioned from {old_st} to {status} by {operator}",
+                    "severity": curr.get("severity", "medium"),
+                    "metadata": {"operator": operator, "old_status": old_st, "new_status": status},
+                    "created_at": now_iso,
+                }
+                self.client.table("incident_timeline").insert(tl_row).execute()
+                self._execute_mirror(
+                    "incident_status",
+                    incident_id,
+                    "update_status",
+                    lambda: self.sqlite_store.update_incident_status(incident_id, status, note, operator),
+                )
+                return self.get_incident_by_id(incident_id)
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to update status: %s", e)
+                raise RuntimeError(f"Cloud SSoT status update failed: {e}") from e
+
+        return self.sqlite_store.update_incident_status(
+            incident_id=incident_id,
+            status=status,
+            note=note,
+            operator=operator,
+        )
+
+    def get_incident_alerts(self, incident_id: str) -> List[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incident alerts.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                res = self.client.table("incident_alerts").select("alert_id").eq("incident_id", incident_id).execute()
+                alert_ids = [r["alert_id"] for r in (res.data or [])]
+                if not alert_ids:
+                    inc = self.get_incident_by_id(incident_id)
+                    if inc and inc.get("primary_alert_id"):
+                        alert_ids = [inc["primary_alert_id"]]
+                out = []
+                for aid in alert_ids:
+                    a = self.get_alert_by_id(aid)
+                    if a:
+                        out.append(a)
+                return out
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to get incident alerts: %s", e)
+                raise RuntimeError(f"Cloud SSoT get incident alerts failed: {e}") from e
+
+        alert_ids = self.sqlite_store.get_incident_alerts(incident_id)
+        if not alert_ids:
+            inc = self.sqlite_store.get_incident_by_id(incident_id)
+            if inc and inc.get("primary_alert_id"):
+                alert_ids = [inc["primary_alert_id"]]
+
+        out = []
+        for aid in alert_ids:
+            a = self.get_alert_by_id(aid)
+            if a:
+                out.append(a)
+        return out
+
+    def save_ai_analysis(self, analysis_data: Dict[str, Any]) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on save ai analysis.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                row = {
+                    "id": analysis_data["id"],
+                    "incident_id": analysis_data.get("incident_id"),
+                    "alert_id": analysis_data.get("alert_id"),
+                    "host_id": analysis_data.get("host_id") or "host-fenn-ubuntu",
+                    "analysis_status": analysis_data.get("analysis_status", "completed"),
+                    "threat_classification": analysis_data.get("threat_classification", "Unclassified"),
+                    "executive_summary": analysis_data.get("executive_summary", ""),
+                    "attack_scenario": analysis_data.get("attack_scenario", ""),
+                    "observed_behaviors": analysis_data.get("observed_behaviors", []),
+                    "timeline": analysis_data.get("timeline", []),
+                    "risk_level": analysis_data.get("risk_level", "medium"),
+                    "risk_score": int(analysis_data.get("risk_score", 50)),
+                    "confidence_level": analysis_data.get("confidence_level", "medium"),
+                    "confidence_reason": analysis_data.get("confidence_reason", ""),
+                    "facts": analysis_data.get("facts", []),
+                    "inferences": analysis_data.get("inferences", []),
+                    "hypotheses": analysis_data.get("hypotheses", []),
+                    "unknowns": analysis_data.get("unknowns", []),
+                    "unknown_items": analysis_data.get("unknown_items", []),
+                    "supporting_evidence": analysis_data.get("supporting_evidence", []),
+                    "contradicting_evidence": analysis_data.get("contradicting_evidence", []),
+                    "impact_assessment": analysis_data.get("impact_assessment", ""),
+                    "recommended_actions": analysis_data.get("recommended_actions", []),
+                    "containment_recommendations": analysis_data.get("containment_recommendations", []),
+                    "investigation_notes": analysis_data.get("investigation_notes"),
+                    "provider": analysis_data.get("provider", "gemini"),
+                    "model": analysis_data.get("model", "gemini-2.5-flash"),
+                    "created_at": analysis_data.get("created_at") or now_iso,
+                    "completed_at": analysis_data.get("completed_at") or now_iso,
+                }
+                self.client.table("ai_analyses").upsert(row, on_conflict="id").execute()
+                self._execute_mirror(
+                    "ai_analysis",
+                    analysis_data["id"],
+                    "save",
+                    lambda: self.sqlite_store.save_ai_analysis(analysis_data),
+                )
+                return analysis_data
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to save AI analysis: %s", e)
+                raise RuntimeError(f"Cloud SSoT save AI analysis failed: {e}") from e
+
+        return self.sqlite_store.save_ai_analysis(analysis_data)
+
+    def get_latest_ai_analysis(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get latest ai analysis.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                res = self.client.table("ai_analyses").select("*").eq("incident_id", incident_id).order("created_at", desc=True).limit(1).execute()
+                if res.data and len(res.data) > 0:
+                    return res.data[0]
+                return None
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to get latest AI analysis: %s", e)
+                raise RuntimeError(f"Cloud SSoT get latest AI analysis failed: {e}") from e
+
+        return self.sqlite_store.get_latest_ai_analysis(incident_id)
+
+    def get_incident_timeline(self, incident_id: str) -> List[Dict[str, Any]]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incident timeline.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                res = self.client.table("incident_timeline").select("*").eq("incident_id", incident_id).order("timestamp", desc=False).execute()
+                items = res.data or []
+                alerts = self.get_incident_alerts(incident_id)
+                for a in alerts:
+                    aid = a.get("id")
+                    if aid:
+                        evs = self.get_alert_evidence(aid) or []
+                        for ev in evs:
+                            items.append({
+                                "id": f"TL-EVT-{ev.get('event_id') or ev.get('id')}",
+                                "incident_id": incident_id,
+                                "timestamp": ev.get("event_timestamp") or ev.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                                "kind": "event",
+                                "title": f"Telemetry: {ev.get('source_id') or 'auth'}",
+                                "description": ev.get("message", ""),
+                                "severity": a.get("severity"),
+                                "metadata": {
+                                    "source_ip": ev.get("source_ip"),
+                                    "user_name": ev.get("user_name"),
+                                    "alert_id": aid,
+                                },
+                            })
+                items.sort(key=lambda x: x.get("timestamp", ""))
+                return items
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to get incident timeline: %s", e)
+                raise RuntimeError(f"Cloud SSoT get timeline failed: {e}") from e
+
+        items = self.sqlite_store.get_incident_timeline(incident_id)
+        alerts = self.get_incident_alerts(incident_id)
+        for a in alerts:
+            aid = a.get("id")
+            if aid:
+                evs = self.get_alert_evidence(aid) or []
+                for ev in evs:
+                    items.append({
+                        "id": f"TL-EVT-{ev.get('event_id') or ev.get('id')}",
+                        "incident_id": incident_id,
+                        "timestamp": ev.get("event_timestamp") or ev.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                        "kind": "event",
+                        "title": f"Telemetry: {ev.get('source_id') or 'auth'}",
+                        "description": ev.get("message", ""),
+                        "severity": a.get("severity"),
+                        "metadata": {
+                            "source_ip": ev.get("source_ip"),
+                            "user_name": ev.get("user_name"),
+                            "alert_id": aid,
+                        },
+                    })
+        items.sort(key=lambda x: x.get("timestamp", ""))
+        return items
+
+    def get_incidents_summary(self, host_id: Optional[str] = None) -> Dict[str, Any]:
+        if self.simulate_db_error:
+            raise RuntimeError("Database error on get incidents summary.")
+        if settings.database_mode == "cloud_ssot":
+            try:
+                query = self.client.table("incidents").select("id, status, risk_level, risk_score, created_at")
+                if host_id:
+                    query = query.eq("host_id", host_id)
+                res = query.execute()
+                incs = res.data or []
+                total = len(incs)
+                open_c = sum(1 for i in incs if i.get("status") in ("new", "investigating", "confirmed", "open"))
+                investigating = sum(1 for i in incs if i.get("status") == "investigating")
+                contained = sum(1 for i in incs if i.get("status") == "contained")
+                resolved = sum(1 for i in incs if i.get("status") in ("resolved", "closed"))
+                fp = sum(1 for i in incs if i.get("status") == "false_positive")
+                crit = sum(1 for i in incs if i.get("risk_level") == "critical")
+                high = sum(1 for i in incs if i.get("risk_level") == "high")
+                med = sum(1 for i in incs if i.get("risk_level") == "medium")
+                low = sum(1 for i in incs if i.get("risk_level") == "low")
+                avg_risk = round(sum(i.get("risk_score", 50) for i in incs) / max(total, 1), 1)
+
+                return {
+                    "total_incidents": total,
+                    "open_incidents": open_c,
+                    "investigating_incidents": investigating,
+                    "contained_incidents": contained,
+                    "resolved_incidents": resolved,
+                    "false_positives": fp,
+                    "critical_incidents": crit,
+                    "high_incidents": high,
+                    "medium_incidents": med,
+                    "low_incidents": low,
+                    "avg_risk_score": avg_risk,
+                }
+            except Exception as e:
+                logger.error("FATAL [Cloud SSoT]: Failed to get incidents summary: %s", e)
+                raise RuntimeError(f"Cloud SSoT summary failed: {e}") from e
+
+        return self.sqlite_store.get_incident_summary()
+
+    def get_mirror_sync_stats(self) -> Dict[str, Any]:
+        """Returns statistics and logs of Cloud-to-SQLite mirror synchronization."""
+        return self.sqlite_store.get_mirror_sync_stats()
+
+    def replay_failed_mirrors(self) -> Dict[str, Any]:
+        """
+        Scans mirror_sync_log for failed synchronization attempts and replays them
+        from Supabase Cloud authoritative state to the local SQLite replica.
+        """
+        failed_logs = self.sqlite_store.get_failed_mirror_logs()
+        replayed = 0
+        still_failed = 0
+        for log in failed_logs:
+            entity_type = log.get("entity_type")
+            entity_id = log.get("entity_id")
+            action = log.get("action")
+            try:
+                if entity_type == "incident":
+                    inc = self.get_incident_by_id(entity_id)
+                    if inc:
+                        self.sqlite_store.upsert_incident(
+                            incident_data=inc,
+                            alert_ids=inc.get("alert_ids", []),
+                            risk_factors=inc.get("risk_factors", []),
+                        )
+                elif entity_type == "ai_analysis":
+                    analysis = self.get_ai_analysis(entity_id)
+                    if analysis:
+                        self.sqlite_store.save_ai_analysis(entity_id, analysis)
+                elif entity_type == "incident_status":
+                    inc = self.get_incident_by_id(entity_id)
+                    if inc:
+                        self.sqlite_store.update_incident_status(entity_id, inc.get("status", "open"))
+                elif entity_type == "security_check_run":
+                    res_run = self.client.table("security_check_runs").select("*").eq("id", entity_id).limit(1).execute()
+                    if res_run.data:
+                        run_row = res_run.data[0]
+                        res_fnd = self.client.table("security_findings").select("*").eq("run_id", entity_id).execute()
+                        findings = res_fnd.data or []
+                        self.sqlite_store.save_security_check_run(run_row, findings)
+
+                self.sqlite_store.log_mirror_attempt(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    action=action,
+                    status="synced",
+                    retry_count=log.get("retry_count", 0) + 1,
+                )
+                replayed += 1
+            except Exception as e:
+                still_failed += 1
+                logger.warning("Replay mirror failed for %s:%s: %s", entity_type, entity_id, e)
+
+        return {"total_checked": len(failed_logs), "replayed": replayed, "still_failed": still_failed}
 
 
 

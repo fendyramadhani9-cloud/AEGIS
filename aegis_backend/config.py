@@ -66,6 +66,21 @@ class Settings:
         )
         self.cors_origins: list[str] = [o.strip() for o in raw_origins.split(",") if o.strip()]
 
+        # SQLite Local Persistent Storage (for incidents, analyses, and timelines)
+        default_sqlite = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "aegis_incidents.db")
+        self.sqlite_db_path: str = os.getenv("AEGIS_SQLITE_DB_PATH", default_sqlite)
+
+        # Database Architecture Mode: 'hybrid' (transitional) or 'cloud_ssot' (canonical Unified Cloud SSoT)
+        raw_mode = os.getenv("AEGIS_DATABASE_MODE", "hybrid").lower().strip()
+        if raw_mode in ("cloud_ssot", "unified_cloud"):
+            self.database_mode = "cloud_ssot"
+        else:
+            self.database_mode = "hybrid"
+
+    @property
+    def aegis_database_mode(self) -> str:
+        return self.database_mode
+
     @property
     def is_supabase_configured(self) -> bool:
         """Returns True only if both URL and Service Role Key are provided."""
@@ -145,6 +160,8 @@ class Settings:
             "supabase_configured": self.is_supabase_configured,
             "supabase_key_masked": mask_secret(self.supabase_service_role_key),
             "llm_provider": self.llm_provider,
+            "sqlite_db_path": self.sqlite_db_path,
+            "database_mode": self.database_mode,
         }
 
 

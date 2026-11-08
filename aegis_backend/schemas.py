@@ -464,3 +464,360 @@ class AiRoleKeyStatusItem(BaseModel):
     failover_slots: List[str] = Field(default_factory=list)
 
 
+# ==========================================
+# 8. SECURITY CHECKER SCHEMAS
+# ==========================================
+
+class SecurityFindingItem(BaseModel):
+    id: str
+    run_id: str
+    host_id: str
+    check_id: str
+    check_name: str
+    category: str
+    severity: str
+    status: str
+    actual_value: Optional[str] = None
+    expected_value: Optional[str] = None
+    description: str
+    security_impact: Optional[str] = None
+    recommendation: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    remediation_reference: Optional[str] = None
+    checked_at: str
+    checker_version: Optional[str] = "1.0.0"
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedSecurityFindingsResponse(BaseModel):
+    items: List[SecurityFindingItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class SecurityCheckRunItem(BaseModel):
+    id: str
+    host_id: str
+    status: str
+    total_checks: int
+    passed_checks: int
+    failed_checks: int
+    warning_checks: int
+    error_checks: int
+    checker_version: str = "1.0.0"
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    started_at: str
+    completed_at: Optional[str] = None
+    created_at: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedSecurityRunsResponse(BaseModel):
+    items: List[SecurityCheckRunItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class SecuritySummaryResponse(BaseModel):
+    total_checks: int
+    passed: int
+    failed: int
+    warning: int
+    not_applicable: int
+    error: int
+    total_hosts: int
+    last_checked_at: Optional[str] = None
+    critical_fails: int
+    high_fails: int
+    medium_fails: int
+    low_fails: int
+
+
+class AgentSecurityCheckResultsRequest(BaseModel):
+    run: SecurityCheckRunItem
+    findings: List[SecurityFindingItem]
+
+
+class AgentSecurityCheckResultsResponse(BaseModel):
+    status: str = "ok"
+    run_id: str
+    host_id: str
+    stored_findings: int
+    message: str
+
+
+class TriggerRunRequest(BaseModel):
+    host_id: str
+    force: bool = False
+
+
+class TriggerRunResponse(BaseModel):
+    status: str = "pending"
+    host_id: str
+    message: str
+    requested_at: str
+
+
+# ==========================================
+# 6. INCIDENT & AI INVESTIGATION SCHEMAS
+# ==========================================
+
+class IncidentItem(BaseModel):
+    id: str
+    host_id: str
+    title: str
+    severity: str
+    risk_level: str
+    risk_score: int
+    status: str
+    primary_alert_id: str
+    alert_count: int = 1
+    source_ip: Optional[str] = None
+    target_user: Optional[str] = None
+    attack_scenario: Optional[str] = None
+    correlation_reason: Optional[str] = None
+    assigned_to: Optional[str] = None
+    first_seen_at: str
+    last_seen_at: str
+    created_at: str
+    updated_at: Optional[str] = None
+    storage_backend: Optional[str] = "sqlite_local"
+    provenance: Optional[str] = "synthetic_benchmark"
+    source_category: Optional[str] = "unknown"
+    source_label: Optional[str] = None
+    threat_actor_context: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedIncidentsResponse(BaseModel):
+    items: List[IncidentItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class IncidentStatusUpdateRequest(BaseModel):
+    status: str
+    note: Optional[str] = None
+    operator: Optional[str] = "admin"
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        valid = {"new", "investigating", "confirmed", "false_positive", "contained", "resolved"}
+        if v.lower() not in valid:
+            raise ValueError(f"Invalid status '{v}'. Must be one of {valid}")
+        return v.lower()
+
+
+class IncidentTimelineItem(BaseModel):
+    id: str
+    incident_id: str
+    timestamp: str
+    kind: str  # 'event', 'alert', 'finding', 'analysis', 'status_change'
+    title: str
+    description: str
+    severity: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AIAnalysisItem(BaseModel):
+    analysis_id: str
+    incident_id: Optional[str] = None
+    alert_id: Optional[str] = None
+    host_id: str
+    analysis_status: str  # 'completed', 'partial', 'insufficient_data', 'failed', 'unavailable', 'degraded'
+    threat_classification: str
+    executive_summary: str
+    attack_scenario: str
+    facts: List[Dict[str, Any]] = Field(default_factory=list)
+    inferences: List[Dict[str, Any]] = Field(default_factory=list)
+    hypotheses: List[Dict[str, Any]] = Field(default_factory=list)
+    unknown_items: List[Dict[str, Any]] = Field(default_factory=list)
+    observed_behaviors: List[Dict[str, Any]] = Field(default_factory=list)
+    timeline: List[Dict[str, Any]] = Field(default_factory=list)
+    risk_level: str
+    risk_score: int
+    confidence_level: str  # 'high', 'medium', 'low'
+    confidence_reason: str
+    supporting_evidence: List[str] = Field(default_factory=list)
+    contradicting_evidence: List[str] = Field(default_factory=list)
+    unknowns: List[str] = Field(default_factory=list)
+    impact_assessment: str
+    recommended_actions: List[Dict[str, Any]] = Field(default_factory=list)
+    containment_recommendations: List[str] = Field(default_factory=list)
+    investigation_notes: Optional[str] = None
+    provider: str
+    model: str
+    storage_backend: str = "sqlite_local"
+    created_at: str
+    completed_at: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("facts", mode="before")
+    @classmethod
+    def coerce_facts(cls, v):
+        if isinstance(v, str):
+            return [{"evidence_id": "EVT-AUTO", "fact": v}]
+        if v is None:
+            return []
+        if isinstance(v, list):
+            res = []
+            for item in v:
+                if isinstance(item, str):
+                    res.append({"evidence_id": "EVT-AUTO", "fact": item})
+                elif isinstance(item, dict):
+                    res.append(item)
+            return res
+        return v
+
+    @field_validator("inferences", mode="before")
+    @classmethod
+    def coerce_inferences(cls, v):
+        if isinstance(v, str):
+            return [{"statement": v, "supporting_evidence_ids": [], "rationale": "Model statement."}]
+        if v is None:
+            return []
+        if isinstance(v, list):
+            res = []
+            for item in v:
+                if isinstance(item, str):
+                    res.append({"statement": item, "supporting_evidence_ids": [], "rationale": "Model statement."})
+                elif isinstance(item, dict):
+                    res.append(item)
+            return res
+        return v
+
+    @field_validator("hypotheses", mode="before")
+    @classmethod
+    def coerce_hypotheses(cls, v):
+        if isinstance(v, str):
+            return [{"statement": v, "status": "unverified", "investigation_step": "Verifikasi telemetri host."}]
+        if v is None:
+            return []
+        if isinstance(v, list):
+            res = []
+            for item in v:
+                if isinstance(item, str):
+                    res.append({"statement": item, "status": "unverified", "investigation_step": "Verifikasi telemetri host."})
+                elif isinstance(item, dict):
+                    res.append(item)
+            return res
+        return v
+
+    @field_validator("unknown_items", mode="before")
+    @classmethod
+    def coerce_unknown_items(cls, v):
+        if isinstance(v, str):
+            return [{"data_gap": v, "impact": "Requires additional telemetry."}]
+        if v is None:
+            return []
+        if isinstance(v, list):
+            res = []
+            for item in v:
+                if isinstance(item, str):
+                    res.append({"data_gap": item, "impact": "Requires additional telemetry."})
+                elif isinstance(item, dict):
+                    res.append(item)
+            return res
+        return v
+
+    @field_validator("timeline", mode="before")
+    @classmethod
+    def coerce_timeline(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        return []
+
+    @field_validator("supporting_evidence", mode="before")
+    @classmethod
+    def coerce_supporting_evidence(cls, v):
+        if isinstance(v, str):
+            return [v]
+        if v is None:
+            return []
+        return v
+
+    @field_validator("risk_score", mode="before")
+    @classmethod
+    def coerce_risk_score(cls, v):
+        import math
+        try:
+            if isinstance(v, float) and math.isnan(v):
+                return 0
+            return int(v)
+        except Exception:
+            return 0
+
+    @field_validator("risk_level", mode="before")
+    @classmethod
+    def coerce_risk_level(cls, v):
+        if v is None:
+            return "low"
+        return str(v)
+
+
+class IncidentDetailResponse(BaseModel):
+    incident: IncidentItem
+    alerts: List[AlertItem]
+    evidence_count: int
+    posture_context: Dict[str, Any] = Field(default_factory=dict)
+    risk_factors: List[Dict[str, Any]] = Field(default_factory=list)
+    latest_analysis: Optional[AIAnalysisItem] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentSummaryResponse(BaseModel):
+    total_incidents: int
+    new_incidents: int
+    open_incidents: Optional[int] = 0
+    investigating: int
+    confirmed: int
+    resolved: int
+    false_positives: int
+    contained: int
+    critical_risk: int
+    high_risk: int
+    medium_risk: int
+    low_risk: int
+    total_hosts_affected: int
+    latest_incident_at: Optional[str] = None
+    storage_backend: Optional[str] = "database"
+
+
+class AnalyzeIncidentRequest(BaseModel):
+    force: bool = False
+    model: Optional[str] = None
+
+
+class AIHealthResponse(BaseModel):
+    status: str  # 'ok', 'degraded', 'unavailable'
+    provider: str
+    active_provider: Optional[str] = None
+    model: str
+    configured: bool
+    reachable: bool
+    key_available: Optional[bool] = None
+    offline_fallback_ready: Optional[bool] = True
+    analysis_status: Optional[str] = "ready"
+    message: str
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.active_provider:
+            self.active_provider = self.provider
+        if self.key_available is None:
+            self.key_available = self.configured
+        if not self.analysis_status:
+            self.analysis_status = "ready" if self.reachable else "degraded"
+

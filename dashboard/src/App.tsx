@@ -6,6 +6,8 @@ import { PreferencesProvider } from './lib/preferences';
 import { OverviewScreen } from './screens/Overview';
 import { HostsScreen } from './screens/Hosts';
 import { HostDetailScreen } from './screens/HostDetail';
+import { IncidentsScreen } from './screens/Incidents';
+import { IncidentDetailScreen } from './screens/IncidentDetail';
 import { DetectionsScreen } from './screens/Detections';
 import { AlertDetailScreen } from './screens/AlertDetail';
 import { FindingDetailScreen } from './screens/FindingDetail';
@@ -26,6 +28,8 @@ export function App() {
               <Route index element={<OverviewScreen />} />
               <Route path="hosts" element={<HostsScreen />} />
               <Route path="hosts/:id" element={<HostDetailScreen />} />
+              <Route path="incidents" element={<IncidentsScreen />} />
+              <Route path="incidents/:id" element={<IncidentDetailScreen />} />
               <Route path="detections" element={<DetectionsScreen />} />
               <Route path="alerts/:id" element={<AlertDetailScreen />} />
               <Route path="findings/:id" element={<FindingDetailScreen />} />

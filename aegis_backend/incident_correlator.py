@@ -1,0 +1,414 @@
+"""
+AEGIS Incident Correlation Engine.
+Correlates discrete security alerts and telemetry evidence into unified security incidents.
+
+Correlation Criteria:
+1. Strict Host Isolation: Cross-host alert conflation is strictly forbidden.
+2. Temporal Window: Alerts occurring within a configurable sliding window (default 30m / 1800s).
+3. Pivot Continuity Requirement (Mandatory):
+   Alerts must be linked by at least one verifiable pivot:
+   - Shared Source IP address.
+   - Shared Target Username.
+   - Verified Causal Progression (e.g. Brute Force -> Account Compromise -> Root Escalation).
+   Unrelated administrator actions or independent attacks from separate source IPs are segregated.
+4. Context-Aware Attribution (Prioritas 6.1):
+   - Never labels loopback (127.0.0.1) as an external/remote adversary.
+   - Explicitly notes identity discontinuity when distinct users appear on loopback.
+   - Labels controlled security test exercises accurately.
+5. Explainable Correlation: Generates human-auditable correlation reasons for each group.
+"""
+
+import re
+import hashlib
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional, Set, Tuple
+from aegis_backend.risk_assessment import RiskAssessmentEngine, RiskAssessmentResult
+from aegis_backend.source_attribution import classify_ip_source, format_contextual_attack_scenario
+
+
+class CorrelatedIncident:
+    """Represents a grouped cluster of alerts forming an incident."""
+
+    def __init__(
+        self,
+        incident_id: str,
+        host_id: str,
+        title: str,
+        severity: str,
+        primary_alert_id: str,
+        alerts: List[Dict[str, Any]],
+        source_ip: Optional[str] = None,
+        target_user: Optional[str] = None,
+        attack_scenario: Optional[str] = None,
+        correlation_reason: Optional[str] = None,
+        first_seen_at: Optional[str] = None,
+        last_seen_at: Optional[str] = None,
+        risk_result: Optional[RiskAssessmentResult] = None,
+        provenance: str = "genuine_host_telemetry",
+    ):
+        self.incident_id = incident_id
+        self.host_id = host_id
+        self.title = title
+        self.severity = severity
+        self.primary_alert_id = primary_alert_id
+        self.alerts = alerts
+        self.source_ip = source_ip
+        self.target_user = target_user
+        self.attack_scenario = attack_scenario
+        self.correlation_reason = correlation_reason or "Correlated via temporal and entity proximity."
+        self.first_seen_at = first_seen_at or datetime.now(timezone.utc).isoformat()
+        self.last_seen_at = last_seen_at or self.first_seen_at
+        self.risk_result = risk_result or RiskAssessmentResult(risk_score=0, risk_level="low")
+        self.provenance = provenance
+
+        # Enrich network attribution
+        attr = classify_ip_source(source_ip)
+        self.source_category = attr["category"]
+        self.source_label = attr["label"]
+        self.threat_actor_context = attr["threat_actor_context"]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.incident_id,
+            "host_id": self.host_id,
+            "title": self.title,
+            "severity": self.severity,
+            "risk_level": self.risk_result.risk_level,
+            "risk_score": self.risk_result.risk_score,
+            "status": "new",
+            "primary_alert_id": self.primary_alert_id,
+            "alert_count": len(self.alerts),
+            "source_ip": self.source_ip,
+            "source_category": self.source_category,
+            "source_label": self.source_label,
+            "threat_actor_context": self.threat_actor_context,
+            "target_user": self.target_user,
+            "attack_scenario": self.attack_scenario,
+            "correlation_reason": self.correlation_reason,
+            "first_seen_at": self.first_seen_at,
+            "last_seen_at": self.last_seen_at,
+            "risk_factors": [f.__dict__ for f in self.risk_result.risk_factors],
+            "storage_backend": "sqlite_local",
+            "provenance": self.provenance,
+        }
+
+
+class IncidentCorrelator:
+    """Clusters alerts into cohesive incidents per host with pivot continuity validation."""
+
+    def __init__(self, time_window_seconds: int = 1800):  # 30 minutes
+        self.time_window_seconds = time_window_seconds
+
+    @staticmethod
+    def _parse_ts(ts_str: Optional[str]) -> datetime:
+        if not ts_str:
+            return datetime.now(timezone.utc)
+        try:
+            return datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        except Exception:
+            return datetime.now(timezone.utc)
+
+    @classmethod
+    def generate_incident_id(cls, host_id: str, alert_ids: List[str]) -> str:
+        """Generates a stable, reproducible incident identifier."""
+        sorted_ids = sorted(alert_ids)
+        digest = hashlib.sha256(f"{host_id}:{':'.join(sorted_ids)}".encode()).hexdigest()[:12]
+        return f"INC-{host_id}-{digest}"
+
+    @classmethod
+    def _extract_entities(cls, alert: Dict[str, Any]) -> Tuple[Set[str], Set[str]]:
+        """Extracts source IPs and usernames from alert reason and details."""
+        ips = set()
+        users = set()
+
+        reason = str(alert.get("reason", ""))
+        # Match IPv4 addresses
+        for ip in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", reason):
+            ips.add(ip)
+
+        # Match user patterns
+        for u in re.findall(r"user ['\"]([^'\"]+)['\"]", reason):
+            users.add(u)
+        for u in re.findall(r"for user ([a-zA-Z0-9_\-]+)", reason):
+            users.add(u)
+
+        return ips, users
+
+    def _can_correlate(
+        self,
+        alert: Dict[str, Any],
+        cluster: List[Dict[str, Any]],
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Determines if an alert belongs to an existing cluster based on:
+        1. Temporal proximity (<= time_window_seconds).
+        2. Pivot continuity: shared IP, shared user, or causal attack progression.
+        """
+        alert_ts = self._parse_ts(alert.get("detected_at"))
+        latest_in_cluster = max(self._parse_ts(a.get("detected_at")) for a in cluster)
+
+        # Check temporal window against latest activity
+        delta = abs((alert_ts - latest_in_cluster).total_seconds())
+        if delta > self.time_window_seconds:
+            return False, None
+
+        alert_ips, alert_users = self._extract_entities(alert)
+        alert_rule = alert.get("rule_id", "")
+
+        cluster_ips: Set[str] = set()
+        cluster_users: Set[str] = set()
+        cluster_rules: Set[str] = set()
+        cluster_auth_users: Set[str] = set()
+        has_auth_success = False
+
+        for a in cluster:
+            ips, users = self._extract_entities(a)
+            cluster_ips.update(ips)
+            cluster_users.update(users)
+            r = a.get("rule_id", "")
+            cluster_rules.add(r)
+            if r == "RULE-AUTH-003":
+                has_auth_success = True
+                cluster_auth_users.update(users)
+
+        shared_ips = alert_ips & cluster_ips
+        shared_users = alert_users & cluster_users
+
+        # 1. Independent Brute-Force Attacks Isolation
+        # If incoming alert is brute-force and cluster already has brute-force, require shared Source IP.
+        if alert_rule == "RULE-SSH-BRUTE" and "RULE-SSH-BRUTE" in cluster_rules:
+            if shared_ips:
+                ip_str = ", ".join(sorted(shared_ips))
+                attr = classify_ip_source(list(shared_ips)[0])
+                if attr["is_loopback"]:
+                    return True, "Shared local loopback interface (127.0.0.1) in repeated authentication failure bursts."
+                return True, f"Shared Source IP pivot ({ip_str}) in continuing brute-force campaign."
+            return False, None
+
+        # 2. Strict Causal Attack Progression: Failed Brute-Force -> Accepted Login
+        if ("RULE-SSH-BRUTE" in cluster_rules) and (alert_rule == "RULE-AUTH-003"):
+            if shared_ips:
+                ip_str = ", ".join(sorted(shared_ips))
+                attr = classify_ip_source(list(shared_ips)[0])
+                if attr["is_loopback"]:
+                    if shared_users:
+                        user_str = ", ".join(sorted(shared_users))
+                        return True, f"Causal progression on local loopback (127.0.0.1): Repeated failed logins followed by successful login for user '{user_str}'."
+                    else:
+                        cluster_failed_users = ", ".join(sorted(cluster_users)) or "unspecified user"
+                        alert_auth_users = ", ".join(sorted(alert_users)) or "unspecified user"
+                        return True, (
+                            f"Temporal correlation on local loopback (127.0.0.1): "
+                            f"Authentication failures for '{cluster_failed_users}' followed by login for distinct user '{alert_auth_users}'; "
+                            f"separate user accounts indicate distinct local processes rather than single attacker continuation."
+                        )
+                if shared_users:
+                    user_str = ", ".join(sorted(shared_users))
+                    return True, f"Causal attack chain progression: Repeated failed logins followed by successful authentication for user '{user_str}'."
+                return True, f"Causal attack chain progression: Repeated failed logins followed by successful authentication from {ip_str}."
+            if shared_users:
+                user_str = ", ".join(sorted(shared_users))
+                return True, f"Causal attack chain progression: Repeated failed logins followed by successful authentication for user '{user_str}'."
+            return False, None
+
+        # 3. Strict Causal Attack Progression: Accepted Login -> Suspicious Sudo Execution
+        if alert_rule == "RULE-SUSP-SUDO":
+            if has_auth_success:
+                matching_users = alert_users & cluster_auth_users
+                is_test_cmd = "test" in str(alert.get("reason", "")).lower() or "controlled" in str(alert.get("reason", "")).lower()
+                is_loopback = any(classify_ip_source(ip)["is_loopback"] for ip in cluster_ips)
+
+                if matching_users:
+                    user_str = ", ".join(sorted(matching_users))
+                    if is_test_cmd:
+                        return True, f"Controlled test execution: Authenticated session followed by simulated sudo command by user '{user_str}'."
+                    return True, f"Causal attack chain progression: Successful authentication followed by privileged sudo execution by user '{user_str}'."
+                if shared_ips and not is_loopback:
+                    ip_str = ", ".join(sorted(shared_ips))
+                    return True, f"Causal attack chain progression: Activity from authenticated session origin {ip_str} followed by privileged sudo execution."
+            # Unlinked sudo without accepted authentication in cluster is segregated
+            return False, None
+
+        # 4. Shared Source IP Pivot across other detections
+        if shared_ips:
+            ip_str = ", ".join(sorted(shared_ips))
+            attr = classify_ip_source(list(shared_ips)[0])
+            if attr["is_loopback"]:
+                return True, "Shared local loopback interface (127.0.0.1) across local detections."
+            return True, f"Shared Source IP pivot ({ip_str}) with activity occurring within {int(delta)}s."
+
+        # 5. Shared Target User Pivot (Only for authenticated sessions or explicit user pivots)
+        if shared_users and (has_auth_success or alert_rule == "RULE-AUTH-003"):
+            user_str = ", ".join(sorted(shared_users))
+            return True, f"Shared Target User pivot ('{user_str}') across correlated detections."
+
+        return False, None
+
+    def correlate(
+        self,
+        alerts: List[Dict[str, Any]],
+        posture_findings: Optional[List[Dict[str, Any]]] = None,
+        evidence_counts: Optional[Dict[str, int]] = None,
+    ) -> List[CorrelatedIncident]:
+        """
+        Groups alerts by host, sorts chronologically, and forms clusters
+        connected by verified pivot continuity.
+        """
+        if not alerts:
+            return []
+
+        evidence_counts = evidence_counts or {}
+
+        # 1. Partition strictly by host_id (Zero Cross-Host Contamination)
+        by_host: Dict[str, List[Dict[str, Any]]] = {}
+        for a in alerts:
+            hid = a.get("host_id", "")
+            if hid:
+                by_host.setdefault(hid, []).append(a)
+
+        incidents: List[CorrelatedIncident] = []
+
+        for host_id, host_alerts in by_host.items():
+            # Sort alerts chronologically
+            sorted_alerts = sorted(
+                host_alerts,
+                key=lambda a: self._parse_ts(a.get("detected_at")),
+            )
+
+            # Cluster alerts by pivot continuity
+            clusters: List[List[Dict[str, Any]]] = []
+            cluster_reasons: List[List[str]] = []
+
+            for alert in sorted_alerts:
+                matched_idx = None
+                matched_reason = None
+
+                for idx, cluster in enumerate(clusters):
+                    can_corr, reason = self._can_correlate(alert, cluster)
+                    if can_corr:
+                        matched_idx = idx
+                        matched_reason = reason
+                        break
+
+                if matched_idx is not None:
+                    clusters[matched_idx].append(alert)
+                    if matched_reason:
+                        cluster_reasons[matched_idx].append(matched_reason)
+                else:
+                    clusters.append([alert])
+                    cluster_reasons.append([])
+
+            # For each cluster, synthesize a CorrelatedIncident
+            for idx, cluster in enumerate(clusters):
+                reasons = cluster_reasons[idx]
+                combined_reason = "; ".join(dict.fromkeys(reasons)) if reasons else "Single isolated security detection on host."
+                incident = self._build_incident_from_cluster(
+                    host_id=host_id,
+                    cluster=cluster,
+                    posture_findings=posture_findings,
+                    evidence_counts=evidence_counts,
+                    correlation_reason=combined_reason,
+                )
+                incidents.append(incident)
+
+        return incidents
+
+    def _build_incident_from_cluster(
+        self,
+        host_id: str,
+        cluster: List[Dict[str, Any]],
+        posture_findings: Optional[List[Dict[str, Any]]],
+        evidence_counts: Dict[str, int],
+        correlation_reason: str,
+    ) -> CorrelatedIncident:
+        alert_ids = [a.get("id") for a in cluster]
+        incident_id = self.generate_incident_id(host_id, alert_ids)
+
+        # Entity extraction
+        source_ips: Set[str] = set()
+        users: Set[str] = set()
+        rule_ids: Set[str] = set()
+        severities = []
+
+        for a in cluster:
+            rule_ids.add(a.get("rule_id", ""))
+            severities.append(a.get("severity", "low").lower())
+            ips, us = self._extract_entities(a)
+            source_ips.update(ips)
+            users.update(us)
+
+        # Highest severity (Rule Engine immutability)
+        sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+        highest_sev = max(severities, key=lambda s: sev_rank.get(s, 0), default="medium")
+
+        # Determine Primary Alert (highest severity or earliest trigger)
+        primary_alert = min(
+            cluster,
+            key=lambda a: (-sev_rank.get(a.get("severity", "low").lower(), 0), a.get("detected_at")),
+        )
+
+        first_seen = min(a.get("detected_at") for a in cluster)
+        last_seen = max(a.get("detected_at") for a in cluster)
+
+        # Compute total evidence count across all alerts in cluster
+        total_evidence = sum(evidence_counts.get(a.get("id", ""), 0) for a in cluster)
+
+        # Evaluate risk score
+        risk_result = RiskAssessmentEngine.evaluate(
+            alerts=cluster,
+            evidence_count=total_evidence,
+            posture_findings=posture_findings,
+        )
+
+        has_brute = "RULE-SSH-BRUTE" in rule_ids
+        has_auth = "RULE-AUTH-003" in rule_ids
+        has_sudo = "RULE-SUSP-SUDO" in rule_ids
+
+        primary_ip = sorted(list(source_ips))[0] if source_ips else None
+        primary_user = sorted(list(users))[0] if users else None
+
+        # Provenance classification
+        is_synthetic = (
+            "ALT-SEED-" in str(primary_alert.get("id", ""))
+            or (primary_ip and ("198.51.100." in primary_ip or "203.0.113." in primary_ip or "192.0.2." in primary_ip))
+            or "09e84aeac243e448" in str(primary_alert.get("id", ""))
+        )
+        is_test = (
+            primary_ip == "127.0.0.1"
+            or "sec_test_user" in str(primary_user)
+            or any("controlled" in str(a.get("reason", "")).lower() for a in cluster)
+        )
+        if is_synthetic:
+            prov = "synthetic_benchmark"
+        elif is_test:
+            prov = "controlled_operational_test"
+        else:
+            prov = "genuine_host_telemetry"
+
+        # Synthesize Title and Attack Scenario using Context-Aware Attribution
+        title, scenario = format_contextual_attack_scenario(
+            provenance=prov,
+            source_ip=primary_ip,
+            target_user=primary_user,
+            has_brute=has_brute,
+            has_auth=has_auth,
+            has_sudo=has_sudo,
+            host_id=host_id,
+        )
+
+        return CorrelatedIncident(
+            incident_id=incident_id,
+            host_id=host_id,
+            title=title,
+            severity=highest_sev,
+            primary_alert_id=primary_alert.get("id", ""),
+            alerts=cluster,
+            source_ip=primary_ip,
+            target_user=primary_user,
+            attack_scenario=scenario,
+            correlation_reason=correlation_reason,
+            first_seen_at=first_seen,
+            last_seen_at=last_seen,
+            risk_result=risk_result,
+            provenance=prov,
+        )

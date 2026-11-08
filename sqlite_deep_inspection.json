@@ -1,0 +1,1311 @@
+{
+  "ai_analyses": {
+    "count": 12,
+    "columns": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "incident_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "alert_id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "host_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "analysis_status",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "threat_classification",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "executive_summary",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "attack_scenario",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 8,
+        "name": "risk_level",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 9,
+        "name": "risk_score",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 10,
+        "name": "confidence_level",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 11,
+        "name": "confidence_reason",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 12,
+        "name": "facts_json",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'[]'",
+        "pk": 0
+      },
+      {
+        "cid": 13,
+        "name": "inferences_json",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'[]'",
+        "pk": 0
+      },
+      {
+        "cid": 14,
+        "name": "hypotheses_json",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'[]'",
+        "pk": 0
+      },
+      {
+        "cid": 15,
+        "name": "unknowns_json",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'[]'",
+        "pk": 0
+      },
+      {
+        "cid": 16,
+        "name": "observed_behaviors_json",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": "'[]'",
+        "pk": 0
+      },
+      {
+        "cid": 17,
+        "name": "timeline_json",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": "'[]'",
+        "pk": 0
+      },
+      {
+        "cid": 18,
+        "name": "supporting_evidence_json",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'[]'",
+        "pk": 0
+      },
+      {
+        "cid": 19,
+        "name": "contradicting_evidence_json",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": "'[]'",
+        "pk": 0
+      },
+      {
+        "cid": 20,
+        "name": "impact_assessment",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 21,
+        "name": "recommended_actions_json",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": "'[]'",
+        "pk": 0
+      },
+      {
+        "cid": 22,
+        "name": "containment_recommendations_json",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": "'[]'",
+        "pk": 0
+      },
+      {
+        "cid": 23,
+        "name": "investigation_notes",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 24,
+        "name": "provider",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 25,
+        "name": "model",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 26,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 27,
+        "name": "completed_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "incidents",
+        "from": "incident_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "indexes": [
+      {
+        "seq": 0,
+        "name": "idx_ai_analyses_inc",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 1,
+        "name": "sqlite_autoindex_ai_analyses_1",
+        "unique": 1,
+        "origin": "pk",
+        "partial": 0
+      }
+    ],
+    "sample": {
+      "id": "ANL-INC-host-fenn-ubuntu-771f6d1f7346-1794106189",
+      "incident_id": "INC-host-fenn-ubuntu-771f6d1f7346",
+      "alert_id": "ALT-BRUTE-09e84aeac243e448",
+      "host_id": "host-fenn-ubuntu",
+      "analysis_status": "completed",
+      "threat_classification": "T1110 - Brute Force & T1548.003 - Abuse Elevation Control Mechanism: Sudo and Sudo Caching",
+      "executive_summary": "An adversary conducted multiple SSH authentication brute-force attempts from external source IPs against the host. Following successful brute-force logins for user accounts, privileged command executions via sudo were performed, including spawning interactive root shells and modifying critical web directory permissions.",
+      "attack_scenario": "The incident began with repeated SSH authentication failures from source IP 198.51.100.61 targeting the root user, followed by brute-force password guessing against user_419 and user_472 from IPs 203.0.113.29 and 203.0.113.182 respectively, culminating in successful logins. Subsequently, user 'ubuntu' executed interactive root shells via sudo (/bin/bash) and modified file permissions on the web directory (/bin/chmod 777 /var/www/html).",
+      "risk_level": "high",
+      "risk_score": 85,
+      "confidence_level": "high",
+      "confidence_reason": "Direct authentication logs and sudo execution logs explicitly capture the brute-force sequence and subsequent privileged command execution.",
+      "facts_json": "[{\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-89651\", \"fact\": \"Failed SSH authentication for user 'root' from 198.51.100.61:50000.\", \"timestamp\": \"2026-11-07T16:05:00+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-89652\", \"fact\": \"Failed SSH authentication for user 'root' from 198.51.100.61:50001.\", \"timestamp\": \"2026-11-07T16:05:01+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-89653\", \"fact\": \"Failed SSH authentication for user 'root' from 198.51.100.61:50002.\", \"timestamp\": \"2026-11-07T16:05:02+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-89654\", \"fact\": \"Failed SSH authentication for user 'root' from 198.51.100.61:50003.\", \"timestamp\": \"2026-11-07T16:05:03+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-40419\", \"fact\": \"Failed SSH authentication for user 'user_419' from 203.0.113.29:54101.\", \"timestamp\": \"2026-11-07T16:10:01+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-40420\", \"fact\": \"Failed SSH authentication for user 'user_419' from 203.0.113.29:54102.\", \"timestamp\": \"2026-11-07T16:10:15+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-SUCCESS-40421\", \"fact\": \"Accepted SSH login (password) for user 'user_419' from 203.0.113.29.\", \"timestamp\": \"2026-11-07T16:10:45+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-40972\", \"fact\": \"Failed SSH authentication for user 'user_472' from 203.0.113.182:54101.\", \"timestamp\": \"2026-11-07T16:10:01+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-40973\", \"fact\": \"Failed SSH authentication for user 'user_472' from 203.0.113.182:54102.\", \"timestamp\": \"2026-11-07T16:10:15+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-SUCCESS-40974\", \"fact\": \"Accepted SSH login (password) for user 'user_472' from 203.0.113.182.\", \"timestamp\": \"2026-11-07T16:10:45+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-SUDO-EXEC-62572\", \"fact\": \"Privileged execution of /bin/bash via sudo by user 'ubuntu'.\", \"timestamp\": \"2026-11-07T16:20:00+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-SUDO-EXEC-62582\", \"fact\": \"Privileged execution of /bin/chmod 777 /var/www/html via sudo by user 'ubuntu'.\", \"timestamp\": \"2026-11-07T16:21:00+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-SUDO-EXEC-15914\", \"fact\": \"Privileged execution of /bin/bash via sudo by user 'ubuntu'.\", \"timestamp\": \"2026-11-07T16:30:00+00:00\"}]",
+      "inferences_json": "[{\"statement\": \"External actors utilized automated credential guessing tools against multiple user accounts via SSH.\", \"supporting_evidence_ids\": [\"EVT-host-fenn-ubuntu-AUTH-FAIL-89651\", \"EVT-host-fenn-ubuntu-AUTH-FAIL-40419\", \"EVT-host-fenn-ubuntu-AUTH-FAIL-40972\"], \"rationale\": \"Rapid succession of authentication failures across different accounts and source IPs indicates systematic brute-force activity.\"}, {\"statement\": \"The user 'ubuntu' account was compromised or leveraged by an attacker to escalate privileges and alter system security settings.\", \"supporting_evidence_ids\": [\"EVT-host-fenn-ubuntu-SUDO-EXEC-62572\", \"EVT-host-fenn-ubuntu-SUDO-EXEC-62582\", \"EVT-host-fenn-ubuntu-SUDO-EXEC-15914\"], \"rationale\": \"Execution of root interactive shells and permissive chmod commands via sudo indicates post-compromise activity designed to persist or facilitate further exploitation.\"}]",
+      "hypotheses_json": "[{\"statement\": \"The attacker established persistent access by dropping webshells or backdoors into /var/www/html after making it world-writable.\", \"status\": \"unverified\", \"investigation_step\": \"Perform a file integrity check and scan /var/www/html for newly created or modified scripts.\"}]",
+      "unknowns_json": "[{\"data_gap\": \"The exact mechanism by which user 'ubuntu' credentials were obtained prior to the sudo executions.\", \"impact\": \"Limits full understanding of the initial entry vector for the administrative account.\"}]",
+      "observed_behaviors_json": "[{\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-89651\", \"fact\": \"Failed SSH authentication for user 'root' from 198.51.100.61:50000.\", \"timestamp\": \"2026-11-07T16:05:00+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-89652\", \"fact\": \"Failed SSH authentication for user 'root' from 198.51.100.61:50001.\", \"timestamp\": \"2026-11-07T16:05:01+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-89653\", \"fact\": \"Failed SSH authentication for user 'root' from 198.51.100.61:50002.\", \"timestamp\": \"2026-11-07T16:05:02+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-89654\", \"fact\": \"Failed SSH authentication for user 'root' from 198.51.100.61:50003.\", \"timestamp\": \"2026-11-07T16:05:03+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-40419\", \"fact\": \"Failed SSH authentication for user 'user_419' from 203.0.113.29:54101.\", \"timestamp\": \"2026-11-07T16:10:01+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-40420\", \"fact\": \"Failed SSH authentication for user 'user_419' from 203.0.113.29:54102.\", \"timestamp\": \"2026-11-07T16:10:15+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-SUCCESS-40421\", \"fact\": \"Accepted SSH login (password) for user 'user_419' from 203.0.113.29.\", \"timestamp\": \"2026-11-07T16:10:45+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-40972\", \"fact\": \"Failed SSH authentication for user 'user_472' from 203.0.113.182:54101.\", \"timestamp\": \"2026-11-07T16:10:01+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-40973\", \"fact\": \"Failed SSH authentication for user 'user_472' from 203.0.113.182:54102.\", \"timestamp\": \"2026-11-07T16:10:15+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-SUCCESS-40974\", \"fact\": \"Accepted SSH login (password) for user 'user_472' from 203.0.113.182.\", \"timestamp\": \"2026-11-07T16:10:45+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-SUDO-EXEC-62572\", \"fact\": \"Privileged execution of /bin/bash via sudo by user 'ubuntu'.\", \"timestamp\": \"2026-11-07T16:20:00+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-SUDO-EXEC-62582\", \"fact\": \"Privileged execution of /bin/chmod 777 /var/www/html via sudo by user 'ubuntu'.\", \"timestamp\": \"2026-11-07T16:21:00+00:00\"}, {\"evidence_id\": \"EVT-host-fenn-ubuntu-SUDO-EXEC-15914\", \"fact\": \"Privileged execution of /bin/bash via sudo by user 'ubuntu'.\", \"timestamp\": \"2026-11-07T16:30:00+00:00\"}]",
+      "timeline_json": "[{\"step\": 1, \"timestamp\": \"2026-11-07T16:05:00+00:00\", \"event_type\": \"auth_failure\", \"description\": \"Brute-force SSH attempts begin from 198.51.100.61 against user root.\", \"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-89651\"}, {\"step\": 2, \"timestamp\": \"2026-11-07T16:10:01+00:00\", \"event_type\": \"auth_failure\", \"description\": \"Authentication failures observed for user_419 and user_472.\", \"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-FAIL-40419\"}, {\"step\": 3, \"timestamp\": \"2026-11-07T16:10:45+00:00\", \"event_type\": \"auth_success\", \"description\": \"Successful SSH login for user_419 and user_472.\", \"evidence_id\": \"EVT-host-fenn-ubuntu-AUTH-SUCCESS-40421\"}, {\"step\": 4, \"timestamp\": \"2026-11-07T16:20:00+00:00\", \"event_type\": \"sudo_execution\", \"description\": \"User ubuntu executes interactive root shell (/bin/bash) via sudo.\", \"evidence_id\": \"EVT-host-fenn-ubuntu-SUDO-EXEC-62572\"}, {\"step\": 5, \"timestamp\": \"2026-11-07T16:21:00+00:00\", \"event_type\": \"sudo_execution\", \"description\": \"User ubuntu modifies web directory permissions via sudo (/bin/chmod 777 /var/www/html).\", \"evidence_id\": \"EVT-host-fenn-ubuntu-SUDO-EXEC-62582\"}, {\"step\": 6, \"timestamp\": \"2026-11-07T16:30:00+00:00\", \"event_type\": \"sudo_execution\", \"description\": \"User ubuntu executes another interactive root shell via sudo.\", \"evidence_id\": \"EVT-host-fenn-ubuntu-SUDO-EXEC-15914\"}]",
+      "supporting_evidence_json": "[\"EVT-host-fenn-ubuntu-AUTH-FAIL-89651\", \"EVT-host-fenn-ubuntu-AUTH-FAIL-89652\", \"EVT-host-fenn-ubuntu-AUTH-FAIL-89653\", \"EVT-host-fenn-ubuntu-AUTH-FAIL-89654\", \"EVT-host-fenn-ubuntu-AUTH-FAIL-40419\", \"EVT-host-fenn-ubuntu-AUTH-FAIL-40420\", \"EVT-host-fenn-ubuntu-AUTH-SUCCESS-40421\", \"EVT-host-fenn-ubuntu-AUTH-FAIL-40972\", \"EVT-host-fenn-ubuntu-AUTH-FAIL-40973\", \"EVT-host-fenn-ubuntu-AUTH-SUCCESS-40974\", \"EVT-host-fenn-ubuntu-SUDO-EXEC-62572\", \"EVT-host-fenn-ubuntu-SUDO-EXEC-62582\", \"EVT-host-fenn-ubuntu-SUDO-EXEC-15914\"]",
+      "contradicting_evidence_json": "[]",
+      "impact_assessment": "Compromise of multiple user accounts and escalation to root privileges via sudo creates a high risk of unauthorized data modification, malware installation, and complete host takeover.",
+      "recommended_actions_json": "[{\"priority\": \"immediate\", \"action\": \"Revoke active sessions and reset passwords for compromised user accounts (user_419, user_472, and ubuntu).\"}, {\"priority\": \"high\", \"action\": \"Inspect /var/www/html for unauthorized file creations, modifications, or backdoors introduced following the chmod 777 command.\"}, {\"priority\": \"high\", \"action\": \"Review sudoers configuration to ensure principle of least privilege is enforced for user 'ubuntu'.\"}]",
+      "containment_recommendations_json": "[\"Block malicious source IPs (198.51.100.61, 203.0.113.29, 203.0.113.182) at the firewall or security group level.\", \"Temporarily restrict SSH password authentication and enforce SSH key-based authentication.\", \"Restore secure permissions on /var/www/html (e.g., chmod 755).\"]",
+      "investigation_notes": "Live Google Gemini analysis verified against grounding telemetry.",
+      "provider": "gemini",
+      "model": "gemini-3.5-flash-lite",
+      "created_at": "2026-11-08T02:49:49.700683+00:00",
+      "completed_at": "2026-11-08T02:49:57.738439+00:00"
+    }
+  },
+  "incident_alerts": {
+    "count": 22,
+    "columns": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "incident_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "alert_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "added_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "incidents",
+        "from": "incident_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "indexes": [
+      {
+        "seq": 0,
+        "name": "idx_incident_alerts_alt",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 1,
+        "name": "idx_incident_alerts_inc",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 2,
+        "name": "sqlite_autoindex_incident_alerts_2",
+        "unique": 1,
+        "origin": "u",
+        "partial": 0
+      },
+      {
+        "seq": 3,
+        "name": "sqlite_autoindex_incident_alerts_1",
+        "unique": 1,
+        "origin": "pk",
+        "partial": 0
+      }
+    ],
+    "sample": {
+      "id": "REL-INC-host-fenn-ubuntu-ae8b42ad988f-ALT-SEED-BRUTE",
+      "incident_id": "INC-host-fenn-ubuntu-ae8b42ad988f",
+      "alert_id": "ALT-SEED-BRUTE",
+      "added_at": "2026-11-08T02:49:31.977980+00:00"
+    }
+  },
+  "incident_risk_factors": {
+    "count": 40,
+    "columns": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "incident_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "factor_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "factor_name",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "points",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "category",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "description",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "supporting_evidence_ids",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": "'[]'",
+        "pk": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "incidents",
+        "from": "incident_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "indexes": [
+      {
+        "seq": 0,
+        "name": "idx_risk_factors_inc",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 1,
+        "name": "sqlite_autoindex_incident_risk_factors_1",
+        "unique": 1,
+        "origin": "pk",
+        "partial": 0
+      }
+    ],
+    "sample": {
+      "id": "RF-INC-host-fenn-ubuntu-ae8b42ad988f-0-SEV-HIGH",
+      "incident_id": "INC-host-fenn-ubuntu-ae8b42ad988f",
+      "factor_id": "SEV-HIGH",
+      "factor_name": "Base Alert Severity",
+      "points": 30,
+      "category": "severity",
+      "description": "Incident encompasses at least one 'HIGH' severity detection.",
+      "supporting_evidence_ids": "[]"
+    }
+  },
+  "incident_status_history": {
+    "count": 11,
+    "columns": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "incident_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "old_status",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "new_status",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "note",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "operator",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "transitioned_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "incidents",
+        "from": "incident_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "indexes": [
+      {
+        "seq": 0,
+        "name": "idx_status_history_inc",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 1,
+        "name": "sqlite_autoindex_incident_status_history_1",
+        "unique": 1,
+        "origin": "pk",
+        "partial": 0
+      }
+    ],
+    "sample": {
+      "id": "HIST-INC-host-fenn-ubuntu-771f6d1f7346-1794106177",
+      "incident_id": "INC-host-fenn-ubuntu-771f6d1f7346",
+      "old_status": "new",
+      "new_status": "investigating",
+      "note": null,
+      "operator": "admin",
+      "transitioned_at": "2026-11-08T02:49:37.487434+00:00"
+    }
+  },
+  "incident_timeline": {
+    "count": 36,
+    "columns": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "incident_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "timestamp",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "kind",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "title",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "description",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "severity",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "metadata_json",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": "'{}'",
+        "pk": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "incidents",
+        "from": "incident_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "indexes": [
+      {
+        "seq": 0,
+        "name": "idx_timeline_ts",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 1,
+        "name": "idx_timeline_inc",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 2,
+        "name": "sqlite_autoindex_incident_timeline_1",
+        "unique": 1,
+        "origin": "pk",
+        "partial": 0
+      }
+    ],
+    "sample": {
+      "id": "TL-INC-host-fenn-ubuntu-ae8b42ad988f-INIT",
+      "incident_id": "INC-host-fenn-ubuntu-ae8b42ad988f",
+      "timestamp": "2026-11-07T14:17:07.555659+00:00",
+      "kind": "alert",
+      "title": "Incident Identified: Multi-Stage Brute-Force to Privileged Sudo Shell on host-fenn-ubuntu",
+      "description": "Adversary launched automated SSH authentication brute-force from external IP, succeeded in authenticating as user 'account', and executed privileged root shell via sudo.",
+      "severity": "high",
+      "metadata_json": "{\"alert_count\": 3, \"source_ip\": null}"
+    }
+  },
+  "incidents": {
+    "count": 13,
+    "columns": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "host_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "title",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "severity",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "risk_level",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "risk_score",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "status",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'new'",
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "primary_alert_id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 8,
+        "name": "alert_count",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": "1",
+        "pk": 0
+      },
+      {
+        "cid": 9,
+        "name": "source_ip",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 10,
+        "name": "target_user",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 11,
+        "name": "attack_scenario",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 12,
+        "name": "correlation_reason",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 13,
+        "name": "assigned_to",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 14,
+        "name": "first_seen_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 15,
+        "name": "last_seen_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 16,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 17,
+        "name": "updated_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 18,
+        "name": "provenance",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": "'synthetic_benchmark'",
+        "pk": 0
+      },
+      {
+        "cid": 19,
+        "name": "source_category",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": "'unknown'",
+        "pk": 0
+      },
+      {
+        "cid": 20,
+        "name": "source_label",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 21,
+        "name": "threat_actor_context",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "foreign_keys": [],
+    "indexes": [
+      {
+        "seq": 0,
+        "name": "idx_incidents_risk",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 1,
+        "name": "idx_incidents_status",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 2,
+        "name": "idx_incidents_host",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 3,
+        "name": "sqlite_autoindex_incidents_1",
+        "unique": 1,
+        "origin": "pk",
+        "partial": 0
+      }
+    ],
+    "sample": {
+      "id": "INC-host-fenn-ubuntu-ae8b42ad988f",
+      "host_id": "host-fenn-ubuntu",
+      "title": "Multi-Stage Brute-Force to Privileged Sudo Shell on host-fenn-ubuntu",
+      "severity": "high",
+      "risk_level": "high",
+      "risk_score": 79,
+      "status": "new",
+      "primary_alert_id": "ALT-SEED-BRUTE",
+      "alert_count": 3,
+      "source_ip": null,
+      "target_user": null,
+      "attack_scenario": "Adversary launched automated SSH authentication brute-force from external IP, succeeded in authenticating as user 'account', and executed privileged root shell via sudo.",
+      "correlation_reason": "Causal attack chain progression: Repeated failed logins followed by successful authentication.; Causal attack chain progression: Authentication activity followed by privileged sudo execution.",
+      "assigned_to": null,
+      "first_seen_at": "2026-11-07T14:17:07.555659+00:00",
+      "last_seen_at": "2026-11-07T14:27:07.555659+00:00",
+      "created_at": "2026-11-08T02:49:31.977980+00:00",
+      "updated_at": "2026-11-08T02:58:55.432310+00:00",
+      "provenance": "synthetic_benchmark",
+      "source_category": "unknown",
+      "source_label": null,
+      "threat_actor_context": null
+    }
+  },
+  "schema_migrations": {
+    "count": 2,
+    "columns": [
+      {
+        "cid": 0,
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "applied_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "description",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "foreign_keys": [],
+    "indexes": [],
+    "sample": {
+      "version": 1,
+      "applied_at": "2026-11-08T02:49:23.072740+00:00",
+      "description": "Initial v1 incident investigation schema"
+    }
+  },
+  "security_check_runs": {
+    "count": 0,
+    "columns": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "host_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "status",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'completed'",
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "total_checks",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "passed_checks",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "failed_checks",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "warning_checks",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "error_checks",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 8,
+        "name": "checker_version",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'1.0.0'",
+        "pk": 0
+      },
+      {
+        "cid": 9,
+        "name": "summary",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'{}'",
+        "pk": 0
+      },
+      {
+        "cid": 10,
+        "name": "started_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 11,
+        "name": "completed_at",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 12,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "foreign_keys": [],
+    "indexes": [
+      {
+        "seq": 0,
+        "name": "idx_sc_runs_status",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 1,
+        "name": "idx_sc_runs_host_started",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 2,
+        "name": "sqlite_autoindex_security_check_runs_1",
+        "unique": 1,
+        "origin": "pk",
+        "partial": 0
+      }
+    ],
+    "sample": null
+  },
+  "security_findings": {
+    "count": 0,
+    "columns": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "run_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "host_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "check_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "check_name",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "category",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "severity",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "status",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 8,
+        "name": "actual_value",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 9,
+        "name": "expected_value",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 10,
+        "name": "description",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 11,
+        "name": "security_impact",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 12,
+        "name": "recommendation",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 13,
+        "name": "evidence_summary",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 14,
+        "name": "remediation_reference",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 15,
+        "name": "checked_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 16,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "foreign_keys": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "security_check_runs",
+        "from": "run_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "indexes": [
+      {
+        "seq": 0,
+        "name": "idx_sc_findings_status",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 1,
+        "name": "idx_sc_findings_severity",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 2,
+        "name": "idx_sc_findings_category",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 3,
+        "name": "idx_sc_findings_check_id",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 4,
+        "name": "idx_sc_findings_run_id",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 5,
+        "name": "idx_sc_findings_host_checked",
+        "unique": 0,
+        "origin": "c",
+        "partial": 0
+      },
+      {
+        "seq": 6,
+        "name": "sqlite_autoindex_security_findings_2",
+        "unique": 1,
+        "origin": "u",
+        "partial": 0
+      },
+      {
+        "seq": 7,
+        "name": "sqlite_autoindex_security_findings_1",
+        "unique": 1,
+        "origin": "pk",
+        "partial": 0
+      }
+    ],
+    "sample": null
+  }
+}

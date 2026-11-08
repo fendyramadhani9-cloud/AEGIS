@@ -152,14 +152,16 @@ export interface Alert {
   ai: AiAnalysis;
 }
 
-export type FindingStatus = 'fail' | 'pass' | 'not_checked';
+export type FindingStatus = 'fail' | 'pass' | 'warning' | 'not_applicable' | 'error' | 'not_checked';
 
 /** Security Checker result (read-only host check). */
 export interface Finding {
   kind: 'finding';
   id: string;
+  runId?: string;
   checkId: string;
   title: string;
+  category?: string;
   status: FindingStatus;
   severity: Severity;
   confidence?: Confidence;
@@ -167,6 +169,12 @@ export interface Finding {
   ruleLogic?: RuleLogic;
   hostId: string;
   checkedAt: ISODate;
+  actualValue?: string;
+  expectedValue?: string;
+  securityImpact?: string;
+  recommendation?: string;
+  evidenceSummary?: string;
+  remediationReference?: string;
   indicators: string[];
   /** What this check can and cannot see. */
   limits: string;
@@ -326,6 +334,36 @@ export interface PipelineSourceHealth {
   activeGaps: number;
 }
 
+export interface SecuritySummary {
+  totalChecks: number;
+  passed: number;
+  failed: number;
+  warning: number;
+  notApplicable: number;
+  error: number;
+  totalHosts: number;
+  lastCheckedAt?: string | null;
+  criticalFails: number;
+  highFails: number;
+  mediumFails: number;
+  lowFails: number;
+}
+
+export interface SecurityCheckRun {
+  id: string;
+  hostId: string;
+  status: string;
+  totalChecks: number;
+  passedChecks: number;
+  failedChecks: number;
+  warningChecks: number;
+  errorChecks: number;
+  checkerVersion: string;
+  summary: Record<string, any>;
+  startedAt: ISODate;
+  completedAt?: ISODate | null;
+}
+
 export type EvidenceStatus = 'active' | 'expired' | 'stopped';
 
 export interface EvidenceSession {
@@ -378,4 +416,121 @@ export type TimelineItem =
   | { kind: 'event'; ts: ISODate; event: NormalizedEvent }
   | { kind: 'alert'; ts: ISODate; alert: Alert }
   | { kind: 'gap'; ts: ISODate; gap: TelemetryGap };
+
+/* ========================================================================= */
+/* Prioritas 5: AI Security Analysis & Incident Investigation Domain Types   */
+/* ========================================================================= */
+
+export type IncidentStatus = 'open' | 'investigating' | 'mitigated' | 'resolved' | 'closed' | 'false_positive';
+export type IncidentSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+
+export interface IncidentRiskFactor {
+  name: string;
+  factorId?: string;
+  weight: number;
+  contribution: number;
+  category?: string;
+  description: string;
+  supportingEvidenceIds?: string[];
+}
+
+export interface AIAnalysisRecord {
+  id: string;
+  incidentId: string;
+  provider: string;
+  model: string;
+  state: 'pending' | 'ready' | 'failed';
+  threatClassification: string;
+  executiveSummary: string;
+  attackScenario: string;
+  facts?: Array<{ evidence_id: string; fact: string; timestamp?: string }>;
+  inferences?: Array<{ statement: string; supporting_evidence_ids: string[]; rationale: string }>;
+  hypotheses?: Array<{ statement: string; status: string; investigation_step: string }>;
+  unknownItems?: Array<{ data_gap: string; impact: string }>;
+  keyObservations: Array<{
+    observation: string;
+    evidenceIds: string[];
+    confidence: number;
+  }>;
+  recommendedActions: Array<{
+    priority: number;
+    action: string;
+    rationale: string;
+  }>;
+  unknowns: string[];
+  riskScore: number;
+  riskLevel: IncidentSeverity;
+  tokensUsed?: number;
+  latencyMs?: number;
+  promptSanitized?: boolean;
+  storageBackend?: string;
+  createdAt: ISODate;
+  error?: string | null;
+}
+
+export interface Incident {
+  id: string;
+  title: string;
+  hostId: string;
+  hostname?: string;
+  primaryAlertId: string;
+  status: IncidentStatus;
+  severity: IncidentSeverity;
+  riskScore: number;
+  riskLevel: IncidentSeverity;
+  alertCount: number;
+  evidenceCount: number;
+  detectedAt: ISODate;
+  resolvedAt?: ISODate | null;
+  correlationScenario?: string;
+  correlationReason?: string;
+  storageBackend?: string;
+  provenance?: 'synthetic_benchmark' | 'controlled_operational_test' | 'genuine_host_telemetry';
+  sourceIp?: string | null;
+  targetUser?: string | null;
+  sourceCategory?: string;
+  sourceLabel?: string;
+  threatActorContext?: string;
+  riskFactors?: IncidentRiskFactor[];
+  alerts?: Alert[];
+  latestAnalysis?: AIAnalysisRecord | null;
+}
+
+export interface IncidentTimelineItem {
+  id: string;
+  incidentId: string;
+  timestamp: ISODate;
+  entryType: 'alert' | 'event' | 'action' | 'ai_analysis' | 'status_change';
+  title: string;
+  description: string;
+  severity?: IncidentSeverity | null;
+  source?: string | null;
+  referenceId?: string | null;
+  metadata?: Record<string, any>;
+}
+
+export interface IncidentSummary {
+  totalIncidents: number;
+  openIncidents: number;
+  investigatingIncidents: number;
+  resolvedIncidents: number;
+  criticalIncidents: number;
+  highIncidents: number;
+  mediumIncidents: number;
+  lowIncidents: number;
+  avgRiskScore: number;
+  storageBackend: string;
+}
+
+export interface AIHealthStatus {
+  status: 'ok' | 'degraded' | 'unavailable';
+  activeProvider: string;
+  model: string;
+  keyAvailable: boolean;
+  reachable?: boolean;
+  analysisStatus?: string;
+  offlineFallbackReady: boolean;
+  providersConfigured: string[];
+}
+
 
