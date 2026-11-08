@@ -2,165 +2,162 @@
 **AEGIS Enterprise Cyber Defense Platform**
 **Prioritas:** 9 — Final Cloud Migration Review & Production Cutover Preparation
 **Dokumen Induk:** `docs/priority-9-final-cloud-migration-review.md`
-**Tanggal:** 8 November 2026
+**Tanggal Pembaruan:** 8 November 2026 (Final Readiness Review)
 **Pelaksana:** Apri (Senior Cybersecurity Engineer & Full-Stack Platform Architect)
-**Status:** **AUDIT LULUS EMPIRIS — CUTOVER TETAP BERADA DALAM STATUS HOLD**
+**Status Operasional:** **HYBRID MODE DIPERTAHANKAN — CUTOVER BELUM DISETUJUI (NO-GO)**
 
 ---
 
-## 1. Pendahuluan
+## 1. Pendahuluan & Batasan Pembuktian Epistemologis
 
-Lampiran ini disusun khusus untuk menindaklanjuti arahan terarah dari Project Owner guna menutup secara tuntas **empat risiko residual** sebelum keputusan produksi diambil:
-1. **RLS & Production Role Access:** Pembuktian izin akses `service_role` dan penolakan `anon` serta `authenticated`.
-2. **Importer & Cloud Baseline Dependency:** Pembuktian mapping 136 record terhadap 1 host, 13 alert, dan 23 evidence link yang telah ada di Cloud.
-3. **Mirror Worker Concurrency & Resilience:** Pengujian dua worker konkuren, simulasi kegagalan disk SQLite, restart recovery, dan jaminan non-mutasi Cloud.
-4. **Collector Retention Empirical Calculation:** Perhitungan matematis batas retensi log berdasarkan pengukuran volume jurnal aktual di VM `fenn`.
+Lampiran ini menyajikan hasil penelaahan terarah dan evaluasi batas pembuktian (*epistemological boundaries*) atas **empat risiko residual** sebelum ada keputusan produksi. 
+
+Sesuai arahan Project Owner, seluruh klaim teknis diklasifikasikan secara ketat ke dalam 4 kategori:
+1. `VERIFIED LIVE (READ-ONLY)`: Terbukti langsung pada VM `fenn` atau Supabase Cloud tanpa mutasi.
+2. `VERIFIED IN SIMULATION / LOCAL TEST`: Terbukti pada lingkungan pengujian lokal (PGlite / SQLite in-memory / unit tests).
+3. `UNTESTED ON PRODUCTION CLOUD SCHEMA`: Belum dapat dibuktikan pada Supabase Cloud karena DDL 002–004 belum pernah diterapkan di Cloud.
+4. `THEORETICAL ESTIMATE / KNOWN LIMITATION`: Estimasi berbasis model perhitungan atau batasan arsitektural yang diakui secara sadar.
 
 ---
 
 ## 2. Audit Risiko 1 — RLS & Production Role Access
 
-### 2.1. Hardening Tambahan pada DDL
-Pada audit sebelumnya, Migration 004 telah mengaktifkan RLS dan memberikan `GRANT ALL ... TO service_role, postgres;`. Namun, untuk menegakkan prinsip *Defense-in-Depth*, ditambahkan instruksi `REVOKE` eksplisit pada seluruh tabel baru sebelum `GRANT`:
-```sql
-REVOKE ALL ON TABLE public.incidents FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON TABLE public.incident_alerts FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON TABLE public.incident_risk_factors FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON TABLE public.incident_timeline FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON TABLE public.ai_analyses FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON TABLE public.incident_status_history FROM PUBLIC, anon, authenticated;
-```
-Perubahan ini telah diterapkan pada `supabase/migrations/004_incident_investigation.sql` dan `supabase/migrations/unified_migration_002_to_004.sql`.
+### 2.1. Hardening DDL & Konsistensi Hak Akses (`REVOKE` / `GRANT`)
+- **Status Bukti:** `VERIFIED IN SIMULATION / LOCAL TEST` & `STATIC CATALOG AUDIT`.
+- **Implementasi:**
+  Pada file individual `004_incident_investigation.sql` dan `unified_migration_002_to_004.sql`, telah ditambahkan instruksi pencabutan hak akses eksplisit sebelum pemberian hak akses backend:
+  ```sql
+  -- Least Privilege Access Control: Explicitly revoke public, anon, authenticated
+  REVOKE ALL ON TABLE public.incidents FROM PUBLIC, anon, authenticated;
+  REVOKE ALL ON TABLE public.incident_alerts FROM PUBLIC, anon, authenticated;
+  REVOKE ALL ON TABLE public.incident_risk_factors FROM PUBLIC, anon, authenticated;
+  REVOKE ALL ON TABLE public.incident_timeline FROM PUBLIC, anon, authenticated;
+  REVOKE ALL ON TABLE public.ai_analyses FROM PUBLIC, anon, authenticated;
+  REVOKE ALL ON TABLE public.incident_status_history FROM PUBLIC, anon, authenticated;
 
-### 2.2. Hasil Pengujian Perilaku Role (`tests/test_targeted_rls_and_roles.cjs`)
-Pengujian dijalankan pada engine PostgreSQL terisolasi (PGlite) dengan menyimulasikan 3 role standar Supabase:
-- **`service_role` (Backend FastAPI):**
-  - `INSERT INTO incidents`: **BERHASIL (HTTP 200)**.
-  - `SELECT FROM incidents`: **BERHASIL (Data terbaca)**.
-  - `INSERT & SELECT security_check_runs & findings`: **BERHASIL**.
-  - `EXECUTE fn_ingest_alert_with_evidence`: **BERHASIL**.
-- **`anon` (Public API Key):**
-  - `SELECT FROM incidents`: **DITOLAK (0 baris / RLS Deny-All)**.
-  - `INSERT INTO incidents`: **DITOLAK (`permission denied for table incidents`)**.
-  - `SELECT FROM security_findings`: **DITOLAK (`permission denied for table security_findings`)**.
-  - `EXECUTE fn_ingest_alert_with_evidence`: **DITOLAK (`permission denied for function fn_ingest_alert_with_evidence`)**.
-- **`authenticated` (User Login Standar):**
-  - `INSERT INTO incidents`: **DITOLAK (`permission denied for table incidents`)**.
-  - `EXECUTE fn_ingest_alert_with_evidence`: **DITOLAK (`permission denied for function fn_ingest_alert_with_evidence`)**.
+  -- Grant backend service_role and postgres permissions
+  GRANT ALL ON TABLE public.incidents TO service_role, postgres;
+  GRANT ALL ON TABLE public.incident_alerts TO service_role, postgres;
+  GRANT ALL ON TABLE public.incident_risk_factors TO service_role, postgres;
+  GRANT ALL ON TABLE public.incident_timeline TO service_role, postgres;
+  GRANT ALL ON TABLE public.ai_analyses TO service_role, postgres;
+  GRANT ALL ON TABLE public.incident_status_history TO service_role, postgres;
+  ```
 
-### 2.3. Matriks Hasil Audit Keamanan Role:
-| Peran (Role) | Akses Baca (SELECT) | Akses Tulis (INSERT/UPDATE) | Eksekusi RPC Ingest | Kesimpulan Audit |
-| :--- | :---: | :---: | :---: | :--- |
-| **`anon`** | BLOCKED (0 rows) | REJECTED (Permission Denied) | REJECTED (Permission Denied) | **100% Aman (No Leakage)** |
-| **`authenticated`** | BLOCKED (0 rows) | REJECTED (Permission Denied) | REJECTED (Permission Denied) | **100% Aman (No Elevation)** |
-| **`service_role`** | PERMITTED | PERMITTED | PERMITTED | **100% Operasional Backend** |
-| **`postgres`** | FULL (Superuser) | FULL (Superuser) | FULL (Superuser) | **100% Administratif** |
+### 2.2. Hasil Pengujian Simulasi Role (`tests/test_targeted_rls_and_roles.cjs`):
+- **Role `service_role`:**
+  - `INSERT` dan `SELECT` pada `incidents`: **LULUS (Akses Penuh)**.
+  - `INSERT` dan `SELECT` pada `security_check_runs` & `security_findings`: **LULUS**.
+  - Eksekusi RPC `fn_ingest_alert_with_evidence`: **LULUS**.
+- **Role `anon` (Public API Key):**
+  - `SELECT` pada `incidents`: **DITOLAK (0 baris / RLS Deny-All)**.
+  - `INSERT` pada `incidents`: **DITOLAK (`permission denied for table incidents`)**.
+  - `SELECT` pada `security_findings`: **DITOLAK (`permission denied for table security_findings`)**.
+  - Eksekusi RPC Ingest: **DITOLAK (`permission denied for function fn_ingest_alert_with_evidence`)**.
+- **Role `authenticated` (Login User):**
+  - `INSERT` pada `incidents`: **DITOLAK (`permission denied`)**.
+  - Eksekusi RPC Ingest: **DITOLAK (`permission denied`)**.
+
+### 2.3. Batasan Pembuktian (Caveat):
+> [!IMPORTANT]
+> **Batasan Produksi (`UNTESTED ON PRODUCTION CLOUD SCHEMA`):**
+> Pengujian di atas membuktikan bahwa konfigurasi DDL dan logika PostgreSQL sudah benar pada engine PGlite. Namun, **karena Supabase Cloud belum menerima migrasi 002–004, perilaku autentikasi JWT gateway PostgREST produksi pada skema baru belum pernah diuji secara live**. Pengujian live hanya dapat dilakukan setelah DDL diterapkan di Cloud.
 
 ---
 
 ## 3. Audit Risiko 2 — Importer & Dependensi Cloud Baseline
 
-Pemeriksaan referensial dilakukan secara langsung terhadap data Supabase Cloud aktual (`https://hiwfbmwgnpnwaszltqwb.supabase.co`) dan dataset 136 record SQLite VM (`data/vm_fenn_aegis_incidents.db`) melalui `scripts/audit_cloud_dependencies.py`:
+### 3.1. Hasil Pemeriksaan Dependensi Data (`scripts/audit_cloud_dependencies.py`):
+- **Status Bukti:** `VERIFIED LIVE (READ-ONLY)`.
+- **Data Cloud Aktual:**
+  - `hosts`: 1 host (`host-fenn-ubuntu`).
+  - `alerts`: 13 alert historis.
+  - `alert_evidence`: 23 relasi evidence.
+- **Pencocokan 136 Record SQLite VM:**
+  - **Host Foreign Key:** 100% dari 136 record merujuk ke `'host-fenn-ubuntu'`. Missing host: **0**.
+  - **Alert Foreign Key:** 100% dari parent alert yang dirujuk oleh 14 insiden dan 23 junction `incident_alerts` **cocok persis dengan 13 alert di Cloud**. Missing alert: **0**.
+  - **Isolasi Host:** 0 host mismatch. Seluruh insiden dan alert berada pada host yang sama (`host-fenn-ubuntu`).
 
-### 3.1. Baseline Supabase Cloud Terkini:
-- **Hosts:** Tepat **1 host** terdaftar (`id = 'host-fenn-ubuntu'`, hostname = `'fenn'`).
-- **Alerts:** Tepat **13 alert** historis baseline tersimpan.
-- **Evidence Links:** Tepat **23 relasi evidence** baseline tersimpan.
-
-### 3.2. Hasil Pencocokan Dependensi 136 Record SQLite:
-1. **Integritas Foreign Key Host:**
-   - Seluruh 14 insiden, 1 security run, 28 temuan, dan 7 analisis AI merujuk ke `host_id = 'host-fenn-ubuntu'`.
-   - Host yang hilang di Cloud: **`set()` (Nol / 0 Missing)**.
-2. **Integritas Foreign Key Alert:**
-   - 14 insiden di SQLite merujuk tepat pada 13 alert yang ada di Cloud.
-   - Alert yang hilang di Cloud: **`set()` (Nol / 0 Missing)**.
-   - 100% parent alert untuk 14 insiden dan 23 junction `incident_alerts` telah tersedia di Cloud.
-3. **Pemeriksaan Isolasi Host (Cross-Host Check):**
-   - Host insiden vs host parent alert: **0 Mismatch**.
-   - Tidak ada insiden yang menghubungkan alert lintas host yang berbeda.
-4. **Stabilitas Payload:**
-   - Timestamp ISO-8601 UTC terkonversi konsisten tanpa distorsi offset timezone.
-   - Struktur JSONB (seperti `summary`, `facts`, `inferences`, `observed_behaviors`) tervalidasi sebagai valid object di PostgreSQL (bukan stringified ganda).
+### 3.2. Batasan Pembuktian (Caveat):
+> [!WARNING]
+> **Batasan Produksi (`THEORETICAL ESTIMATE / KNOWN LIMITATION`):**
+> Kecocokan referensial ini membuktikan bahwa tidak ada data yatim (*orphan data*) terhadap baseline Cloud saat ini. Namun, hal ini **belum menjamin** bahwa eksekusi live impor melalui jaringan WAN tidak akan mengalami gangguan latensi HTTP, batas payload PostgREST, atau lock timeout selama transaksi berjalan.
 
 ---
 
 ## 4. Audit Risiko 3 — Konkurensi & Resiliensi Mirror Worker
 
-Pengujian dieksekusi secara otomatis melalui unit & integration test suite [`tests/test_mirror_worker_concurrency.py`](file:///d:/AEGIS/tests/test_mirror_worker_concurrency.py) dengan hasil **4/4 LULUS (100%)**:
+### 4.1. Hasil Pengujian Unit (`tests/test_mirror_worker_concurrency.py`):
+- **Status Bukti:** `VERIFIED IN SIMULATION / LOCAL TEST`.
+- **Skenario 1 (Intra-Process Concurrency):** Dua thread mengeksekusi `replay_failed_mirrors()` bersamaan. Kunci `threading.RLock()` dan klausa `ON CONFLICT (id)` berhasil mencegah rekaman ganda (5/5 record unik, status: `synced`).
+- **Skenario 2 (SQLite Failure):** Saat SQLite disimulasikan mengalami disk lock/IO error, status record **tetap `pending_retry`** dan tidak pernah menghasilkan status 'synced' palsu.
+- **Skenario 3 (Startup Recovery):** Record `pending_retry` dari proses lama berhasil dipulihkan secara otomatis saat inisialisasi backend (`lifespan`).
+- **Skenario 4 (Strict Flow Direction):** Diverifikasi bahwa fungsi mirror **hanya melakukan operasi baca** terhadap Cloud (0 panggilan `insert`/`update`/`delete`). Arah aliran data selalu **Cloud SSoT $\rightarrow$ SQLite Lokal**.
 
-### 4.1. Uji Konkurensi Dua Worker Bersamaan (`test_concurrent_mirror_replay_no_race_condition`)
-- Dua thread terpisah menjalankan `replay_failed_mirrors()` secara simultan terhadap 5 record yang pending.
-- **Hasil:**
-  - `threading.RLock()` pada `SqliteIncidentStore` dan constraint `ON CONFLICT (id)` pada tabel `incidents` mencegah race condition dan duplikasi.
-  - Setelah kedua worker selesai, jumlah insiden unik di SQLite tepat **5** (tidak ada record ganda).
-  - Status pada `mirror_sync_log`: `pending_retry: 0`, `synced: 5`.
-
-### 4.2. Uji Kegagalan SQLite & Pencegahan Status Palsu (`test_sqlite_failure_does_not_create_false_synced_status`)
-- Menginjeksikan simulasi `sqlite3.OperationalError` (disk I/O error) saat proses penyimpanan mirror.
-- **Hasil:**
-  - Operasi replay menangkap exception secara aman (`still_failed = 1, replayed = 0`).
-  - Status record di `mirror_sync_log` **tetap `pending_retry`** dan **TIDAK PERNAH berubah menjadi `synced` palsu**.
-
-### 4.3. Uji Restart Recovery (`test_restart_recovery_processes_pending_items`)
-- Menyimulasikan proses backend yang mati mendadak dengan 3 record tersisa dalam status `pending_retry`.
-- Saat instance backend baru dinyalakan (`lifespan` startup hook):
-  - Method `replay_failed_mirrors()` memindai `WHERE status != 'synced'`.
-  - Ketiga record langsung diambil ulang dari Cloud SSoT dan di-mirror bersih ke SQLite.
-  - Status akhir: `synced: 3`, `pending_retry: 0`.
-
-### 4.4. Jaminan Arah Replikasi Non-Mutasi Cloud (`test_mirror_replay_never_mutates_cloud`)
-- Memeriksa seluruh panggilan API client Supabase selama proses mirror replay.
-- **Hasil:**
-  - Metode yang dipanggil: hanya `select()` / `get()`.
-  - Panggilan `insert()`, `update()`, `upsert()`, maupun `delete()` pada client Cloud: **0 (Nol)**.
-  - Aliran data terbukti **100% satu arah: Supabase Cloud SSoT $\rightarrow$ SQLite Lokal Replica**.
+### 4.2. Batasan Arsitektural Multi-Process & Stale Overwrites:
+> [!CAUTION]
+> **Batasan Arsitektural yang Diakui (`THEORETICAL ESTIMATE / KNOWN LIMITATION`):**
+> 1. **Batas Kunci Thread:** `threading.RLock()` hanya melindungi konkurensi di dalam **satu proses Python tunggal**. Kunci ini tidak melindungi jika backend dijalankan dengan multi-worker (`uvicorn --workers > 1`) atau beberapa instance terdistribusi.
+> 2. **Risiko Stale Overwrite:** Klausa `ON CONFLICT (id) DO UPDATE` mencegah duplikasi primary key, tetapi tanpa *monotonic versioning* (misal nomor versi increment atau vector clock), ada kemungkinan proses yang tertinggal menimpa data yang lebih baru di SQLite dengan data lama.
+> 3. **Mitigasi di Lingkungan VM Saat Ini:** Pada VM `fenn`, `aegis-backend.service` beroperasi sebagai **satu proses tunggal** (`PID 51764`, 1 instance Uvicorn di port 8000), sehingga risiko konkurensi multi-proses belum aktif pada topologi saat ini. Namun, ini tetap dicatat sebagai batasan desain bila sistem discale di masa depan.
 
 ---
 
-## 5. Audit Risiko 4 — Perhitungan Empiris Retensi Journald Collector
+## 5. Audit Risiko 4 — Koreksi Klaim Retensi Journald Collector
 
-Pengukuran telemetri aktual dijalankan langsung pada sistem operasi Linux VM `fenn` melalui script [`scripts/measure_vm_journal_metrics.py`](file:///d:/AEGIS/scripts/measure_vm_journal_metrics.py):
+### 5.1. Koreksi Formal Atas Klaim "Zero Telemetry Loss"
+> [!NOTE]
+> **Koreksi Klaim Teknis:**
+> Klaim sebelumnya bahwa *"Zero Telemetry Loss terbukti secara matematis"* **DITARIK DAN DIKOREKSI**. Angka yang dilaporkan adalah **estimasi kapasitas retensi (Retention Headroom Estimation)** berdasarkan asumsi beban terukur, bukan jaminan mutlak ketiadaan log loss.
 
-### 5.1. Data Pengukuran Empiris VM `fenn`:
-| Parameter | Nilai Pengukuran Aktual | Sumber Data |
+### 5.2. Data Pengukuran Aktual VM `fenn` (`scripts/measure_vm_journal_metrics.py`):
+- **Status Bukti:** `VERIFIED LIVE (READ-ONLY)`.
+- **Kapasitas Filesystem:** 9,75 GB Total, 3,89 GB Bebas.
+- **Batas Maksimum Journal (`SystemMaxUse`):** 997,93 MB (10% batas FS).
+- **Penggunaan Journal Saat Ini:** **184,00 MB** (23 file journal aktif di `/var/log/journal`).
+- **Headroom Bebas Sebelum Rotasi Log:** **813,93 MB**.
+- **Volume Log Terukur (1 Jam Terakhir):**
+  - Total Log Sistem: 491 entri/jam (**557,65 KB / jam**, rata-rata 1.163 bytes/entri).
+  - Telemetri Keamanan (SSH, PAM, Sudo): 69 entri/jam (**72,34 KB / jam**).
+
+### 5.3. Estimasi Durasi Retensi Berdasarkan Model:
+1. **Model Beban Normal (~558 KB/jam):**
+   $$\text{Estimasi Headroom} = \frac{813,93\text{ MB}}{0,544\text{ MB/jam}} \approx \mathbf{62,3\text{ hari}}$$
+2. **Model Serangan Ekstrem (100 percobaan login/detik $\approx 418,7\text{ MB/jam}$):**
+   $$\text{Estimasi Headroom} = \frac{813,93\text{ MB}}{418,7\text{ MB/jam}} \approx \mathbf{1,94\text{ jam (118 menit)}}$$
+
+### 5.4. Skenario Nyata yang Dapat Menyebabkan Kehilangan Telemetri (Known Failure Modes):
+Meskipun kapasitas disk mencukupi, kehilangan telemetri tetap dapat terjadi dalam kondisi berikut:
+1. **Log Vacuuming / Aggressive Rotation:** Eksekusi `journalctl --vacuum-size` atau `systemd-journald` me-rotate journal file saat batas ukuran file per-arsip tercapai.
+2. **Downtime Melebihi Headroom:** Jika collector tidak aktif melebihi jendela retensi saat terjadi banjir event log.
+3. **Cursor Invalidation:** File `/home/ubuntu/aegis/.collector_cursor` korup, terhapus, atau pointer cursor berada di luar rentang log yang tersisa di disk.
+4. **Filesystem Saturation:** Partisi root `/` penuh akibat file log lain atau proses di luar journald.
+5. **Network Ingestion Stalls:** Collector kehabisan memori buffer lokal jika backend mengalami unreachable berkepanjangan saat volume event sangat tinggi.
+6. **Log Surge di Luar Asumsi:** Serangan terdistribusi dengan intensitas > 500 event/detik yang dapat menghabiskan headroom 813 MB dalam hitungan belasan menit.
+
+---
+
+## 6. Audit Konsistensi File Migrasi SQL
+
+Pemeriksaan konsistensi teks dan substansi antara file individual dan script unified dijalankan secara otomatis:
+- **`002_atomic_alert_evidence_rpc.sql`** $\rightarrow$ Cocok 100% di dalam `unified_migration_002_to_004.sql`.
+- **`003_security_checker.sql`** $\rightarrow$ Cocok 100% di dalam `unified_migration_002_to_004.sql`.
+- **`004_incident_investigation.sql`** $\rightarrow$ Cocok 100% di dalam `unified_migration_002_to_004.sql`.
+- **Batas Transaksi:** Dibungkus dalam blok atomik tunggal `BEGIN; ... COMMIT;`.
+- **Privilege & Owner:** Seluruh function dimiliki oleh `postgres`, search path diset ke `public, pg_temp`, eksekusi publik dicabut, dan diberikan strictly kepada `service_role`.
+
+---
+
+## 7. Kesimpulan & Rekomendasi Akhir
+
+| Parameter | Status Evaluasi | Rekomendasi |
 | :--- | :---: | :--- |
-| **Path Penyimpanan Journal** | `/var/log/journal` | Filesystem persisten (ext4) |
-| **Kapasitas Partisi Disk** | 9,75 GB Total (3,89 GB Bebas) | `statvfs` pada `/` |
-| **Batas Maksimum Journal (`SystemMaxUse`)** | **997,93 MB** (10% batas FS) | Default systemd journald |
-| **Penggunaan Journal Saat Ini** | **184,00 MB** (23 file journal aktif) | `journalctl --disk-usage` / walk |
-| **Headroom Bebas Sebelum Rotasi Log** | **813,93 MB** | Selisih kuota bebas |
-| **Rata-rata Ukuran 1 Log Entry** | **1.163 bytes** (~1,16 KB) | Pengukuran 1 jam terakhir |
-| **Volume Total Log Sistem per Jam** | 491 log / jam (**557,65 KB / jam**) | Telemetri aktual (normal) |
-| **Volume Log Keamanan (SSH, PAM, Sudo)**| 69 log / jam (**72,34 KB / jam**) | Telemetri keamanan murni |
+| **Kesiapan DDL & Schema** | Lulus Simulasi & Audit Konsistensi | Siap bila disetujui |
+| **Kesiapan Data 136 Record**| Lulus Rekonsiliasi & Dependensi Cloud | Siap bila disetujui |
+| **Resiliensi Mirror Worker** | Lulus Single-Process (Ada batasan multi-process) | Diterima dengan catatan |
+| **Estimasi Retensi Telemetri**| Terukur 813 MB Headroom (Bukan jaminan mutlak) | Diterima dengan catatan |
+| **Status Supabase Cloud** | 100% Untouched (Nol DDL, Nol Impor) | Terpelihara |
+| **Layanan VM fenn** | Backend & Collector Aktif di Hybrid Mode | Terpelihara |
 
-### 5.2. Formulasi & Hasil Perhitungan Retensi:
-
-#### Skenario A: Beban Operasional Normal (Kecepatan: ~557,7 KB / jam)
-Pada kondisi operasional normal sistem Linux `fenn`:
-$$\text{Lama Retensi Aman} = \frac{813,93\text{ MB}}{0,544\text{ MB/jam}} \approx 1.495\text{ jam} \approx \mathbf{62,3\text{ hari}}$$
-*Artinya:* Jika collector dihentikan pada beban normal, journald mampu menampung log hingga **62 hari** sebelum terjadi rotasi/penghapusan log tertua.
-
-#### Skenario B: Serangan Siber Ekstrem (Brute-Force 100 percobaan login/detik)
-Pada simulasi serangan brute-force intensitas tinggi:
-- Kecepatan log: 100 event/detik $\times$ 1.163 bytes/event = **116,3 KB/detik** ($\approx 418,7\text{ MB/jam}$).
-$$\text{Lama Retensi Aman} = \frac{813,93\text{ MB}}{418,7\text{ MB/jam}} \approx 1,94\text{ jam} \approx \mathbf{118\text{ menit}}$$
-*Artinya:* Bahkan di bawah serangan siber dahsyat tanpa henti, journald tetap mampu menahan seluruh log selama **hampir 2 jam penuh** tanpa ada satu pun log yang terbuang.
-
-#### Evaluasi Jendela Downtime Maintenance Cutover (Estimasi: 4–5 Menit):
-- Beban Normal (5 Menit): Mengonsumsi $\approx \mathbf{46\text{ KB}}$ ($0,005\%$ dari headroom).
-- Beban Serangan Ekstrem (5 Menit): Mengonsumsi $\approx \mathbf{34,8\text{ MB}}$ ($4,27\%$ dari headroom).
-- **Kesimpulan Mutlak:** Jendela maintenance 5 menit berada jauh di bawah batas rotasi log (>95% headroom tetap utuh). **Jaminan kesinambungan telemetri (Zero Telemetry Loss) terbukti secara matematis dan empiris.**
-
----
-
-## 6. Ringkasan & Kesimpulan Final
-
-| No | Risiko Residual yang Ditelaah | Status Validasi | Bukti Teknis |
-| :---: | :--- | :---: | :--- |
-| 1 | **RLS & Production Role Access** | **TERTUTUP (LULUS)** | `anon` & `authenticated` ditolak total; `service_role` beroperasi penuh. |
-| 2 | **Importer & Cloud Baseline Dependency**| **TERTUTUP (LULUS)** | 136 record 100% cocok dengan 1 host, 13 alert, 23 evidence di Cloud. |
-| 3 | **Mirror Worker Concurrency & Resilience**| **TERTUTUP (LULUS)** | Bebas race condition, fail-safe no false sync, restart recovery terbukti. |
-| 4 | **Collector Retention Calculation** | **TERTUTUP (LULUS)** | Headroom 813,9 MB terbukti aman: 62 hari (normal) atau 118 menit (serangan). |
-
-Sesuai instruksi Project Owner:
-**SISTEM TETAP BERJALAN PADA HYBRID MODE. TIDAK ADA MUTASI SUPABASE CLOUD. KEPUTUSAN CUTOVER SEPENUHNYA BERADA DI TANGAN PROJECT OWNER.**
+### Rekomendasi: **`NO-GO FOR CUTOVER AT THIS TIME`**
+Sistem AEGIS **tetap beroperasi pada arsitektur Hybrid Mode**. Seluruh hasil pengujian dan batasan arsitektur telah tercatat secara jujur dan transparan. Tidak ada tindakan lanjutan yang akan dieksekusi tanpa persetujuan eksplisit dari Project Owner.

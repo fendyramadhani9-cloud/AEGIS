@@ -4,7 +4,7 @@
 **Tanggal:** 8 November 2026
 **Host Target:** VM `fenn` (`192.168.193.129`) & Supabase Cloud (`hiwfbmwgnpnwaszltqwb.supabase.co`)
 **Pelaksana:** Apri (Senior Cybersecurity Engineer & Full-Stack Platform Architect)
-**Status Akhir:** **`READY FOR FINAL APPROVAL`** (Siap Direview untuk Izin Produksi)
+**Status Operasional:** **`NO-GO FOR IMMEDIATE CUTOVER — HYBRID MODE MAINTAINED`** (Audit Risiko Terarah Selesai, Mode Hybrid Dipertahankan)
 
 ---
 
@@ -33,8 +33,8 @@ Laporan ini merupakan hasil pelaksanaan paket pekerjaan lengkap **Prioritas 9**,
    - Membuktikan bahwa arah sinkronisasi selalu satu arah dari Cloud SSoT ke SQLite lokal, sehingga SQLite tidak akan pernah menimpa data otoritatif Cloud.
 5. **Kesinambungan Telemetry & Keamanan Collector:**
    - Konfigurasi journald pada VM `fenn` terbukti persisten di `/var/log/journal`.
-   - Penggunaan disk journald saat ini hanya **108,8 MB** dari kuota bebas **3,9 GB** (>850 MB headroom).
-   - Menghitung batas retensi aman: pada kecepatan log operasional saat ini, journald mampu menampung log hingga **>30 hari downtime tanpa kehilangan satu pun event log**.
+   - Penggunaan disk journald saat ini adalah **184,0 MB** dari kuota batas **997,9 MB** (**813,9 MB headroom** terukur empiris).
+   - Model kapasitas retensi: mampu menampung log operasional normal hingga **62,3 hari** (~1.495 jam) atau kondisi serangan ekstrem hingga **118,5 menit** (dengan penarikan klaim absolut "Zero Telemetry Loss" dan pendokumentasian 6 failure modes operasional).
 6. **Disaster Recovery & 3-Tier Rollback:**
    - Mengakui keterbatasan backup Supabase Cloud secara jujur: paket Free Tier tidak menyediakan self-serve PITR (Point-in-Time-Recovery).
    - Menyiapkan mekanisme mitigasi: reverse data evacuation tool (`scripts/reconcile_cloud_to_sqlite.py --fix`) dan rollback DDL non-destruktif (`supabase/rollback_migration_004.sql`) yang mempertahankan integritas baseline 001.
@@ -223,17 +223,33 @@ sequenceDiagram
 
 ### 7.1. Hasil Pemeriksaan VM fenn:
 - **Journal Storage Directory:** `/var/log/journal` (Permissions: `drwxr-sr-x+`, persisten di disk).
-- **Penggunaan Ruang Disk Journal:** **108,8 MB**.
-- **Ruang Partisi Tersedia:** **3,9 GB** (58% used pada `/dev/mapper/ubuntu--vg-ubuntu--lv`).
+- **Penggunaan Ruang Disk Journal:** **184,00 MB** (23 file journal aktif).
+- **Ruang Partisi Tersedia:** **3,89 GB** bebas dari total 9,75 GB pada `/dev/mapper/ubuntu--vg-ubuntu--lv`.
 - **Cursor Position:** File `/home/ubuntu/aegis/.collector_cursor` izin `0600`, posisi bersih di `i=7930`.
 
-### 7.2. Perhitungan Downtime Retensi Aman (Safe Retention Window):
-- Kecepatan log Linux rata-rata pada host `fenn`: ~2–5 event per menit pada kondisi normal (sekitar 300 KB – 1 MB per hari).
-- Headroom journald yang diizinkan sistem (10% batas FS): **~850 MB ruang bebas tersisa**.
-- **Estimasi Daya Tampung:**
-  - Kondisi Operasional Normal: Mampu menampung event hingga **>30 hari** tanpa rotasi log.
-  - Kondisi Serangan Siber Brutal (100 event/detik): Mampu menampung event selama **~4 hingga 6 jam** penuh tanpa kehilangan data.
-- **Kesimpulan:** Jendela maintenance cutover yang diperkirakan memakan waktu **< 5 menit** berada jauh di bawah batas toleransi bahaya (100% aman dari resiko telemetry loss).
+### 7.2. Pengukuran Empiris Retensi Journald & Koreksi Klaim Retensi:
+- **Pengukuran Empiris Langsung di VM `fenn` (`scripts/measure_vm_journal_metrics.py`):**
+  - Filesystem Root: 9,75 GB Total, 3,89 GB Bebas.
+  - Batas Kuota Journald (`SystemMaxUse` 10% FS): **997,93 MB**.
+  - Penggunaan Disk Journald Saat Ini: **184,00 MB** (23 file journal aktif di `/var/log/journal`).
+  - **Headroom Bebas Sebelum Rotasi Log:** **813,93 MB**.
+  - Kecepatan Log Empiris (1 Jam Terakhir):
+    - Total Sistem: 491 entri/jam (**557,65 KB/jam**, rata-rata 1.163 bytes/entri).
+    - Telemetri Keamanan (SSH, PAM, Sudo): 69 entri/jam (**72,34 KB/jam**).
+- **Model Daya Tampung Headroom (Kapasitas):**
+  - **Kondisi Operasional Normal (557,65 KB/jam):** Mampu menampung log hingga **62,3 hari** (~1.495 jam).
+  - **Kondisi Serangan Siber Ekstrem (100 auth attempts/detik $\approx 116,3$ KB/s = 418,7 MB/jam):** Mampu menampung log hingga **1,94 jam (118,5 menit)**.
+- **Koreksi Epistemologis Atas Klaim "Zero Telemetry Loss":**
+  > [!NOTE]
+  > Klaim bahwa *"Zero Telemetry Loss terbukti secara matematis"* **ditarik dan dikoreksi**. Headroom 813,9 MB adalah kapasitas daya tampung log, bukan jaminan mutlak ketiadaan log loss.
+- **6 Failure Modes Nyata Kehilangan Telemetri yang Diakui:**
+  1. *Log Vacuuming / Aggressive Rotation:* Pembersihan manual (`journalctl --vacuum-size`) atau rotasi otomatis systemd saat batas per file tercapai.
+  2. *Downtime Melebihi Headroom:* Gangguan berkepanjangan melampaui jendela retensi saat terjadi banjir event log (> 1,94 jam saat diserang).
+  3. *Cursor Invalidation:* Pointer cursor di `/home/ubuntu/aegis/.collector_cursor` korup, terhapus, atau pointer tertinggal di belakang log yang dirotasi.
+  4. *Filesystem Saturation:* Partisi root `/` penuh akibat aktivitas proses non-journald.
+  5. *Network Stalls & Buffer Exhaustion:* Memory pressure collector saat buffer lokal penuh akibat backend unreachable dalam waktu lama.
+  6. *Surge di Luar Asumsi:* Serangan terdistribusi ekstrem (> 500 event/detik) yang menghabiskan kuota dalam hitungan belasan menit.
+- **Kesimpulan Operasional:** Jendela maintenance cutover ~5 menit berada jauh di dalam kapasitas headroom terukur, namun tim operasional tetap mewaspadai 6 failure modes di atas.
 
 ---
 
@@ -266,7 +282,7 @@ sequenceDiagram
 | 1 | Layanan Backend & Collector Aktif di VM | `VERIFIED LIVE` | **PASS** (Systemd active, HTTP 200) |
 | 2 | Status Supabase Cloud Untouched (002-004 404) | `VERIFIED LIVE` | **PASS** (PostgREST audit clean) |
 | 3 | Integritas Database & Backup SQLite VM | `VERIFIED LIVE` | **PASS** (136 record, SHA-256 match) |
-| 4 | Audit Journald VM & Retensi Disk | `VERIFIED LIVE` | **PASS** (108,8 MB used, 3,9 GB avail) |
+| 4 | Audit Journald VM & Retensi Disk | `VERIFIED LIVE` | **PASS** (184 MB used, 814 MB headroom) |
 | 5 | DDL Unified Migration 002–004 di PostgreSQL | `VERIFIED IN TEST ENVIRONMENT` | **PASS** (PGlite test suite 100%) |
 | 6 | Penegakan RLS pada 20 Tabel Publik | `VERIFIED IN TEST ENVIRONMENT` | **PASS** (PGlite relrowsecurity true) |
 | 7 | Validasi RPC & Penolakan Konflik (002) | `VERIFIED IN TEST ENVIRONMENT` | **PASS** (Advisory lock & enum pass) |
@@ -276,7 +292,11 @@ sequenceDiagram
 | 11| Resiliensi Mirror Retry & Worker Periodik | `VERIFIED IN TEST ENVIRONMENT` | **PASS** (Code hardened & tested) |
 | 12| Simulasi Full Lifecycle (Migrasi s/d Rollback)| `VERIFIED IN TEST ENVIRONMENT` | **PASS** (8/8 phase success) |
 | 13| Pytest API Regression Test Suite | `VERIFIED IN TEST ENVIRONMENT` | **PASS** (32/32 tests passed) |
-| 14| Eksekusi DDL & Impor ke Supabase Cloud | `REQUIRES APPROVAL` | **HOLD** (Menunggu Izin Pemilik Proyek) |
+| 14| Pengujian Hak Akses RLS & Role Produksi (`test_targeted_rls_and_roles.cjs`) | `VERIFIED IN TEST ENVIRONMENT` | **PASS** (`anon`/`authenticated` ditolak, `service_role` full) |
+| 15| Audit Dependensi Baseline Supabase Cloud (`audit_cloud_dependencies.py`) | `VERIFIED LIVE (READ-ONLY)` | **PASS** (136/136 host & alert match, 0 orphan) |
+| 16| Pengujian Konkurensi & Resiliensi Mirror Worker (`test_mirror_worker_concurrency.py`) | `VERIFIED IN TEST ENVIRONMENT` | **PASS** (4/4 tests passed, single-process safe) |
+| 17| Pengukuran Empiris Retensi Journald VM `fenn` (`measure_vm_journal_metrics.py`) | `VERIFIED LIVE (READ-ONLY)` | **PASS** (Headroom 813,9 MB, 62,3 hari normal / 118,5 mnt ekstrem) |
+| 18| Eksekusi DDL & Impor ke Supabase Cloud | `REQUIRES APPROVAL` | **HOLD** (Menunggu Izin Pemilik Proyek) |
 
 ---
 
@@ -356,9 +376,12 @@ Jika terjadi kegagalan fatal pada langkah mana pun di atas, lakukan prosedur rol
 
 ## 12. Residual Risks & Tindakan yang Memerlukan Persetujuan
 
-### 12.1. Risiko Teknis Tersisa:
+### 12.1. Risiko Teknis Tersisa & Batasan Epistemologis:
 1. **PostgREST Latency Spike:** Latensi rata-rata PostgREST Cloud saat ini adalah ~835 ms (karena lokasi Cloudflare/Supabase datacenter). Untuk operasi non-blocking, hal ini tidak mengganggu collector atau backend, tetapi latency dashboard akan sedikit meningkat dibanding SQLite lokal murni (~2 ms).
 2. **Ketiadaan PITR Mandiri:** Free Tier Supabase tidak mendukung pemulihan titik waktu instan. Oleh karena itu, backup snapshot lokal di VM `fenn` tetap menjadi instrumen penyelamat utama.
+3. **Validasi Role PostgREST Live Belum Teruji:** Pengujian RLS dan role `anon`/`authenticated`/`service_role` telah terbukti 100% pada engine PostgreSQL simulasi (PGlite), namun perilaku live JWT gateway PostgREST terhadap skema baru 002–004 di Cloud belum pernah diuji secara live karena DDL belum diterapkan.
+4. **Batas Kunci Thread Mirror Worker:** Perlindungan `threading.RLock()` hanya menjamin konkurensi aman di dalam satu proses Python (topologi single-worker VM saat ini). Jika di masa depan sistem discale menjadi multi-worker atau distributed cluster, diperlukan distributed lock (misal Redis) atau monotonic versioning untuk mencegah *stale overwrite*.
+5. **Retensi Telemetri Bukan Garansi Mutlak:** Headroom 813,9 MB di journald terbukti aman untuk downtime 5 menit dalam kondisi normal, tetapi risiko kehilangan telemetri tetap ada jika terjadi 6 failure modes operasional (agresif vacuuming, cursor corruption, filesystem root full, network buffer pressure).
 
 ### 12.2. Tindakan yang Mutlak Memerlukan Persetujuan Project Owner:
 - [ ] Persetujuan eksekusi file DDL `unified_migration_002_to_004.sql` di Supabase SQL Editor.
@@ -381,12 +404,12 @@ Sebagai tindak lanjut atas arahan penelaahan khusus dari Project Owner, telah di
 Berdasarkan seluruh hasil audit statis, hardening SQL, uji coba perilaku di PostgreSQL engine terisolasi, verifikasi rekonsiliasi data 136 record, pengujian konkurensi mirror worker, serta pengukuran empiris retensi telemetri Linux:
 
 Status Prioritas 9 dinyatakan:
-# **`READY FOR FINAL APPROVAL`**
-*(Catatan: Status ini adalah kesiapan dokumen dan bukti teknis untuk peninjauan persetujuan, dan **BUKAN** merupakan izin untuk langsung mengeksekusi cutover produksi).*
+# **`NO-GO FOR IMMEDIATE CUTOVER — HYBRID MODE MAINTAINED`**
+*(Keputusan: Seluruh audit teknis, pengujian simulasi, hardening DDL, rekonsiliasi data, dan audit risiko terarah telah selesai secara tuntas dan transparan. Namun, cutover produksi **TIDAK DILAKSANAKAN** saat ini. Arsitektur Hybrid Mode dipertahankan penuh).*
 
 Sikap operasional tim pelaksana:
 - **Mode Operasional:** Tetap berjalan pada **`hybrid`** di VM `fenn`.
-- **Layanan:** `aegis-backend.service` dan `aegis-collector.service` tetap aktif melayani sistem.
-- **Supabase Cloud:** Tetap **100% perawan (Untouched)** tanpa mutasi DDL atau data.
-- **Tindakan Lanjutan:** **STOP & STANDBY** menunggu keputusan akhir dan instruksi persetujuan resmi dari Project Owner.
+- **Layanan:** `aegis-backend.service` dan `aegis-collector.service` tetap aktif melayani sistem tanpa interupsi.
+- **Supabase Cloud:** Tetap **100% perawan (Untouched)** — nol DDL, nol impor data, nol mutasi konfigurasi.
+- **Tindakan Lanjutan:** Seluruh berkas migrasi, script rekonsiliasi, dan runbook pemulihan disimpan dalam kondisi siaga (*standby*). Tim pelaksana berhenti pada tahap audit dan menunggu instruksi strategis selanjutnya dari Project Owner.
 
