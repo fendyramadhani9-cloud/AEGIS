@@ -6,13 +6,16 @@ import {
   Bot,
   CheckCircle2,
   ChevronRight,
+  Database,
   Flame,
+  FlaskConical,
   Layers,
   RefreshCw,
   Search,
   SearchX,
   Shield,
   Sparkles,
+  Target,
 } from 'lucide-react';
 import { Screen } from '../components/AppShell';
 import { EmptyState, QueryView, SkeletonBlock } from '../components/states';
@@ -173,7 +176,7 @@ export function IncidentsScreen() {
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '6px',
+                      gap: '5px',
                       fontSize: '0.75rem',
                       padding: '4px 8px',
                       borderRadius: '4px',
@@ -183,7 +186,7 @@ export function IncidentsScreen() {
                     }}
                     title="Active persistence engine"
                   >
-                    💾 Storage: {summary.storageBackend === 'sqlite_local' ? 'SQLite Local (WAL)' : summary.storageBackend}
+                    <Database size={12} /> Storage: {summary.storageBackend === 'sqlite_local' ? 'SQLite Local (WAL)' : summary.storageBackend}
                   </span>
                   <span
                     style={{
@@ -477,10 +480,13 @@ export function IncidentsScreen() {
                                       color: '#2dd4bf',
                                       border: '1px solid rgba(20, 184, 166, 0.35)',
                                       letterSpacing: '0.04em',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
                                     }}
                                     title="Generated from live controlled operational validation test on Linux VM"
                                   >
-                                    🎯 OPERATIONAL TEST
+                                    <Target size={11} /> OPERATIONAL TEST
                                   </span>
                                 ) : inc.provenance === 'genuine_host_telemetry' ? (
                                   <span
@@ -493,10 +499,13 @@ export function IncidentsScreen() {
                                       color: '#4ade80',
                                       border: '1px solid rgba(34, 197, 94, 0.35)',
                                       letterSpacing: '0.04em',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
                                     }}
                                     title="Live unclassified background host telemetry"
                                   >
-                                    🛡️ GENUINE HOST
+                                    <Shield size={11} /> GENUINE HOST
                                   </span>
                                 ) : (
                                   <span
@@ -509,10 +518,13 @@ export function IncidentsScreen() {
                                       color: '#c084fc',
                                       border: '1px solid rgba(168, 85, 247, 0.35)',
                                       letterSpacing: '0.04em',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
                                     }}
                                     title="Pre-loaded synthetic benchmark dataset (RFC 5737 test data)"
                                   >
-                                    🧪 SYNTHETIC BENCHMARK
+                                    <FlaskConical size={11} /> SYNTHETIC BENCHMARK
                                   </span>
                                 )}
                                 <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>

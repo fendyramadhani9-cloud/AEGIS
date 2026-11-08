@@ -4,11 +4,18 @@ import {
   AlertCircle,
   AlertTriangle,
   Bot,
+  Check,
   CheckCircle2,
   CircleAlert,
+  Database,
+  FlaskConical,
+  Globe,
   HelpCircle,
   History,
+  Search,
+  Shield,
   Sparkles,
+  Target,
 } from 'lucide-react';
 import { Screen } from '../components/AppShell';
 import { EmptyState, QueryView, SkeletonBlock } from '../components/states';
@@ -179,7 +186,8 @@ export function IncidentDetailScreen() {
                       }}
                       title="Permanently persisted in SQLite database on disk"
                     >
-                      💾 Storage: {incident.storageBackend === 'sqlite_local' ? 'SQLite Local (WAL)' : incident.storageBackend || 'SQLite Local'}
+                      <Database size={12} style={{ marginRight: 4, verticalAlign: -1 }} />
+                      Storage: {incident.storageBackend === 'sqlite_local' ? 'SQLite Local (WAL)' : incident.storageBackend || 'SQLite Local'}
                     </span>
                     {incident.provenance === 'controlled_operational_test' ? (
                       <span
@@ -191,10 +199,12 @@ export function IncidentDetailScreen() {
                           background: 'rgba(20, 184, 166, 0.15)',
                           color: '#2dd4bf',
                           border: '1px solid rgba(20, 184, 166, 0.35)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
                         }}
                         title="Generated from live controlled operational validation test on Linux VM"
                       >
-                        🎯 Provenance: Operational Test
+                        <Target size={12} style={{ marginRight: 4 }} /> Provenance: Operational Test
                       </span>
                     ) : incident.provenance === 'genuine_host_telemetry' ? (
                       <span
@@ -206,10 +216,12 @@ export function IncidentDetailScreen() {
                           background: 'rgba(34, 197, 94, 0.15)',
                           color: '#4ade80',
                           border: '1px solid rgba(34, 197, 94, 0.35)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
                         }}
                         title="Live unclassified background host telemetry"
                       >
-                        🛡️ Provenance: Genuine Host Telemetry
+                        <Shield size={12} style={{ marginRight: 4 }} /> Provenance: Genuine Host Telemetry
                       </span>
                     ) : (
                       <span
@@ -221,10 +233,12 @@ export function IncidentDetailScreen() {
                           background: 'rgba(168, 85, 247, 0.15)',
                           color: '#c084fc',
                           border: '1px solid rgba(168, 85, 247, 0.35)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
                         }}
                         title="Pre-loaded synthetic benchmark dataset (RFC 5737 test data)"
                       >
-                        🧪 Provenance: Synthetic Benchmark
+                        <FlaskConical size={12} style={{ marginRight: 4 }} /> Provenance: Synthetic Benchmark
                       </span>
                     )}
                     {incident.sourceCategory && (
@@ -234,6 +248,8 @@ export function IncidentDetailScreen() {
                           fontWeight: 700,
                           padding: '3px 8px',
                           borderRadius: '4px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
                           background:
                             incident.sourceCategory === 'loopback'
                               ? 'rgba(234, 179, 8, 0.15)'
@@ -255,7 +271,7 @@ export function IncidentDetailScreen() {
                         }}
                         title={incident.threatActorContext || incident.sourceLabel}
                       >
-                        🌐 {incident.sourceLabel || incident.sourceCategory}
+                        <Globe size={12} style={{ marginRight: 4 }} /> {incident.sourceLabel || incident.sourceCategory}
                       </span>
                     )}
                   </div>
@@ -536,12 +552,14 @@ export function IncidentDetailScreen() {
                                 fontSize: '0.75rem',
                                 padding: '3px 8px',
                                 borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
                                 background: 'rgba(34, 197, 94, 0.15)',
                                 color: '#4ade80',
                                 fontWeight: 600,
                               }}
                             >
-                              ✓ Telemetry Sanitized
+                              <Check size={12} style={{ marginRight: 4 }} /> Telemetry Sanitized
                             </span>
                             <span
                               style={{
@@ -802,8 +820,8 @@ export function IncidentDetailScreen() {
                                       {hyp.statement}
                                     </strong>
                                   </div>
-                                  <div style={{ fontSize: '0.8rem', color: '#93c5fd', marginTop: '4px' }}>
-                                    🔍 Verification: {hyp.investigation_step}
+                                  <div style={{ fontSize: '0.8rem', color: '#93c5fd', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                    <Search size={12} /> Verification: {hyp.investigation_step}
                                   </div>
                                 </div>
                               ))}

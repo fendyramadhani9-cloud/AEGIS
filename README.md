@@ -1,4 +1,4 @@
-# 🛡️ AEGIS — Enterprise Linux Security Monitoring & Zero-Trust Defense Platform
+# AEGIS — Enterprise Linux Security Monitoring & Zero-Trust Defense Platform
 
 <div align="center">
 
@@ -6,17 +6,17 @@
 
 ### Real-Time Linux Threat Detection • MITRE ATT&CK • CIS & DISA STIG • Hard Multi-Tenancy
 
-[![Pytest: 256 Passed](https://img.shields.io/badge/pytest-256%20passed%20(100%25)-brightgreen.svg?style=for-the-badge&logo=pytest)](tests/)
-[![Security: Hard Multi--Tenancy](https://img.shields.io/badge/security-Zero--Trust%20Multi--Tenant-blue.svg?style=for-the-badge&logo=shield)](aegis_backend/tenancy.py)
-[![Compliance: CIS + DISA STIG](https://img.shields.io/badge/compliance-CIS%20Benchmark%20%7C%20DISA%20STIG-orange.svg?style=for-the-badge&logo=checkmarx)](aegis_agent/security_checker.py)
-[![Footprint: Ultra Low RAM](https://img.shields.io/badge/RAM-<%20135%20MB-purple.svg?style=for-the-badge&logo=docker)](docker-compose.yml)
-[![Mobile: PWA Ready](https://img.shields.io/badge/mobile-PWA%20%2F%20APK%20Ready-success.svg?style=for-the-badge&logo=android)](dashboard/public/manifest.webmanifest)
+[![Pytest: 256 Passed](https://img.shields.io/badge/pytest-256%20passed%20(100%25)-brightgreen.svg?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
+[![Security: Hard Multi--Tenancy](https://img.shields.io/badge/security-Zero--Trust%20Multi--Tenant-0052cc.svg?style=for-the-badge&logo=auth0&logoColor=white)](aegis_backend/tenancy.py)
+[![Compliance: CIS + DISA STIG](https://img.shields.io/badge/compliance-CIS%20Benchmark%20%7C%20DISA%20STIG-ea580c.svg?style=for-the-badge&logo=securityscorecard&logoColor=white)](aegis_agent/security_checker.py)
+[![Footprint: Ultra Low RAM](https://img.shields.io/badge/RAM-<%20135%20MB-7c3aed.svg?style=for-the-badge&logo=docker&logoColor=white)](docker-compose.yml)
+[![Mobile: PWA Ready](https://img.shields.io/badge/mobile-PWA%20%2F%20APK%20Ready-16a34a.svg?style=for-the-badge&logo=android&logoColor=white)](dashboard/public/manifest.webmanifest)
 
 </div>
 
 ---
 
-## 🏛️ Ikhtisar Sistem
+## Ikhtisar Sistem
 
 **AEGIS** adalah platform pemantauan keamanan dan investigasi forensik tingkat enterprise untuk server Linux (*Ubuntu 22.04 / 24.04 LTS*) yang dirancang khusus untuk infrastruktur berkeamanan tinggi. Platform ini menggabungkan mesin korelasi ancaman deterministik, audit kepatuhan postur keamanan militer (**CIS Benchmark & DISA STIG**), serta analisis insiden berbantuan AI.
 
@@ -29,7 +29,7 @@ AEGIS menganut filosofi **100% Read-Only & Non-Destructive**:
 
 ---
 
-## ⚡ Panduan Instalasi & Deployment Produksi
+## Panduan Instalasi & Deployment Produksi
 
 Deployment AEGIS dirancang cepat, tangguh, dan otomatis menggunakan Docker Compose.
 
@@ -71,7 +71,7 @@ Untuk deployment awal, akun administrator default telah terdaftar secara terisol
 
 ---
 
-## 🖥️ Pemasangan Agen pada Host Linux Target (Opsional)
+## Pemasangan Agen pada Host Linux Target (Opsional)
 
 Untuk memantau server fisik atau VM Ubuntu nyata, pasang agen pengumpul telemetri (*Collector Daemon*) menggunakan installer resmi:
 
@@ -91,7 +91,7 @@ sudo bash scripts/install_agent.sh \
 
 ---
 
-## 🏗️ Arsitektur Arus Data & Pipeline Keamanan
+## Arsitektur Arus Data & Pipeline Keamanan
 
 ```mermaid
 flowchart TD
@@ -115,16 +115,16 @@ flowchart TD
 
 ---
 
-## 🚀 Fitur & Keunggulan Utama
+## Fitur & Keunggulan Utama
 
-### 1. 🛡️ Hard Multi-Tenancy & Isolasi Zero-Trust
+### 1. Hard Multi-Tenancy & Isolasi Zero-Trust
 Memastikan pemisahan data absolut antar divisi, unit kerja, atau anak perusahaan:
 * **Server-Side Enforcement**: Validasi kepemilikan host diterapkan langsung di lapisan database (`TenantScopedRepository`), bukan sekadar filter visual.
 * **Anti-Enumeration 404**: Jika operator Unit A mencoba membuka URL server Unit B, sistem merespons **404 Not Found** (bukan 403), menggagalkan upaya pemetaan infrastruktur rahasia.
 * **Agent Anti-Spoofing**: Host terikat secara permanen pada tenant saat pengiriman telemetri pertama (*first-claim locking*).
 * **Brute-Force Rate Limiting**: Penguncian otomatis sesi jika terjadi $\ge 5$ kali kegagalan autentikasi berturut-turut.
 
-### 2. ⚡ Mesin Deteksi Deterministik MITRE ATT&CK (15 Aturan Inti)
+### 2. Mesin Deteksi Deterministik MITRE ATT&CK (15 Aturan Inti)
 Mendeteksi serangan secara instan (sub-milidetik) tanpa latensi model AI:
 * `RULE-SSH-BRUTE` (`T1110.001`) — Serangan brute force password SSH.
 * `RULE-SSH-SPRAY` (`T1110.003`) — Password spraying lintas ragam akun pengguna.
@@ -142,18 +142,18 @@ Mendeteksi serangan secara instan (sub-milidetik) tanpa latensi model AI:
 * `RULE-DATA-EXFIL` (`T1041`) — Pengarsipan dan pengiriman data rahasia ke luar jaringan (`tar`, `scp`, `curl -F`).
 * `RULE-ROOTKIT-SNIFF` (`T1547.006`) — Pemuatan modul kernel tidak sah (`insmod`) & sniffing paket jaringan.
 
-### 3. 🎖️ 12 Modul Audit Postur Keamanan (CIS Benchmark + DISA STIG)
+### 3. 12 Modul Audit Postur Keamanan (CIS Benchmark + DISA STIG)
 * **8 Kontrol CIS Ubuntu Benchmark**: Audit konfigurasi SSH (`PermitRootLogin`), izin berkas sensitif `/etc/shadow`, deteksi `NOPASSWD` sudoers, pemantauan binary berbahaya berflag SUID, kepatuhan firewall UFW, parameter perlindungan kernel ASLR, ketersediaan patch keamanan sistem, dan integritas cron job.
 * **4 Kontrol Standar Militer DISA STIG**: Banner peringatan hukum pertahanan (`STIG-BANNER-8.1`), algoritma kriptografi tangguh FIPS SSH (`STIG-CRYPTO-5.2`), imutabilitas log audit kernel (`STIG-AUDIT-4.1`), dan pemblokiran modul USB mass storage (`STIG-MEDIA-1.1`).
 
-### 4. 🤖 AI Forensic Copilot & Pelaporan Eksekutif
+### 4. AI Forensic Copilot & Pelaporan Eksekutif
 * **Forensic Grounding**: AI dilarang melakukan halusinasi; setiap kesimpulan investigasi wajib mereferensikan bukti log mentah autentik (*strict evidence attribution*).
 * **Multi-Role AI Failover**: Pembagian beban 3 API Key terpisah (`AEGIS1` untuk runtime monitor, `AEGIS2` untuk audit kepatuhan, `AEGIS3` untuk pembuatan laporan PDF eksekutif).
 * **Offline Resiliency**: Jika koneksi cloud atau internet terputus, sistem tetap beroperasi 100% menggunakan mesin aturan deterministik lokal.
 
 ---
 
-## 📊 Efisiensi Sumber Daya (Ultra-Low RAM Footprint)
+## Efisiensi Sumber Daya (Ultra-Low RAM Footprint)
 
 Dirancang agar dapat beroperasi pada server dengan keterbatasan sumber daya maupun *edge appliance*:
 
@@ -166,7 +166,7 @@ Dirancang agar dapat beroperasi pada server dengan keterbatasan sumber daya maup
 
 ---
 
-## 👥 Tim Pengembang Inti (Core Team)
+## Tim Pengembang Inti (Core Team)
 
 Platform AEGIS dirancang dan dikembangkan dengan dedikasi rekayasa pertahanan siber oleh:
 
@@ -182,7 +182,7 @@ Platform AEGIS dirancang dan dikembangkan dengan dedikasi rekayasa pertahanan si
 
 ---
 
-## 🧪 Jaminan Kualitas & Sertifikasi Pengujian
+## Jaminan Kualitas & Sertifikasi Pengujian
 
 AEGIS menerapkan metodologi pengujian ketat berbasis standar industri perangkat lunak keamanan:
 
@@ -196,7 +196,7 @@ AEGIS menerapkan metodologi pengujian ketat berbasis standar industri perangkat 
 
 ---
 
-## 📁 Struktur Repositori
+## Struktur Repositori
 
 ```text
 aegis/
