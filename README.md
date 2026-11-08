@@ -172,27 +172,36 @@ Platform AEGIS dirancang dan dikembangkan bersama sebagai sebuah tim pertahanan 
 
 <div align="center">
 
-<table style="border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; border-collapse: separate; border-spacing: 28px; background: rgba(15, 23, 42, 0.65); padding: 18px;">
-  <tr align="center">
-    <td align="center" width="200" style="vertical-align: top;">
+<table>
+  <tr>
+    <td align="center" width="33%" style="vertical-align: top; text-align: center; padding: 18px 12px;">
       <a href="https://github.com/yasss31">
-        <img src="docs/assets/team/dias.jpg" width="130" height="130" style="border-radius: 6px; object-fit: cover; box-shadow: 0 4px 12px rgba(0,0,0,0.4);" alt="Diaz / Yazz" /><br /><br />
-        <b style="font-size: 1.05rem;">Diaz / Yazz</b><br />
-        <span style="color: #93c5fd; font-size: 0.9rem;">@yasss31</span>
+        <img src="docs/assets/team/dias.jpg" width="140" height="140" style="border-radius: 6px; display: block; margin: 0 auto 10px auto;" alt="Diaz / Yazz" /><br />
+        <b>Diaz / Yazz</b>
+      </a>
+      <br />
+      <a href="https://github.com/yasss31" style="text-decoration: none;">
+        <sub style="font-size: 0.85rem; color: #58a6ff; white-space: nowrap;">@yasss31</sub>
       </a>
     </td>
-    <td align="center" width="200" style="vertical-align: top;">
+    <td align="center" width="33%" style="vertical-align: top; text-align: center; padding: 18px 12px;">
       <a href="https://github.com/fendyramadhani9-cloud">
-        <img src="docs/assets/team/fendy.jpg" width="130" height="130" style="border-radius: 6px; object-fit: cover; box-shadow: 0 4px 12px rgba(0,0,0,0.4);" alt="Fendy Ramadhani" /><br /><br />
-        <b style="font-size: 1.05rem;">Fendy Ramadhani</b><br />
-        <span style="color: #93c5fd; font-size: 0.9rem;">@fendyramadhani9-cloud</span>
+        <img src="docs/assets/team/fendy.jpg" width="140" height="140" style="border-radius: 6px; display: block; margin: 0 auto 10px auto;" alt="Fendy Ramadhani" /><br />
+        <b>Fendy Ramadhani</b>
+      </a>
+      <br />
+      <a href="https://github.com/fendyramadhani9-cloud" style="text-decoration: none;">
+        <sub style="font-size: 0.85rem; color: #58a6ff; white-space: nowrap;">@fendyramadhani9-cloud</sub>
       </a>
     </td>
-    <td align="center" width="200" style="vertical-align: top;">
+    <td align="center" width="33%" style="vertical-align: top; text-align: center; padding: 18px 12px;">
       <a href="https://github.com/Aseppclwk">
-        <img src="docs/assets/team/apri.jpg" width="130" height="130" style="border-radius: 6px; object-fit: cover; box-shadow: 0 4px 12px rgba(0,0,0,0.4);" alt="Apri" /><br /><br />
-        <b style="font-size: 1.05rem;">Apri</b><br />
-        <span style="color: #93c5fd; font-size: 0.9rem;">@Aseppclwk</span>
+        <img src="docs/assets/team/apri.jpg" width="140" height="140" style="border-radius: 6px; display: block; margin: 0 auto 10px auto;" alt="Apri" /><br />
+        <b>Apri</b>
+      </a>
+      <br />
+      <a href="https://github.com/Aseppclwk" style="text-decoration: none;">
+        <sub style="font-size: 0.85rem; color: #58a6ff; white-space: nowrap;">@Aseppclwk</sub>
       </a>
     </td>
   </tr>
