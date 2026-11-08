@@ -4,7 +4,8 @@
 --
 -- Purpose:
 -- Establishes the relational schema for multi-alert incident correlation,
--- unified investigation timelines, AI security analyses, and lifecycle history.
+-- risk factors, unified investigation timelines, 4-tier AI security analyses,
+-- source attribution provenance, and incident status history.
 --
 -- Core Invariants:
 -- 1. Strictly preserves all existing alerts, evidence, hosts, and security findings.
@@ -16,7 +17,7 @@
 -- 1. Enhance or Create Table: incidents
 CREATE TABLE IF NOT EXISTS public.incidents (
     id TEXT PRIMARY KEY, -- e.g. 'INC-host-fenn-ubuntu-d3949a80'
-    alert_id TEXT NOT NULL REFERENCES public.alerts(id) ON DELETE RESTRICT,
+    alert_id TEXT REFERENCES public.alerts(id) ON DELETE RESTRICT,
     host_id TEXT NOT NULL REFERENCES public.hosts(id) ON DELETE RESTRICT,
     title TEXT NOT NULL,
     severity VARCHAR(20) NOT NULL
@@ -27,9 +28,10 @@ CREATE TABLE IF NOT EXISTS public.incidents (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Add new columns for Multi-Alert & AI Investigation
+-- Add new columns for Multi-Alert, Risk Assessment, Attribution & AI Investigation
 DO $$
 BEGIN
+    ALTER TABLE public.incidents ALTER COLUMN alert_id DROP NOT NULL;
     ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS primary_alert_id TEXT REFERENCES public.alerts(id) ON DELETE SET NULL;
     ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS risk_level VARCHAR(20) NOT NULL DEFAULT 'medium';
     ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS risk_score INTEGER NOT NULL DEFAULT 50;
@@ -37,6 +39,11 @@ BEGIN
     ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS source_ip VARCHAR(45);
     ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS target_user VARCHAR(100);
     ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS attack_scenario TEXT;
+    ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS correlation_reason TEXT;
+    ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS provenance VARCHAR(50) DEFAULT 'synthetic_benchmark';
+    ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS source_category VARCHAR(50) DEFAULT 'unknown';
+    ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS source_label VARCHAR(100);
+    ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS threat_actor_context TEXT;
     ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now();
     ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now();
 EXCEPTION WHEN OTHERS THEN
@@ -63,20 +70,39 @@ CREATE INDEX IF NOT EXISTS idx_incidents_created ON public.incidents(created_at 
 
 -- 2. JUNCTION TABLE: incident_alerts (Multi-Alert Linking)
 CREATE TABLE IF NOT EXISTS public.incident_alerts (
+    id TEXT PRIMARY KEY DEFAULT ('REL-' || gen_random_uuid()::text),
     incident_id TEXT NOT NULL REFERENCES public.incidents(id) ON DELETE CASCADE,
     alert_id TEXT NOT NULL REFERENCES public.alerts(id) ON DELETE RESTRICT,
+    added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (incident_id, alert_id)
+    CONSTRAINT uq_incident_alert UNIQUE (incident_id, alert_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_incident_alerts_inc ON public.incident_alerts(incident_id);
 CREATE INDEX IF NOT EXISTS idx_incident_alerts_alert ON public.incident_alerts(alert_id);
 
--- 3. TABLE: incident_timeline
+-- 3. TABLE: incident_risk_factors (Risk Scoring Breakdown)
+CREATE TABLE IF NOT EXISTS public.incident_risk_factors (
+    id TEXT PRIMARY KEY,
+    incident_id TEXT NOT NULL REFERENCES public.incidents(id) ON DELETE CASCADE,
+    factor_id VARCHAR(100) NOT NULL,
+    factor_name TEXT NOT NULL,
+    points INTEGER NOT NULL,
+    category VARCHAR(50) NOT NULL,
+    description TEXT,
+    supporting_evidence_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_incident_factor UNIQUE (incident_id, factor_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_risk_factors_inc ON public.incident_risk_factors(incident_id);
+
+-- 4. TABLE: incident_timeline
 CREATE TABLE IF NOT EXISTS public.incident_timeline (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     incident_id TEXT NOT NULL REFERENCES public.incidents(id) ON DELETE CASCADE,
     timestamp TIMESTAMPTZ NOT NULL,
-    kind VARCHAR(32) NOT NULL CHECK (kind IN ('event', 'alert', 'finding', 'analysis', 'status_change')),
+    kind VARCHAR(32) NOT NULL CHECK (kind IN ('event', 'alert', 'finding', 'analysis', 'status_change', 'test_scenario')),
     title TEXT NOT NULL,
     description TEXT NOT NULL,
     severity VARCHAR(32),
@@ -86,7 +112,7 @@ CREATE TABLE IF NOT EXISTS public.incident_timeline (
 
 CREATE INDEX IF NOT EXISTS idx_incident_timeline_inc_ts ON public.incident_timeline(incident_id, timestamp ASC);
 
--- 4. TABLE: ai_analyses
+-- 5. TABLE: ai_analyses (4-Tier AI Forensic Reasoning & Synthesis)
 CREATE TABLE IF NOT EXISTS public.ai_analyses (
     id VARCHAR(128) PRIMARY KEY, -- e.g. 'ANL-INC-...-17940'
     incident_id TEXT REFERENCES public.incidents(id) ON DELETE CASCADE,
@@ -102,9 +128,13 @@ CREATE TABLE IF NOT EXISTS public.ai_analyses (
     risk_score INTEGER NOT NULL CHECK (risk_score >= 0 AND risk_score <= 100),
     confidence_level VARCHAR(32) NOT NULL CHECK (confidence_level IN ('high', 'medium', 'low')),
     confidence_reason TEXT NOT NULL,
+    facts JSONB NOT NULL DEFAULT '[]'::jsonb,
+    inferences JSONB NOT NULL DEFAULT '[]'::jsonb,
+    hypotheses JSONB NOT NULL DEFAULT '[]'::jsonb,
+    unknowns TEXT[] NOT NULL DEFAULT '{}',
+    unknown_items JSONB NOT NULL DEFAULT '[]'::jsonb,
     supporting_evidence TEXT[] NOT NULL DEFAULT '{}',
     contradicting_evidence TEXT[] NOT NULL DEFAULT '{}',
-    unknowns TEXT[] NOT NULL DEFAULT '{}',
     impact_assessment TEXT NOT NULL,
     recommended_actions JSONB NOT NULL DEFAULT '[]'::jsonb,
     containment_recommendations TEXT[] NOT NULL DEFAULT '{}',
@@ -118,9 +148,9 @@ CREATE TABLE IF NOT EXISTS public.ai_analyses (
 CREATE INDEX IF NOT EXISTS idx_ai_analyses_incident ON public.ai_analyses(incident_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_analyses_host ON public.ai_analyses(host_id);
 
--- 5. TABLE: incident_status_history
+-- 6. TABLE: incident_status_history
 CREATE TABLE IF NOT EXISTS public.incident_status_history (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     incident_id TEXT NOT NULL REFERENCES public.incidents(id) ON DELETE CASCADE,
     old_status VARCHAR(32),
     new_status VARCHAR(32) NOT NULL CHECK (new_status IN ('new', 'investigating', 'confirmed', 'false_positive', 'contained', 'resolved', 'open', 'closed')),
@@ -131,21 +161,23 @@ CREATE TABLE IF NOT EXISTS public.incident_status_history (
 
 CREATE INDEX IF NOT EXISTS idx_status_history_inc ON public.incident_status_history(incident_id, transitioned_at ASC);
 
--- 6. Enable RLS on all tables
+-- 7. Enable RLS on all tables
 ALTER TABLE public.incidents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.incident_alerts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.incident_risk_factors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.incident_timeline ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ai_analyses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.incident_status_history ENABLE ROW LEVEL SECURITY;
 
--- 7. Grant backend service_role permissions
+-- 8. Grant backend service_role and postgres permissions
 DO $$
 BEGIN
-    GRANT ALL ON TABLE public.incidents TO service_role;
-    GRANT ALL ON TABLE public.incident_alerts TO service_role;
-    GRANT ALL ON TABLE public.incident_timeline TO service_role;
-    GRANT ALL ON TABLE public.ai_analyses TO service_role;
-    GRANT ALL ON TABLE public.incident_status_history TO service_role;
+    GRANT ALL ON TABLE public.incidents TO service_role, postgres;
+    GRANT ALL ON TABLE public.incident_alerts TO service_role, postgres;
+    GRANT ALL ON TABLE public.incident_risk_factors TO service_role, postgres;
+    GRANT ALL ON TABLE public.incident_timeline TO service_role, postgres;
+    GRANT ALL ON TABLE public.ai_analyses TO service_role, postgres;
+    GRANT ALL ON TABLE public.incident_status_history TO service_role, postgres;
 EXCEPTION WHEN OTHERS THEN
     NULL;
 END $$;

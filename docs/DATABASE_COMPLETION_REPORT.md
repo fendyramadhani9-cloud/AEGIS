@@ -94,3 +94,4 @@ When the user decides to activate the Cloud Single Source of Truth (SSoT), the p
 3. **Step 3:** Reload PostgREST schema cache (`NOTIFY pgrst, 'reload schema'`).
 4. **Step 4:** Run post-migration verification script (`supabase/verify_production_data_integrity.sql`).
 5. **Step 5:** Run one-time sync script to migrate existing SQLite incidents into Supabase Cloud.
+

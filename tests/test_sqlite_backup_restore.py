@@ -72,3 +72,4 @@ def test_restore_tamper_detection(populated_db):
         perform_restore(backup_file, restored_db, verify_checksum=True)
 
     assert "Checksum mismatch" in str(excinfo.value)
+

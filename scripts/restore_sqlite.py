@@ -195,3 +195,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error("Restore failed: %s", e)
         sys.exit(1)
+

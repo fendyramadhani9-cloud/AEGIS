@@ -188,3 +188,4 @@ flowchart TD
 3. **Finding 3 (Cloud Latency vs Local Speed):**
    * *Detail:* Cloud REST roundtrips average ~500ms, whereas local SQLite queries in WAL mode complete in under 2ms.
    * *Architecture Recommendation:* Retaining SQLite as a local persistent buffer and fast query cache ensures high-frequency agent operations remain ultra-responsive, even if WAN connectivity fluctuates.
+

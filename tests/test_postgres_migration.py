@@ -67,3 +67,23 @@ def test_postgresql_security_checker_migration():
     assert "ALL 7 SECURITY CHECKER DATABASE ENGINE TESTS PASSED (100%)" in result.stdout
 
 
+def test_postgresql_incident_investigation_migration():
+    script_path = Path(__file__).parent / "verify_incident_migration.cjs"
+    assert script_path.exists(), "verify_incident_migration.cjs not found!"
+
+    result = subprocess.run(
+        ["node", str(script_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    print(result.stdout)
+    if result.returncode != 0:
+        print("STDERR:", result.stderr, file=sys.stderr)
+
+    assert result.returncode == 0, f"Incident investigation migration tests failed:\n{result.stderr or result.stdout}"
+    assert "ALL 5 MIGRATION 004 TESTS PASSED (100% SUCCESS)" in result.stdout
+
+
+

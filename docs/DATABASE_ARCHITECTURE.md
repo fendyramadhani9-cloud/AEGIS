@@ -159,3 +159,4 @@ In Supabase PostgreSQL, these fields are defined as native `JSONB`. Because Post
 ### 4.2 Supabase PostgreSQL Integrity & RLS
 * **Transaction Isolation:** Read Committed (PostgreSQL default) with atomic multi-table stored procedures (Migration 002).
 * **Least Privilege Access:** All tables enforce Row Level Security (RLS) with explicit grants restricted to `service_role` and `postgres`. Public, anonymous, and unauthenticated roles are explicitly revoked.
+

@@ -1,9 +1,9 @@
 {
-  "audit_timestamp": "2026-11-08T05:02:46.191398+00:00",
+  "audit_timestamp": "2026-11-08T05:32:36.361642+00:00",
   "sqlite": {
     "exists": true,
     "path": "D:\\AEGIS\\data\\aegis_incidents.db",
-    "file_size_bytes": 278528,
+    "file_size_bytes": 286720,
     "pragmas": {
       "journal_mode": "wal",
       "synchronous": 2,
@@ -266,7 +266,7 @@
             ]
           }
         ],
-        "row_count": 11
+        "row_count": 12
       },
       "incident_alerts": {
         "columns": [
@@ -529,7 +529,7 @@
             ]
           }
         ],
-        "row_count": 10
+        "row_count": 11
       },
       "incident_timeline": {
         "columns": [
@@ -632,7 +632,7 @@
             ]
           }
         ],
-        "row_count": 34
+        "row_count": 36
       },
       "incidents": {
         "columns": [
@@ -1235,7 +1235,7 @@
   "supabase": {
     "connected": true,
     "message": "Database connection verified successfully.",
-    "latency_ms": 829.37,
+    "latency_ms": 735.42,
     "tables": {
       "hosts": {
         "exists": true,
@@ -1269,7 +1269,7 @@
       },
       "telemetry_events": {
         "exists": true,
-        "count": 981,
+        "count": 1074,
         "columns": [
           "created_at",
           "details",

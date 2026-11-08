@@ -182,3 +182,4 @@ NOTIFY pgrst, 'reload schema';
 DROP FUNCTION IF EXISTS public.fn_ingest_alert_with_evidence(jsonb, jsonb);
 NOTIFY pgrst, 'reload schema';
 ```
+

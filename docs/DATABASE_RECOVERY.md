@@ -195,3 +195,4 @@ pg_dump "postgresql://postgres:[PASSWORD]@db.hiwfbmwgnpnwaszltqwb.supabase.co:54
   --schema=public \
   -f data/backups/supabase_full_dump_$(date +%Y%m%d).sql
 ```
+

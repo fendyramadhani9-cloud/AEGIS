@@ -108,3 +108,4 @@ def test_sqlite_security_checker_persistence_and_reload(temp_store):
     assert summary["failed"] == 1
     assert summary["critical_fails"] == 1
     assert summary["high_fails"] == 0
+

@@ -44,6 +44,9 @@ class Settings:
         default_sqlite = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "aegis_incidents.db")
         self.sqlite_db_path: str = os.getenv("AEGIS_SQLITE_DB_PATH", default_sqlite)
 
+        # Database Architecture Mode: 'hybrid' (transitional) or 'cloud_ssot' (unified cloud single source of truth)
+        self.database_mode: str = os.getenv("AEGIS_DATABASE_MODE", "hybrid").lower()
+
     @property
     def is_supabase_configured(self) -> bool:
         """Returns True only if both URL and Service Role Key are provided."""
@@ -66,6 +69,7 @@ class Settings:
             "supabase_key_masked": mask_secret(self.supabase_service_role_key),
             "llm_provider": self.llm_provider,
             "sqlite_db_path": self.sqlite_db_path,
+            "database_mode": self.database_mode,
         }
 
 
