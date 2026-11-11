@@ -34,6 +34,19 @@ def _resolve_storage_backend() -> str:
     except Exception:
         return "sqlite_local"
 
+
+def _safe_json_loads(text: str) -> Any:
+    """Robust JSON parser that handles markdown code fences and unescaped LLM backslashes."""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        return json.loads(cleaned, strict=False)
+    except Exception:
+        fixed = re.sub(r'\\(?![/"\\bfnrtu]|u[0-9a-fA-F]{4})', r'\\\\', cleaned)
+        return json.loads(fixed, strict=False)
+
 logger = logging.getLogger("aegis_backend.ai_provider")
 
 
@@ -952,7 +965,7 @@ class GeminiProvider(BaseAIProvider):
                 raise RuntimeError("Gemini API returned no candidates.")
 
             text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-            parsed = json.loads(text_content)
+            parsed = _safe_json_loads(text_content)
             return self._validate_and_normalize(parsed, context, analysis_id=analysis_id, now_iso=now_iso)
         except Exception as e:
             sanitized_err = self._sanitize_error(str(e))
@@ -1166,7 +1179,7 @@ class OpenAICompatibleProvider(BaseAIProvider):
                 raise RuntimeError(f"OpenAI API returned HTTP {resp.status_code}: {resp.text}")
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
+            parsed = _safe_json_loads(content)
 
             analysis_item = AIAnalysisItem(
                 analysis_id=analysis_id,

@@ -56,7 +56,7 @@ class Settings:
             or self.key_aegis2
             or self.key_aegis3
         )
-        self.llm_model: str = os.getenv("AEGIS_LLM_MODEL", "gemini-2.5-flash")
+        self.llm_model: str = os.getenv("AEGIS_LLM_MODEL", "gemini-3.5-flash-lite")
         self.llm_timeout: int = int(os.getenv("AEGIS_LLM_TIMEOUT", "30"))
 
         # Configurable CORS Origins

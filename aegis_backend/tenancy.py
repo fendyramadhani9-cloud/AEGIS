@@ -298,7 +298,7 @@ class AuthStore:
 
     def tenant_name(self, tenant_id: str) -> str:
         if tenant_id == SUPERADMIN_TENANT:
-            return "Pusat Komando (HQ Command)"
+            return "Global Security Operations (All Clusters)"
         with self._lock:
             self._reload_if_changed()
             return self._data["tenants"].get(tenant_id, {}).get("name") or tenant_id

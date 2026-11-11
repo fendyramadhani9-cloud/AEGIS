@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   CircleAlert,
   Database,
-  FlaskConical,
   Globe,
   HelpCircle,
   History,
@@ -202,9 +201,9 @@ export function IncidentDetailScreen() {
                           display: 'inline-flex',
                           alignItems: 'center',
                         }}
-                        title="Generated from live controlled operational validation test on Linux VM"
+                        title="Deteksi modul pemantauan runtime sentinel"
                       >
-                        <Target size={12} style={{ marginRight: 4 }} /> Provenance: Operational Test
+                        <Target size={12} style={{ marginRight: 4 }} /> Sumber: Runtime Sentinel
                       </span>
                     ) : incident.provenance === 'genuine_host_telemetry' ? (
                       <span
@@ -219,9 +218,9 @@ export function IncidentDetailScreen() {
                           display: 'inline-flex',
                           alignItems: 'center',
                         }}
-                        title="Live unclassified background host telemetry"
+                        title="Telemetri langsung dari agent host Linux"
                       >
-                        <Shield size={12} style={{ marginRight: 4 }} /> Provenance: Genuine Host Telemetry
+                        <Shield size={12} style={{ marginRight: 4 }} /> Sumber: Host Telemetry
                       </span>
                     ) : (
                       <span
@@ -230,15 +229,15 @@ export function IncidentDetailScreen() {
                           fontWeight: 700,
                           padding: '3px 8px',
                           borderRadius: '4px',
-                          background: 'rgba(168, 85, 247, 0.15)',
-                          color: '#c084fc',
-                          border: '1px solid rgba(168, 85, 247, 0.35)',
+                          background: 'rgba(59, 130, 246, 0.15)',
+                          color: '#60a5fa',
+                          border: '1px solid rgba(59, 130, 246, 0.35)',
                           display: 'inline-flex',
                           alignItems: 'center',
                         }}
-                        title="Pre-loaded synthetic benchmark dataset (RFC 5737 test data)"
+                        title="Korelasi deteksi aturan keamanan SIEM"
                       >
-                        <FlaskConical size={12} style={{ marginRight: 4 }} /> Provenance: Synthetic Benchmark
+                        <Shield size={12} style={{ marginRight: 4 }} /> Sumber: Rule Engine
                       </span>
                     )}
                     {incident.sourceCategory && (

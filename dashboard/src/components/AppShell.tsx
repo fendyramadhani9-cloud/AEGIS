@@ -5,7 +5,6 @@ import {
   ChevronRight,
   FileText,
   Flame,
-  FlaskConical,
   History,
   LayoutGrid,
   ListTree,
@@ -113,7 +112,7 @@ function DesktopSidebar() {
           <LogoMark size={36} />
           <div className="desktop-sidebar__brand-text">
             <span className="desktop-sidebar__brand-name">AEGIS</span>
-            <span className="desktop-sidebar__brand-tag">Linux Security Monitor</span>
+            <span className="desktop-sidebar__brand-tag">Cloud Defense Platform</span>
           </div>
         </NavLink>
       </div>
@@ -225,10 +224,10 @@ function DesktopSidebar() {
             type="button"
             className="sidebar-logout-btn"
             onClick={handleLogout}
-            title="Keluar dari sesi operator"
+            title="Sign out of current session"
           >
             <LogOut size={14} aria-hidden />
-            <span>Keluar Sistem</span>
+            <span>Sign Out</span>
           </button>
         )}
       </div>
@@ -283,16 +282,11 @@ export function Screen({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { prefs, update } = usePrefs();
 
   const goBack = () => {
     if (location.key !== 'default' && window.history.state?.idx > 0) navigate(-1);
     else navigate(back ?? '/');
   };
-
-  const isLive = prefs.previewState === 'live';
-  const isSample = prefs.previewState === 'sample';
-  const isSimulating = !isLive && !isSample;
 
   return (
     <div className="screen-container">
@@ -313,30 +307,6 @@ export function Screen({
 
           <div className="app-header__actions">
             {actions}
-
-            {/* State simulator switcher */}
-            <div className="state-simulator-dropdown">
-              <label
-                className={`state-simulator-label ${isLive ? 'is-live' : isSimulating ? 'is-simulating' : 'is-sample'}`}
-                title="Switch UI data mode / preview state"
-              >
-                <FlaskConical className="state-simulator-icon" aria-hidden />
-                <span className="state-simulator-text">
-                  {isLive ? 'Live Data' : isSample ? 'Sample Data' : `Preview: ${prefs.previewState}`}
-                </span>
-                <select
-                  value={prefs.previewState}
-                  onChange={(e) => update({ previewState: e.target.value as typeof prefs.previewState })}
-                  aria-label="Data Source / Preview State Switcher"
-                >
-                  <option value="live">Live Data (Supabase)</option>
-                  <option value="sample">Sample Data (Demo)</option>
-                  <option value="loading">Loading State</option>
-                  <option value="empty">Empty State</option>
-                  <option value="error">Error State</option>
-                </select>
-              </label>
-            </div>
 
             {/* Mobile-only settings icon */}
             {!back && (

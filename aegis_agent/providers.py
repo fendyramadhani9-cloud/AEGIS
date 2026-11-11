@@ -28,6 +28,18 @@ from aegis_agent.schemas import (
 )
 
 
+def _safe_json_loads(text: str) -> Any:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        return json.loads(cleaned, strict=False)
+    except Exception:
+        fixed = re.sub(r'\\(?![/"\\bfnrtu]|u[0-9a-fA-F]{4})', r'\\\\', cleaned)
+        return json.loads(fixed, strict=False)
+
+
 class BaseLLMProvider(ABC):
     @abstractmethod
     def generate_investigation_report(
@@ -332,7 +344,7 @@ class RealLLMAdapter(BaseLLMProvider):
         self.api_key = api_key if api_key is not None else default_role_key
         self.backup_keys = [k for k in (backup_keys or []) if k and k != self.api_key]
         self.base_url = base_url or os.getenv("AEGIS_LLM_BASE_URL", "")
-        self.model_name = model_name or os.getenv("AEGIS_LLM_MODEL", "gemini-2.5-flash")
+        self.model_name = model_name or os.getenv("AEGIS_LLM_MODEL", "gemini-3.5-flash-lite")
         self.timeout = timeout_seconds if timeout_seconds is not None else timeout
         self.session = session or requests.Session()
 
@@ -447,7 +459,7 @@ class RealLLMAdapter(BaseLLMProvider):
 
         try:
             raw_response = self._call_http(prompt=user_prompt, system_instruction=system_prompt)
-            data = json.loads(raw_response)
+            data = _safe_json_loads(raw_response)
             # Guarantee immutable severity binding
             data["severity"] = alert_info.get("severity", "High")
             return IncidentReportOutput(**data)
@@ -488,7 +500,7 @@ class RealLLMAdapter(BaseLLMProvider):
 
         try:
             raw_response = self._call_http(prompt=user_prompt, system_instruction=system_prompt)
-            data = json.loads(raw_response)
+            data = _safe_json_loads(raw_response)
             return SCAnalysisOutput(**data)
         except Exception as e:
             audit_id = enriched_context.get("audit_run", {}).get("audit_id", "AUD-UNKNOWN")
@@ -521,7 +533,7 @@ class RealLLMAdapter(BaseLLMProvider):
 
         try:
             raw_response = self._call_http(prompt=user_prompt, system_instruction=system_prompt)
-            data = json.loads(raw_response)
+            data = _safe_json_loads(raw_response)
             return StructuredReportOutput(**data)
         except Exception as e:
             # Fallback to deterministic synthesis on provider error

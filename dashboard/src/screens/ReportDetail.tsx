@@ -1,10 +1,11 @@
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { CircleAlert, Download, FileText, LoaderCircle, RotateCw } from 'lucide-react';
+import { CircleAlert, Download, FileText, LoaderCircle, Printer, RotateCw } from 'lucide-react';
 import { Screen } from '../components/AppShell';
 import { useToast } from '../components/Toast';
 import { EmptyState, QueryView, SkeletonBlock } from '../components/states';
 import { Badge, Button, Group, KeyValues, Notice, Row, Section, Tag } from '../components/ui';
-import { actions, api, hostName } from '../data/api';
+import { actions, api, getAuthToken, hostName } from '../data/api';
 import { useQuery } from '../lib/hooks';
 import { reportStatusMeta } from '../lib/status';
 import { useTimeFormat } from '../lib/time';
@@ -13,6 +14,7 @@ export function ReportDetailScreen() {
   const { id = '' } = useParams();
   const { dateTime } = useTimeFormat();
   const toast = useToast();
+  const [downloading, setDownloading] = useState(false);
 
   const q = useQuery(async () => {
     const [report, hosts, alerts, findings, gaps] = await Promise.all([
@@ -39,57 +41,35 @@ export function ReportDetailScreen() {
           const matchedGaps = gaps.filter((g) => report.hostIds.includes(g.hostId));
 
           const handleDownload = async () => {
+            setDownloading(true);
             try {
               const pdfUrl = api.downloadReportPdfUrl(report.id);
-              const res = await fetch(pdfUrl);
-              if (res.ok && res.headers.get('content-type')?.includes('application/pdf')) {
+              const token = getAuthToken();
+              const headers: Record<string, string> = {};
+              if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+              }
+              const res = await fetch(pdfUrl, { headers });
+              if (res.ok) {
                 const blob = await res.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `AEGIS-${report.id}-${report.type}.pdf`;
+                a.download = `AEGIS-Security-Report-${report.id}.pdf`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                toast(`Downloaded AEGIS-${report.id}-${report.type}.pdf`, 'success');
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                toast(`Report AEGIS-${report.id}.pdf downloaded successfully`, 'success');
                 return;
               }
-            } catch {
-              // Fallback to client-side PDF generator if offline
+              const errJson = await res.json().catch(() => null);
+              toast(errJson?.detail || `Failed to fetch report PDF (HTTP ${res.status})`, 'info');
+            } catch (err: any) {
+              toast(`Download failed: ${err?.message || 'Network error'}`, 'info');
+            } finally {
+              setDownloading(false);
             }
-
-            const lines = [
-              `AEGIS SECURITY MONITORING REPORT`,
-              `Report ID: ${report.id}`,
-              `Title: ${report.title}`,
-              `Type: ${report.type.toUpperCase()}`,
-              `Status: ${report.status.toUpperCase()}`,
-              `AI Key Slot: ${report.aiKeySlot ?? 'AEGIS3 (Dedicated Reporting Agent)'}`,
-              `Generated At: ${report.completedAt ?? new Date().toISOString()}`,
-              `Period: ${report.periodStart} to ${report.periodEnd}`,
-              `Target Hosts: ${report.hostIds.map(hostName).join(', ')}`,
-              `Findings Evaluated: ${report.findingCount ?? matchedFindings.length}`,
-              `Alerts Recorded: ${report.alertCount ?? matchedAlerts.length}`,
-              `Telemetry Gaps: ${report.gapCount ?? matchedGaps.length}`,
-              `Integrity: Cryptographically sealed by AEGIS reporting engine.`,
-            ];
-            const stream = lines
-              .map((l, i) => `BT /F1 11 Tf 40 ${760 - i * 22} Td (${l.replace(/[()]/g, '')}) Tj ET`)
-              .join('\n');
-            const pdf = `%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n4 0 obj << /Length ${stream.length} >> stream\n${stream}\nendstream endobj\n5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\nxref\n0 6\n0000000000 65535 f \n0000000010 00000 n \n0000000060 00000 n \n0000000117 00000 n \n0000000241 00000 n \n0000000${String(326 + stream.length).padStart(5, '0')} 00000 n \ntrailer << /Size 6 /Root 1 0 R >>\nstartxref\n${400 + stream.length}\n%%EOF`;
-
-            const blob = new Blob([pdf], { type: 'application/pdf' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `AEGIS-${report.id}-${report.type}.pdf`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-
-            toast(`Downloaded AEGIS-${report.id}-${report.type}.pdf`, 'success');
           };
 
           return (
@@ -112,9 +92,17 @@ export function ReportDetailScreen() {
                 </section>
 
                 {report.status === 'completed' && (
-                  <div className="report-action-bar">
-                    <Button variant="primary" icon={Download} block onClick={handleDownload}>
-                      Download PDF ({report.pages ?? 1} pages, {report.sizeKb ?? 300} KB)
+                  <div className="report-action-bar" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <Button variant="primary" icon={Download} block onClick={handleDownload} disabled={downloading}>
+                      {downloading ? 'Generating PDF…' : `Download PDF (${report.pages ?? 1} pages, ${report.sizeKb ?? 300} KB)`}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      icon={Printer}
+                      onClick={() => window.print()}
+                      title="Print / Save View"
+                    >
+                      Print View
                     </Button>
                   </div>
                 )}

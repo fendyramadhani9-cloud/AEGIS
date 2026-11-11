@@ -17,7 +17,7 @@ const KEY = 'aegis.prefs';
 function load(): Preferences {
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
-    return { ...DEFAULTS, ...saved, previewState: saved.previewState || 'live' };
+    return { ...DEFAULTS, ...saved, previewState: 'live' };
   } catch {
     return DEFAULTS;
   }

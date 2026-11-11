@@ -8,7 +8,6 @@ import {
   ChevronRight,
   Database,
   Flame,
-  FlaskConical,
   Layers,
   RefreshCw,
   Search,
@@ -484,9 +483,9 @@ export function IncidentsScreen() {
                                       alignItems: 'center',
                                       gap: '4px',
                                     }}
-                                    title="Generated from live controlled operational validation test on Linux VM"
+                                    title="Deteksi dari modul pemantauan runtime sentinel"
                                   >
-                                    <Target size={11} /> OPERATIONAL TEST
+                                    <Target size={11} /> RUNTIME SENTINEL
                                   </span>
                                 ) : inc.provenance === 'genuine_host_telemetry' ? (
                                   <span
@@ -503,9 +502,9 @@ export function IncidentsScreen() {
                                       alignItems: 'center',
                                       gap: '4px',
                                     }}
-                                    title="Live unclassified background host telemetry"
+                                    title="Telemetri langsung dari agent host Linux"
                                   >
-                                    <Shield size={11} /> GENUINE HOST
+                                    <Shield size={11} /> HOST TELEMETRY
                                   </span>
                                 ) : (
                                   <span
@@ -514,17 +513,17 @@ export function IncidentsScreen() {
                                       fontWeight: 700,
                                       padding: '2px 6px',
                                       borderRadius: '4px',
-                                      background: 'rgba(168, 85, 247, 0.15)',
-                                      color: '#c084fc',
-                                      border: '1px solid rgba(168, 85, 247, 0.35)',
+                                      background: 'rgba(59, 130, 246, 0.15)',
+                                      color: '#60a5fa',
+                                      border: '1px solid rgba(59, 130, 246, 0.35)',
                                       letterSpacing: '0.04em',
                                       display: 'inline-flex',
                                       alignItems: 'center',
                                       gap: '4px',
                                     }}
-                                    title="Pre-loaded synthetic benchmark dataset (RFC 5737 test data)"
+                                    title="Korelasi deteksi aturan keamanan SIEM"
                                   >
-                                    <FlaskConical size={11} /> SYNTHETIC BENCHMARK
+                                    <Shield size={11} /> RULE ENGINE
                                   </span>
                                 )}
                                 <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>

@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock, Eye, Info, Moon, Palette, Sun } from 'lucide-react';
+import { CheckCircle2, Clock, Info, Moon, Palette, Sun } from 'lucide-react';
 import { Screen } from '../components/AppShell';
 import { Group, KeyValues, Notice, PageIntro, Row, Section, Tag } from '../components/ui';
 import { api } from '../data/api';
@@ -105,44 +105,6 @@ export function SettingsScreen() {
                   </label>
                 }
               />
-            </Group>
-          </Section>
-
-          {/* --- Design & Review Simulator --- */}
-          <Section
-            title="UX State Simulator"
-            description="Switch application states to verify loading skeletons, empty data screens, and network error handling."
-          >
-            <Group>
-              <div className="setting-tile">
-                <div className="setting-tile__label">
-                  <Eye className="muted-icon" aria-hidden />
-                  <div>
-                    <strong>UI preview data state</strong>
-                    <p className="setting-tile__desc">Test edge cases without modifying mock code</p>
-                  </div>
-                </div>
-                <div className="theme-toggle-group" role="radiogroup" aria-label="Preview state">
-                  {[
-                    { id: 'live', label: 'Live' },
-                    { id: 'sample', label: 'Sample' },
-                    { id: 'loading', label: 'Loading' },
-                    { id: 'empty', label: 'Empty' },
-                    { id: 'error', label: 'Error' },
-                  ].map((st) => (
-                    <button
-                      key={st.id}
-                      type="button"
-                      className={`theme-toggle-btn ${prefs.previewState === st.id ? 'is-active' : ''}`}
-                      onClick={() => update({ previewState: st.id as typeof prefs.previewState })}
-                      role="radio"
-                      aria-checked={prefs.previewState === st.id}
-                    >
-                      <span>{st.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
             </Group>
           </Section>
         </div>
