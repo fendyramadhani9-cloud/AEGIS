@@ -264,3 +264,4 @@ When an alert or incident reaches `High` or `Critical` severity:
    ```
 6. **Archive Signed Evidence Bundle:**
    Download the cryptographically hashed incident evidence bundle and PDF report for compliance and audit preservation.
+
