@@ -11,7 +11,7 @@ services:
       - API_HOST=0.0.0.0
       - API_PORT=1709
       - AEGIS_STATE_FILE=/app/data/.aegis_operational_state.json
-      - AEGIS_CORS_ORIGINS=http://localhost:1708,http://127.0.0.1:1708,http://localhost:1709,http://127.0.0.1:1709,http://localhost:5173
+      - AEGIS_CORS_ORIGINS=${AEGIS_CORS_ORIGINS:-http://localhost:1708,http://127.0.0.1:1708,http://localhost:1709,http://127.0.0.1:1709,http://localhost:5173}
     ports:
       - "127.0.0.1:1709:1709"
     volumes:
