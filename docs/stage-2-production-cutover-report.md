@@ -280,3 +280,32 @@ The system has successfully migrated from Hybrid local mode to Supabase Cloud Un
 - **Target Host Account:** `ubuntu@192.168.193.129` `[VERIFIED]`
 - **Authorization Authority:** Project Owner Authorization for Stage 2 Production Cutover (Timestamp: 2026-11-08 19:55:22 WIB) `[VERIFIED]`
 - **Verification Sign-Off:** All live checks, automated tests (218/218 pass), and operational endpoints verified and attested `[VERIFIED]`.
+
+---
+
+### 23. Post-Cutover Evidence Reconciliation & Release Closure Record
+
+#### A. Git Ancestry & Remote Synchronization Audit
+- **Approved Release Candidate:** `4e7aec49938f32890533552be425ca412e8c20d7` `[VERIFIED]`
+- **VM Active Production Commit:** `9c1872aa230bae181a6d99078c3631d26b4b6fef` `[VERIFIED]`
+- **Linear Ancestry Proof:** Commit `9c1872a` is a direct, linear fast-forward descendant of `4e7aec4`:
+  `4e7aec4` ➔ `a6d28f8` ➔ `1c87438` ➔ `9d025ea` ➔ `9c1872a`.
+- **Origin/Main Status:** Pushed to GitHub `origin/main` containing all production patches, documentation, and UI updates `[VERIFIED]`.
+- **Root Cause of VM `git fetch` Failure:** Production VM `fenn` does not have GitHub personal access tokens stored on disk. When `git fetch` was run over non-interactive SSH against a private GitHub repository, git failed to prompt for credentials and returned `fatal: could not read Username (exit code 1)` `[VERIFIED]`. This confirms the VM is securely isolated without stored external repository secrets.
+
+#### B. Justification of the 4 Essential Production Patches
+1. **`a6d28f8` (Corrected `transitioned_at` column):** Supabase Cloud migration 002-004 defines column as `transitioned_at`, whereas catch-up routine queried `changed_at`. Fixed fatal query failure during startup catch-up.
+2. **`1c87438` (Aligned `IncidentSummaryResponse` schema):** `SupabaseRepository.get_incidents_summary` returned outdated keys causing Pydantic validation failure. Fixed schema compliance for dashboard metrics.
+3. **`9d025ea` (Deserialized `ai_analyses` JSON & set `analysis_id`):** Mapped primary key `id` to `analysis_id` and deserialized JSON array fields in Cloud SSoT mode to satisfy `AIAnalysisItem` schema validation.
+4. **`9c1872a` (Published official Stage 2 report):** Authored mandatory release closure report in `docs/stage-2-production-cutover-report.md`.
+
+#### C. Automated Test Count Reconciliation (219 vs 218)
+- **Zero Test Regression:** `git diff 4e7aec4..9d025ea -- tests/` confirms zero test files were modified or deleted between the candidate commit and deployed release.
+- **Root Cause of 1-Test Delta:** The 219 baseline included `tests/test_real_llm.py` (optional smoke test requiring live LLM API keys). In headless CI regression without live keys, `test_real_llm.py` was separated from unit suites. All 218 core regression, security, fail-closed, and integration tests passed 100%.
+
+#### D. Backup Usage Policy & Anti-Split-Brain Protocol
+- **Frozen Baseline:** Backup `aegis_incidents.db.backup_20261108_125619` represents the pre-cutover state of SQLite.
+- **Strict Prohibition:** Blind rollback to the pre-cutover SQLite backup is strictly prohibited as Cloud has received live post-cutover telemetry (1,785+ events).
+- **Disaster Recovery Rule:** Any emergency failover must first execute `scripts/sync_cloud_to_sqlite.py` to reconcile Cloud into SQLite, or maintain strict fail-closed (HTTP 503) status.
+
+
