@@ -184,7 +184,7 @@ function DesktopSidebar() {
 
       {/* System Status in Sidebar Footer */}
       <div className="desktop-sidebar__footer">
-        {!isInstalled && (canDirectInstall || isIos || true) && (
+        {!isInstalled && (canDirectInstall || isIos) && (
           <button
             type="button"
             className="sidebar-logout-btn"
@@ -245,19 +245,6 @@ function DesktopSidebar() {
             {resolvedTheme === 'dark' ? <Sun aria-hidden /> : <Moon aria-hidden />}
           </button>
         </div>
-
-        {!isInstalled && (canDirectInstall || isIos || true) && (
-          <button
-            type="button"
-            className="sidebar-logout-btn"
-            style={{ marginBottom: '6px', borderColor: 'var(--color-brand)', color: 'var(--color-brand)' }}
-            onClick={handleInstallApp}
-            title="Install AEGIS as a mobile/desktop app (PWA)"
-          >
-            <Smartphone size={14} aria-hidden />
-            <span>Install App (HP / Desktop)</span>
-          </button>
-        )}
 
         {currentUser && (
           <button

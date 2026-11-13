@@ -59,26 +59,34 @@ def list_hosts(
     try:
         if agent_status:
             raw_hosts, _ = repo.list_hosts(limit=10000, offset=0, status=None)
+            single_node = len(raw_hosts) <= 1
             derived_all = []
             for h in raw_hosts:
                 h_dict = dict(h)
                 h_dict["agent_status"] = derive_agent_status(
                     h_dict.get("last_data_at"), h_dict.get("agent_status", "online")
                 )
-                h_dict["metrics"] = metrics_store.get(str(h_dict.get("id", "")))
+                h_dict["metrics"] = metrics_store.get(
+                    str(h_dict.get("id", "")),
+                    fallback_live=(single_node and h_dict["agent_status"] != "offline"),
+                )
                 if h_dict["agent_status"] == agent_status:
                     derived_all.append(HostItem.model_validate(h_dict))
             total = len(derived_all)
             items = derived_all[offset : offset + limit]
         else:
             data, total = repo.list_hosts(limit=limit, offset=offset, status=None)
+            single_node = total <= 1
             items = []
             for h in data:
                 h_dict = dict(h)
                 h_dict["agent_status"] = derive_agent_status(
                     h_dict.get("last_data_at"), h_dict.get("agent_status", "online")
                 )
-                h_dict["metrics"] = metrics_store.get(str(h_dict.get("id", "")))
+                h_dict["metrics"] = metrics_store.get(
+                    str(h_dict.get("id", "")),
+                    fallback_live=(single_node and h_dict["agent_status"] != "offline"),
+                )
                 items.append(HostItem.model_validate(h_dict))
         return PaginatedHostsResponse(
             items=items,
@@ -113,7 +121,11 @@ def get_host(
             )
         h_dict = dict(host)
         h_dict["agent_status"] = derive_agent_status(h_dict.get("last_data_at"), h_dict.get("agent_status", "online"))
-        h_dict["metrics"] = metrics_store.get(str(h_dict.get("id", host_id)))
+        _, total_hosts = repo.list_hosts(limit=1, offset=0, status=None)
+        h_dict["metrics"] = metrics_store.get(
+            str(h_dict.get("id", host_id)),
+            fallback_live=(total_hosts <= 1 and h_dict["agent_status"] != "offline"),
+        )
         return HostItem.model_validate(h_dict)
     except HTTPException:
         raise

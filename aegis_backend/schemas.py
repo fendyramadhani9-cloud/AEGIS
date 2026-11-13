@@ -160,6 +160,7 @@ class TelemetryIngestRequest(BaseModel):
     os: str = Field(default="Ubuntu 22.04 LTS", min_length=1, max_length=100)
     agent_version: str = Field(default="0.1.0", min_length=1, max_length=50)
     raw_logs: List[str] = Field(..., min_length=1, max_length=500, description="Batch of raw log lines (max 500 lines)")
+    metrics: Optional[HostResourceMetrics] = None
 
     @field_validator("raw_logs")
     @classmethod

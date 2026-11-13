@@ -15,7 +15,7 @@ const DAY = 24 * 3600_000;
 export function OverviewScreen() {
   const { when, date } = useTimeFormat();
   const q = useQuery(async () => {
-    const [hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth, guardian] = await Promise.all([
+    const [hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth, guardian, aiRoles] = await Promise.all([
       api.hosts(),
       api.alerts(),
       api.findings(),
@@ -25,8 +25,9 @@ export function OverviewScreen() {
       api.system(),
       api.pipelineHealth(),
       api.guardianStatus(),
+      api.aiRoles(),
     ]);
-    return { hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth, guardian };
+    return { hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth, guardian, aiRoles };
   });
 
   return (
@@ -41,7 +42,7 @@ export function OverviewScreen() {
           </>
         }
       >
-        {({ hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth, guardian }) => {
+        {({ hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth, guardian, aiRoles }) => {
           if (hosts.length === 0)
             return (
               <EmptyState brand title="No hosts registered yet">
@@ -148,13 +149,13 @@ export function OverviewScreen() {
                     <div className="provenance-item">
                       <span className="provenance-label">CIS Ubuntu Benchmark</span>
                       <span className="provenance-value mono">
-                        {cisPass}/{cisFindings.length || 8} Controls Compliant
+                        {cisPass}/{cisFindings.length} Controls Compliant
                       </span>
                     </div>
                     <div className="provenance-item">
                       <span className="provenance-label">DISA STIG Military Baseline</span>
                       <span className="provenance-value mono">
-                        {stigPass}/{stigFindings.length || 4} Controls Compliant
+                        {stigPass}/{stigFindings.length} Controls Compliant
                       </span>
                     </div>
                     <div className="provenance-item">
@@ -166,16 +167,27 @@ export function OverviewScreen() {
                     </div>
                     <div className="provenance-item">
                       <span className="provenance-label">AI Orchestration</span>
-                      <span className="provenance-value mono">4-Key Active (AEGIS1 · AEGIS2 · AEGIS3 · AEGIS4)</span>
+                      <span className="provenance-value mono">
+                        {(() => {
+                          const configured = (aiRoles ?? []).filter((r) => r.configured);
+                          return configured.length > 0
+                            ? `${configured.length}-Key Active (${configured.map((r) => r.keySlot).join(' · ')})`
+                            : 'Deterministic Mode (0 AI Keys)';
+                        })()}
+                      </span>
                     </div>
-                    {hosts[0]?.metrics && (
-                      <div className="provenance-item">
-                        <span className="provenance-label">Host Telemetry ({hosts[0].hostname})</span>
-                        <span className="provenance-value mono">
-                          CPU {hosts[0].metrics.cpuPercent.toFixed(1)}% · RAM {hosts[0].metrics.ramPercent.toFixed(1)}% ({(hosts[0].metrics.ramUsedMb / 1024).toFixed(1)} GB) · Disk {hosts[0].metrics.diskPercent.toFixed(0)}% · ↓{hosts[0].metrics.netRxMbps.toFixed(2)}/↑{hosts[0].metrics.netTxMbps.toFixed(2)} Mbps
-                        </span>
-                      </div>
-                    )}
+                    {(() => {
+                      const telHost = hosts.find((h) => h.agentStatus === 'online' && h.metrics) ?? hosts.find((h) => h.metrics);
+                      if (!telHost?.metrics) return null;
+                      return (
+                        <div className="provenance-item">
+                          <span className="provenance-label">Host Telemetry ({telHost.hostname})</span>
+                          <span className="provenance-value mono">
+                            CPU {telHost.metrics.cpuPercent.toFixed(1)}% · RAM {telHost.metrics.ramPercent.toFixed(1)}% ({(telHost.metrics.ramUsedMb / 1024).toFixed(1)} GB) · Disk {telHost.metrics.diskPercent.toFixed(0)}% · ↓{telHost.metrics.netRxMbps.toFixed(2)}/↑{telHost.metrics.netTxMbps.toFixed(2)} Mbps
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </section>

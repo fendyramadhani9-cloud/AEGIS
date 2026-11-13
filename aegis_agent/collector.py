@@ -29,7 +29,13 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from aegis_backend.sanitizer import TelemetrySanitizer
-from aegis_backend.metrics_store import metrics_store
+try:
+    from aegis_backend.metrics_store import metrics_store
+except ImportError:
+    class _StandaloneMetricsFallback:
+        def sample_local_proc(self) -> Optional[Dict[str, object]]:
+            return None
+    metrics_store = _StandaloneMetricsFallback()  # type: ignore[assignment]
 from aegis_agent.security_checker import ReadOnlySecurityChecker
 
 # Load .env configuration
