@@ -159,6 +159,11 @@ class RulesEngine:
         alerts.extend(apt_alerts)
         alert_evidence.extend(apt_ev)
 
+        # Step 11: Evaluate Container & Kubernetes Runtime/Audit Rules
+        ck_alerts, ck_ev = self._evaluate_container_and_k8s_rules(sorted_events, generated_alert_ids)
+        alerts.extend(ck_alerts)
+        alert_evidence.extend(ck_ev)
+
         return alerts, alert_evidence
 
     def _evaluate_ssh_brute(
@@ -994,6 +999,103 @@ class RulesEngine:
                     "event_id": ev["id"],
                     "citation_role": "trigger",
                 })
+
+        return alerts, evidence_links
+
+    def _evaluate_container_and_k8s_rules(
+        self,
+        events: List[Dict[str, Any]],
+        generated_ids: Set[str],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Evaluates Docker/Container Runtime and Kubernetes Control Plane Audit events:
+        - RULE-CONTAINER-EXEC (high)
+        - RULE-CONTAINER-ESCAPE-RISK (critical)
+        - RULE-CONTAINER-OOM-CRASH (medium)
+        - RULE-K8S-POD-EXEC (high)
+        - RULE-K8S-RBAC-ESCALATION (critical)
+        - RULE-K8S-SECRET-ACCESS (high)
+        - RULE-K8S-PRIVILEGED-POD (critical)
+        """
+        alerts: List[Dict[str, Any]] = []
+        evidence_links: List[Dict[str, Any]] = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        rule_map = {
+            "container_exec_shell": (
+                "RULE-CONTAINER-EXEC",
+                "ALT-CTREXEC",
+                "Interactive Shell Execution Inside Running Container (MITRE T1609)",
+                "high",
+            ),
+            "privileged_container_started": (
+                "RULE-CONTAINER-ESCAPE-RISK",
+                "ALT-CTRESC",
+                "Privileged Container or Docker Socket Mount Detected (MITRE T1611)",
+                "critical",
+            ),
+            "container_oom_or_crash": (
+                "RULE-CONTAINER-OOM-CRASH",
+                "ALT-CTRDIE",
+                "Abnormal Container Termination / OOMKilled Detected",
+                "medium",
+            ),
+            "k8s_pod_exec": (
+                "RULE-K8S-POD-EXEC",
+                "ALT-K8SEXEC",
+                "Kubernetes Pod Exec / Interactive Attach Detected (MITRE T1609)",
+                "high",
+            ),
+            "k8s_rbac_escalation": (
+                "RULE-K8S-RBAC-ESCALATION",
+                "ALT-K8SRBAC",
+                "Kubernetes RBAC RoleBinding / ClusterRoleBinding Escalation (MITRE T1098)",
+                "critical",
+            ),
+            "k8s_secret_access": (
+                "RULE-K8S-SECRET-ACCESS",
+                "ALT-K8SSEC",
+                "Kubernetes Secret Access Recorded in Audit Stream (MITRE T1552.007)",
+                "high",
+            ),
+            "k8s_privileged_pod": (
+                "RULE-K8S-PRIVILEGED-POD",
+                "ALT-K8SPRIV",
+                "Privileged / Host-Namespace Kubernetes Pod Created (MITRE T1611)",
+                "critical",
+            ),
+        }
+
+        for ev in events:
+            ev_type = ev.get("event_type")
+            if ev_type not in rule_map:
+                continue
+            rule_id, alt_prefix, title, severity = rule_map[ev_type]
+            h_id = ev.get("host_id") or "unknown"
+            fp_raw = f"{h_id}:{rule_id}:{ev['id']}"
+            alert_id = f"{alt_prefix}-{hashlib.sha256(fp_raw.encode()).hexdigest()[:16]}"
+            if alert_id in generated_ids:
+                continue
+            generated_ids.add(alert_id)
+
+            details = ev.get("details") or {}
+            reason = details.get("raw_summary") or ev.get("message") or f"{rule_id} triggered on host '{h_id}'."
+            alerts.append({
+                "id": alert_id,
+                "host_id": h_id,
+                "rule_id": rule_id,
+                "rule_version": "1.0",
+                "title": title,
+                "severity": severity,
+                "detected_at": ev.get("event_timestamp") or now_iso,
+                "reason": reason,
+                "created_at": now_iso,
+            })
+            evidence_links.append({
+                "alert_id": alert_id,
+                "event_id": ev["id"],
+                "citation_role": "trigger",
+            })
 
         return alerts, evidence_links
 

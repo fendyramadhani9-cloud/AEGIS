@@ -71,6 +71,7 @@ services:
     volumes:
       - aegis_state:/app/data
       - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /run/log/journal:/run/log/journal:ro
       - /etc/ssh:/etc/ssh:ro
       - /etc/issue.net:/etc/issue.net:ro

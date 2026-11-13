@@ -488,15 +488,16 @@ def test_incident_replay_and_investigation_workflow():
 
 
 def test_three_key_ai_roles_and_8_module_security_checker():
-    """Verifies the 3-Key AI Role Allocation (AEGIS1, AEGIS2, AEGIS3) and 8-Module Security Checker."""
+    """Verifies the 4-Key AI Role Allocation (AEGIS1, AEGIS2, AEGIS3, AEGIS4) and 12-Module Security Checker."""
     roles_res = client.get("/api/system/ai-roles")
     assert roles_res.status_code == 200
     roles = roles_res.json()
-    assert len(roles) == 3
+    assert len(roles) == 4
     slot_map = {r["role_id"]: r["key_slot"] for r in roles}
     assert slot_map["rm_agent"] == "AEGIS1"
     assert slot_map["sc_agent"] == "AEGIS2"
     assert slot_map["reporting_agent"] == "AEGIS3"
+    assert slot_map["guardian_agent"] == "AEGIS4"
 
     findings_res = client.get("/api/findings?host_id=srv-prod-auth")
     assert findings_res.status_code == 200

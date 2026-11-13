@@ -120,12 +120,22 @@ def _build_safe_event_message(ev_type: str, user: Optional[str], src_ip: Optiona
     if ev_type == "rootkit_or_sniff_activity":
         act = details.get("activity_type", "kernel_or_sniff")
         return f"Rootkit / promiscuous network activity ({act}) under '{u}'."
+    if ev_type in ("container_exec_shell", "privileged_container_started", "container_oom_or_crash", "container_log_security"):
+        cname = details.get("container_name", "unknown")
+        return details.get("raw_summary") or f"Container runtime event '{ev_type}' in '{cname}'."
+    if ev_type in ("k8s_pod_exec", "k8s_rbac_escalation", "k8s_secret_access", "k8s_privileged_pod"):
+        ns = details.get("namespace", "default")
+        return details.get("raw_summary") or f"Kubernetes audit event '{ev_type}' in namespace '{ns}' by '{u}'."
     return f"Security telemetry event '{ev_type}' observed."
 
 
 def _resolve_source_id(details: Dict[str, Any], event_type: str) -> str:
     """Maps event details to valid source_id column in database."""
     service = str(details.get("service", "")).lower()
+    if service == "kubernetes_audit" or event_type.startswith("k8s_"):
+        return "kubernetes-audit"
+    if service in ("docker_runtime", "docker_container") or event_type.startswith("container_") or event_type == "privileged_container_started":
+        return "container-runtime"
     if event_type in ("web_attack_probe", "web_http_error") or service in ("nginx", "apache2"):
         return "nginx-access"
     if service in ["sshd", "pam_unix", "sudo", "useradd", "adduser", "usermod", "gpasswd", "passwd"] or "auth" in event_type or "session" in event_type or "sudo" in event_type or event_type in ("account_created", "privilege_group_added", "password_changed"):

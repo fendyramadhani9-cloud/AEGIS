@@ -5,6 +5,7 @@ LogEventInput models conforming to AEGIS data contracts.
 """
 
 import hashlib
+import json
 import re
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
@@ -27,6 +28,22 @@ class LinuxTelemetryParser:
         line = line.strip()
         if not line:
             return None
+
+        # Try container / Kubernetes structured logs first if JSON or CRI format
+        if line.startswith("{"):
+            parsed = self._parse_k8s_audit_log(line, event_id_prefix)
+            if parsed:
+                return parsed
+            parsed = self._parse_container_runtime_event(line, event_id_prefix)
+            if parsed:
+                return parsed
+            parsed = self._parse_docker_json_log(line, event_id_prefix)
+            if parsed:
+                return parsed
+
+        parsed = self._parse_k8s_cri_pod_log(line, event_id_prefix)
+        if parsed:
+            return parsed
 
         # Try parsing in order of specificity
         parsed = self._parse_sshd_log(line, event_id_prefix)
@@ -738,6 +755,285 @@ class LinuxTelemetryParser:
                     "raw_summary": line[:240],
                 },
             )
+
+        return None
+
+    # =========================================================================
+    # CONTAINER & KUBERNETES TELEMETRY PARSERS (Stage 1 & Stage 2)
+    # =========================================================================
+
+    def _parse_docker_json_log(self, line: str, prefix: str) -> Optional[LogEventInput]:
+        """Unwraps Docker json-file driver entries: {'log': '...', 'stream': 'stdout|stderr', 'time': '...'}."""
+        try:
+            obj = json.loads(line)
+        except Exception:
+            return None
+        if not isinstance(obj, dict) or "log" not in obj:
+            return None
+
+        inner = str(obj.get("log") or "").strip()
+        if not inner:
+            return None
+        stream = str(obj.get("stream") or "stdout")
+        ts_iso = self._parse_syslog_timestamp(str(obj.get("time") or "")) or datetime.now(timezone.utc).isoformat()
+        container_name = obj.get("container_name") or obj.get("container_id")
+
+        # Delegate inner line to standard parsers (web logs, ssh/auth, sudo, APT)
+        inner_parsed = self.parse_line(inner, prefix)
+        if inner_parsed:
+            if not inner_parsed.timestamp:
+                inner_parsed.timestamp = ts_iso
+            inner_parsed.details = {
+                **(inner_parsed.details or {}),
+                "container_runtime": "docker",
+                "container_stream": stream,
+                **({"container_name": container_name} if container_name else {}),
+            }
+            return inner_parsed
+
+        # Capture security-relevant container stdout/stderr patterns (e.g., prompt injection or interactive shell)
+        lower_inner = inner.lower()
+        if any(
+            sig in lower_inner
+            for sig in (
+                "ignore previous instructions",
+                "[inst]",
+                "<|im_start|>",
+                "unauthorized",
+                "permission denied",
+                "authentication failed",
+                "exec /bin/sh",
+                "exec /bin/bash",
+            )
+        ):
+            return LogEventInput(
+                event_id=f"{prefix}-DOCKER-LOG-{self._line_sig(line)}",
+                timestamp=ts_iso,
+                event_type="container_log_security",
+                details={
+                    "service": "docker_container",
+                    "container_runtime": "docker",
+                    "container_stream": stream,
+                    "container_name": container_name,
+                    "raw_summary": inner[:240],
+                },
+            )
+        return None
+
+    def _parse_k8s_cri_pod_log(self, line: str, prefix: str) -> Optional[LogEventInput]:
+        """Unwraps Kubernetes CRI pod logs: '<ISO8601> stdout|stderr F|P <message>'."""
+        m = re.match(r"^(\d{4}-\d{2}-\d{2}T[^\s]+)\s+(stdout|stderr)\s+[FP]\s+(.+)$", line)
+        if not m:
+            return None
+        ts_raw, stream, inner = m.groups()
+        ts_iso = self._parse_syslog_timestamp(ts_raw) or datetime.now(timezone.utc).isoformat()
+        inner_parsed = self.parse_line(inner.strip(), prefix)
+        if inner_parsed:
+            if not inner_parsed.timestamp:
+                inner_parsed.timestamp = ts_iso
+            inner_parsed.details = {
+                **(inner_parsed.details or {}),
+                "container_runtime": "kubernetes_cri",
+                "container_stream": stream,
+            }
+            return inner_parsed
+        return None
+
+    def _parse_container_runtime_event(self, line: str, prefix: str) -> Optional[LogEventInput]:
+        """
+        Parses Docker / containerd runtime security events:
+        - exec_start / exec_create with interactive shell
+        - privileged container start or docker.sock bind mount (Container Escape Risk)
+        - unexpected oom / die with non-zero exit code
+        """
+        try:
+            obj = json.loads(line)
+        except Exception:
+            return None
+        if not isinstance(obj, dict):
+            return None
+
+        action = str(obj.get("Action") or obj.get("action") or obj.get("event_type") or "").lower()
+        ev_scope = str(obj.get("Type") or obj.get("type") or "").lower()
+        if ev_scope != "container" and not action.startswith(("exec_", "start", "die", "oom", "container_")):
+            return None
+
+        actor = obj.get("Actor") or {}
+        attrs = actor.get("Attributes") or obj.get("attributes") or obj.get("details") or {}
+        cname = attrs.get("name") or obj.get("container_name") or str(actor.get("ID") or obj.get("id") or "unknown")[:12]
+        image = attrs.get("image") or obj.get("image") or "unknown"
+        ts_raw = obj.get("timeNano") or obj.get("time") or obj.get("timestamp")
+        if isinstance(ts_raw, (int, float)):
+            sec = ts_raw / 1e9 if ts_raw > 1e12 else float(ts_raw)
+            ts_iso = datetime.fromtimestamp(sec, tz=timezone.utc).isoformat()
+        else:
+            ts_iso = self._parse_syslog_timestamp(str(ts_raw or "")) or datetime.now(timezone.utc).isoformat()
+
+        # 1. Interactive shell exec inside container
+        if action.startswith("exec_start") or action == "container_exec_shell":
+            cmd = str(attrs.get("execCommand") or attrs.get("command") or action)
+            return LogEventInput(
+                event_id=f"{prefix}-CTR-EXEC-{self._line_sig(line)}",
+                timestamp=ts_iso,
+                event_type="container_exec_shell",
+                user=str(attrs.get("user") or "container-exec"),
+                command=cmd,
+                details={
+                    "service": "docker_runtime",
+                    "container_name": cname,
+                    "image": image,
+                    "action": action,
+                    "command": cmd,
+                    "raw_summary": f"Container exec in '{cname}' ({image}): {cmd[:140]}",
+                },
+            )
+
+        # 2. Privileged container or sensitive docker.sock mount
+        is_privileged = str(attrs.get("privileged") or obj.get("privileged") or "").lower() == "true"
+        mounts_str = json.dumps(attrs.get("mounts") or obj.get("mounts") or "").lower()
+        has_sock_mount = "docker.sock" in mounts_str or "/var/run/docker.sock" in line.lower()
+        if (action == "start" and (is_privileged or has_sock_mount)) or action == "container_escape_risk":
+            risk_reason = "docker_socket_mounted" if has_sock_mount else "privileged_mode"
+            return LogEventInput(
+                event_id=f"{prefix}-CTR-PRIV-{self._line_sig(line)}",
+                timestamp=ts_iso,
+                event_type="privileged_container_started",
+                details={
+                    "service": "docker_runtime",
+                    "container_name": cname,
+                    "image": image,
+                    "risk_reason": risk_reason,
+                    "privileged": is_privileged,
+                    "docker_sock_mounted": has_sock_mount,
+                    "raw_summary": f"High-risk container '{cname}' ({image}) started: {risk_reason}",
+                },
+            )
+
+        # 3. OOMKilled or abnormal non-zero container crash
+        exit_code = str(attrs.get("exitCode") or attrs.get("exit_code") or "0")
+        if action == "oom" or (action == "die" and exit_code not in ("0", "143")) or action == "container_oom_or_crash":
+            return LogEventInput(
+                event_id=f"{prefix}-CTR-DIE-{self._line_sig(line)}",
+                timestamp=ts_iso,
+                event_type="container_oom_or_crash",
+                details={
+                    "service": "docker_runtime",
+                    "container_name": cname,
+                    "image": image,
+                    "action": action,
+                    "exit_code": exit_code,
+                    "raw_summary": f"Container '{cname}' terminated abnormally (action={action}, exit={exit_code})",
+                },
+            )
+
+        return None
+
+    def _parse_k8s_audit_log(self, line: str, prefix: str) -> Optional[LogEventInput]:
+        """
+        Parses Kubernetes kube-apiserver Audit Log (audit.k8s.io/v1):
+        - pods/exec or pods/attach
+        - clusterrolebindings / rolebindings escalation
+        - secrets read access
+        - privileged / hostPID / hostNetwork pod creation
+        """
+        try:
+            obj = json.loads(line)
+        except Exception:
+            return None
+        if not isinstance(obj, dict):
+            return None
+        if obj.get("kind") != "Event" and "audit.k8s.io" not in str(obj.get("apiVersion", "")):
+            return None
+
+        verb = str(obj.get("verb") or "").lower()
+        obj_ref = obj.get("objectRef") or {}
+        resource = str(obj_ref.get("resource") or "").lower()
+        subresource = str(obj_ref.get("subresource") or "").lower()
+        namespace = str(obj_ref.get("namespace") or "default")
+        res_name = str(obj_ref.get("name") or "unknown")
+
+        user_obj = obj.get("user") or {}
+        k8s_user = str(user_obj.get("username") or "unknown")
+        src_ips = obj.get("sourceIPs") or []
+        src_ip = str(src_ips[0]) if isinstance(src_ips, list) and src_ips else None
+        ts_iso = (
+            self._parse_syslog_timestamp(str(obj.get("requestReceivedTimestamp") or obj.get("stageTimestamp") or ""))
+            or datetime.now(timezone.utc).isoformat()
+        )
+        req_uri = str(obj.get("requestURI") or "")
+
+        # 1. kubectl exec / attach
+        if resource == "pods" and subresource in ("exec", "attach"):
+            return LogEventInput(
+                event_id=f"{prefix}-K8S-EXEC-{self._line_sig(line)}",
+                timestamp=ts_iso,
+                event_type="k8s_pod_exec",
+                source_ip=src_ip,
+                user=k8s_user,
+                details={
+                    "service": "kubernetes_audit",
+                    "namespace": namespace,
+                    "pod_name": res_name,
+                    "verb": verb,
+                    "request_uri": req_uri[:200],
+                    "raw_summary": f"K8s {subresource} into {namespace}/{res_name} by {k8s_user}",
+                },
+            )
+
+        # 2. RBAC Escalation (ClusterRoleBinding / RoleBinding create/update/patch)
+        if resource in ("clusterrolebindings", "rolebindings") and verb in ("create", "update", "patch"):
+            return LogEventInput(
+                event_id=f"{prefix}-K8S-RBAC-{self._line_sig(line)}",
+                timestamp=ts_iso,
+                event_type="k8s_rbac_escalation",
+                source_ip=src_ip,
+                user=k8s_user,
+                details={
+                    "service": "kubernetes_audit",
+                    "namespace": namespace,
+                    "resource": resource,
+                    "binding_name": res_name,
+                    "verb": verb,
+                    "raw_summary": f"K8s RBAC {verb} on {resource}/{res_name} by {k8s_user}",
+                },
+            )
+
+        # 3. Secret Access (get/list)
+        if resource == "secrets" and verb in ("get", "list", "watch"):
+            return LogEventInput(
+                event_id=f"{prefix}-K8S-SEC-{self._line_sig(line)}",
+                timestamp=ts_iso,
+                event_type="k8s_secret_access",
+                source_ip=src_ip,
+                user=k8s_user,
+                details={
+                    "service": "kubernetes_audit",
+                    "namespace": namespace,
+                    "secret_name": res_name,
+                    "verb": verb,
+                    "raw_summary": f"K8s secret {verb} in {namespace}/{res_name} by {k8s_user}",
+                },
+            )
+
+        # 4. Privileged Pod Creation
+        if resource == "pods" and verb == "create":
+            req_obj = obj.get("requestObject") or {}
+            req_str = json.dumps(req_obj).lower()
+            if any(flag in req_str for flag in ('"privileged": true', '"hostpid": true', '"hostnetwork": true', '"hostpath"')):
+                return LogEventInput(
+                    event_id=f"{prefix}-K8S-PRIVPOD-{self._line_sig(line)}",
+                    timestamp=ts_iso,
+                    event_type="k8s_privileged_pod",
+                    source_ip=src_ip,
+                    user=k8s_user,
+                    details={
+                        "service": "kubernetes_audit",
+                        "namespace": namespace,
+                        "pod_name": res_name,
+                        "verb": verb,
+                        "raw_summary": f"Privileged/host-access K8s Pod '{namespace}/{res_name}' created by {k8s_user}",
+                    },
+                )
 
         return None
 

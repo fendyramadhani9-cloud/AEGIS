@@ -13,6 +13,7 @@ Key Architecture & Guarantees:
 
 import os
 import sys
+import glob
 import json
 import time
 import signal
@@ -65,11 +66,22 @@ class AegisTelemetryCollector:
         self.offsets_file = Path(
             os.getenv("AEGIS_OFFSETS_FILE", str(self.cursor_file.with_suffix(".offsets.json")))
         )
-        default_log_files = "/var/log/nginx/access.log,/var/log/apache2/access.log,/var/log/audit/audit.log"
+        default_log_files = "/var/log/nginx/access.log,/var/log/apache2/access.log,/var/log/audit/audit.log,/var/log/kubernetes/audit/audit.log"
         raw_log_files = os.getenv("AEGIS_LOG_FILES", default_log_files)
         self.log_files: List[Path] = [
             Path(p.strip()) for p in raw_log_files.split(",") if p.strip()
         ]
+        self.collect_container_logs = os.getenv("AEGIS_COLLECT_CONTAINER_LOGS", "true").strip().lower() in ("1", "true", "yes", "on")
+        self.container_log_globs: List[str] = [
+            p.strip()
+            for p in os.getenv(
+                "AEGIS_CONTAINER_LOG_GLOBS",
+                "/var/lib/docker/containers/*/*-json.log,/var/log/pods/*/*/*.log,/var/log/containers/*.log",
+            ).split(",")
+            if p.strip()
+        ]
+        self.docker_events_url = os.getenv("AEGIS_DOCKER_EVENTS_URL", "").strip()
+        self.last_docker_event_ts = int(time.time()) - 60
 
         self.last_heartbeat_time = 0.0
         self.last_posture_time = 0.0
@@ -231,17 +243,55 @@ class AegisTelemetryCollector:
         except Exception as e:
             logger.error(f"Failed to commit file offsets to {self.offsets_file}: {e}")
 
+    def _discover_all_log_files(self) -> List[Path]:
+        """Combines configured static log files with discovered Docker & Kubernetes Pod logs (Read-Only)."""
+        files: List[Path] = list(self.log_files)
+        seen = {str(p) for p in files}
+        if self.collect_container_logs:
+            for pattern in self.container_log_globs:
+                try:
+                    for matched in glob.glob(pattern):
+                        if matched not in seen:
+                            seen.add(matched)
+                            files.append(Path(matched))
+                except Exception:
+                    continue
+        return files
+
+    def poll_container_runtime_events(self) -> List[str]:
+        """
+        Optionally polls a Read-Only Docker Socket Proxy (AEGIS_DOCKER_EVENTS_URL, e.g. http://docker-proxy:2375/events)
+        for security-relevant container lifecycle events (exec_start, start, die, oom) without raw root socket access.
+        """
+        if not self.docker_events_url:
+            return []
+        now_ts = int(time.time())
+        if now_ts <= self.last_docker_event_ts:
+            return []
+        try:
+            resp = requests.get(
+                self.docker_events_url,
+                params={"since": self.last_docker_event_ts, "until": now_ts},
+                timeout=4,
+            )
+            self.last_docker_event_ts = now_ts
+            if resp.status_code == 200 and resp.text:
+                return [ln.strip() for ln in resp.text.splitlines() if ln.strip()]
+        except Exception:
+            pass
+        return []
+
     def read_new_file_lines(self, max_lines_per_file: int = 200) -> Tuple[List[str], Dict[str, Dict[str, int]]]:
         """
-        Incrementally tails configured flat log files (e.g., /var/log/nginx/access.log,
-        /var/log/audit/audit.log) using inode + byte offset tracking.
+        Incrementally tails configured flat log files plus discovered Docker & Kubernetes Pod logs
+        using inode + byte offset tracking.
         Does NOT commit new offsets to disk until backend delivery succeeds.
         """
         stored = self.get_stored_file_offsets()
         pending: Dict[str, Dict[str, int]] = dict(stored)
         collected: List[str] = []
 
-        for file_path in self.log_files:
+        for file_path in self._discover_all_log_files():
             key = str(file_path)
             if not file_path.exists() or not file_path.is_file():
                 continue
@@ -392,7 +442,8 @@ class AegisTelemetryCollector:
                 # 1. Read new lines incrementally from journalctl & flat log files (Phase 1)
                 raw_lines, pending_cursor = self.read_new_journal_lines()
                 file_lines, pending_offsets = self.read_new_file_lines()
-                combined_lines = raw_lines + file_lines
+                runtime_lines = self.poll_container_runtime_events()
+                combined_lines = raw_lines + file_lines + runtime_lines
 
                 if combined_lines:
                     safe_lines, quarantined = self.sanitize_lines(combined_lines)

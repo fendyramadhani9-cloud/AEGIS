@@ -400,6 +400,82 @@ class ReadOnlySecurityChecker:
 
         return catalog
 
+    def check_container_runtime_posture(self, daemon_json_content: Optional[str] = None) -> Dict[str, Any]:
+        """CIS-DOCKER-5.1: Read-only audit of Docker daemon TCP exposure & socket permissions."""
+        content = daemon_json_content if daemon_json_content is not None else self._safe_read_text("/etc/docker/daemon.json")
+        sock_mode = self._safe_file_mode("/var/run/docker.sock")
+
+        if content is None and sock_mode is None:
+            return {
+                "check_id": "CIS-DOCKER-5.1",
+                "category": "Container Runtime",
+                "title": "Docker daemon socket & TLS exposure posture",
+                "status": "not_checked",
+                "severity": "high",
+                "indicators": ["No Docker daemon config or socket observed on this node"],
+                "limits": "Host may not run Docker Engine or socket is outside read-only mount.",
+            }
+
+        indicators: List[str] = []
+        failed = False
+        if content and ("tcp://0.0.0.0:2375" in content or '"tlsverify": false' in content.lower()):
+            failed = True
+            indicators.append("Docker daemon exposes unencrypted TCP port 2375 or disables tlsverify")
+        if sock_mode is not None and (sock_mode & 0o002):
+            failed = True
+            indicators.append(f"/var/run/docker.sock is world-writable (mode {oct(sock_mode)})")
+        if not failed:
+            indicators.append("Docker daemon socket and config adhere to non-world-writable / no-plain-TCP posture")
+
+        return {
+            "check_id": "CIS-DOCKER-5.1",
+            "category": "Container Runtime",
+            "title": "Docker daemon socket & TLS exposure posture",
+            "status": "fail" if failed else "pass",
+            "severity": "high",
+            "indicators": indicators,
+            "limits": "Read-only inspection of /etc/docker/daemon.json and /var/run/docker.sock.",
+        }
+
+    def check_kubernetes_audit_posture(self, apiserver_manifest: Optional[str] = None) -> Dict[str, Any]:
+        """CIS-K8S-1.2: Read-only audit of kube-apiserver anonymous-auth & audit logging."""
+        content = (
+            apiserver_manifest
+            if apiserver_manifest is not None
+            else self._safe_read_text("/etc/kubernetes/manifests/kube-apiserver.yaml")
+        )
+        if content is None:
+            return {
+                "check_id": "CIS-K8S-1.2",
+                "category": "Kubernetes Control Plane",
+                "title": "Kubernetes API Server anonymous-auth & audit log policy",
+                "status": "not_checked",
+                "severity": "critical",
+                "indicators": ["/etc/kubernetes/manifests/kube-apiserver.yaml not present on this host"],
+                "limits": "Applies only to Kubernetes control-plane nodes.",
+            }
+
+        indicators: List[str] = []
+        failed = False
+        if "--anonymous-auth=true" in content:
+            failed = True
+            indicators.append("--anonymous-auth=true enabled on kube-apiserver")
+        if "--audit-log-path" not in content:
+            failed = True
+            indicators.append("--audit-log-path not configured on kube-apiserver")
+        if not failed:
+            indicators.append("kube-apiserver disables anonymous-auth and enables audit-log-path")
+
+        return {
+            "check_id": "CIS-K8S-1.2",
+            "category": "Kubernetes Control Plane",
+            "title": "Kubernetes API Server anonymous-auth & audit log policy",
+            "status": "fail" if failed else "pass",
+            "severity": "critical",
+            "indicators": indicators,
+            "limits": "Read-only inspection of kube-apiserver static manifest.",
+        }
+
     @staticmethod
     def build_host_posture_catalog(host_id: str, checked_at: str) -> List[Dict[str, Any]]:
         """
