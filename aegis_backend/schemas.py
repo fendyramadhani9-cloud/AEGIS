@@ -61,6 +61,21 @@ class SystemStatusResponse(BaseModel):
 # 2. HOST SCHEMAS
 # ==========================================
 
+class HostResourceMetrics(BaseModel):
+    cpu_percent: float = 0.0
+    ram_used_mb: float = 0.0
+    ram_total_mb: float = 0.0
+    ram_percent: float = 0.0
+    disk_used_gb: float = 0.0
+    disk_total_gb: float = 0.0
+    disk_percent: float = 0.0
+    net_rx_mbps: float = 0.0
+    net_tx_mbps: float = 0.0
+    load_avg_1m: float = 0.0
+    uptime_hours: float = 0.0
+    sampled_at: Optional[str] = None
+
+
 class HostItem(BaseModel):
     id: str
     hostname: str
@@ -73,6 +88,7 @@ class HostItem(BaseModel):
     is_archived: bool = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    metrics: Optional[HostResourceMetrics] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -160,6 +176,7 @@ class HeartbeatRequest(BaseModel):
     ip_address: Optional[str] = Field(None, max_length=45)
     os: str = Field(default="Ubuntu 24.04 LTS", min_length=1, max_length=100)
     agent_version: str = Field(default="0.1.0", min_length=1, max_length=50)
+    metrics: Optional[HostResourceMetrics] = None
 
 
 class HeartbeatResponse(BaseModel):

@@ -29,6 +29,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from aegis_backend.sanitizer import TelemetrySanitizer
+from aegis_backend.metrics_store import metrics_store
 from aegis_agent.security_checker import ReadOnlySecurityChecker
 
 # Load .env configuration
@@ -385,6 +386,7 @@ class AegisTelemetryCollector:
             "ip_address": self.ip_address,
             "os": self.os_name,
             "agent_version": self.agent_version,
+            "metrics": metrics_store.sample_local_proc(),
         }
 
         try:

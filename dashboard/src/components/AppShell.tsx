@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   ChevronRight,
+  Crosshair,
   FileText,
   Flame,
   History,
@@ -13,11 +14,14 @@ import {
   Server,
   Settings2,
   ShieldAlert,
+  Smartphone,
   Sun,
   LogOut,
 } from 'lucide-react';
 import { LogoMark } from './states';
+import { useToast } from './Toast';
 import { usePrefs, type ThemePref } from '../lib/preferences';
+import { usePwaInstall } from '../lib/pwa';
 import { actions, api, hostName } from '../data/api';
 import { getStoredUser, logoutUser } from '../data/api';
 import { useNow, useQuery } from '../lib/hooks';
@@ -29,6 +33,7 @@ const NAV_DESKTOP = [
   { to: '/incidents', label: 'Incidents', icon: Flame, match: ['/incidents'] },
   { to: '/detections', label: 'Detections', icon: ShieldAlert, match: ['/detections', '/alerts', '/findings'] },
   { to: '/timeline', label: 'Timeline', icon: ListTree },
+  { to: '/mitre', label: 'MITRE Matrix', icon: Crosshair },
   { to: '/evidence', label: 'Evidence Mode', icon: Radio },
   { to: '/reports', label: 'Reports', icon: FileText, match: ['/reports'] },
   { to: '/audit', label: 'Audit Log', icon: History, match: ['/audit'] },
@@ -39,7 +44,7 @@ const NAV_MOBILE = [
   { to: '/hosts', label: 'Hosts', icon: Server },
   { to: '/incidents', label: 'Incidents', icon: Flame, match: ['/incidents'] },
   { to: '/detections', label: 'Detections', icon: ShieldAlert, match: ['/detections', '/alerts', '/findings'] },
-  { to: '/timeline', label: 'Timeline', icon: ListTree },
+  { to: '/mitre', label: 'MITRE', icon: Crosshair },
   { to: '/reports', label: 'Reports', icon: FileText, match: ['/reports'] },
 ];
 
@@ -67,8 +72,17 @@ function DesktopSidebar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { resolvedTheme, update } = usePrefs();
+  const { isInstalled, canDirectInstall, isIos, promptInstall } = usePwaInstall();
+  const toast = useToast();
   const now = useNow(1000);
   const currentUser = getStoredUser();
+
+  const handleInstallApp = async () => {
+    const res = await promptInstall();
+    if (res === 'accepted') toast('AEGIS app installed on your device!', 'success');
+    else if (res === 'ios_manual') toast('iPhone/iPad: Tap Share icon in Safari -> "Add to Home Screen"', 'info');
+    else if (res === 'unsupported') toast('Use browser menu -> "Install AEGIS" or "Add to Home Screen"', 'info');
+  };
 
   const handleLogout = async () => {
     await logoutUser();
@@ -170,6 +184,19 @@ function DesktopSidebar() {
 
       {/* System Status in Sidebar Footer */}
       <div className="desktop-sidebar__footer">
+        {!isInstalled && (canDirectInstall || isIos || true) && (
+          <button
+            type="button"
+            className="sidebar-logout-btn"
+            style={{ marginBottom: '6px', borderColor: 'var(--color-brand)', color: 'var(--color-brand)' }}
+            onClick={handleInstallApp}
+            title="Install AEGIS as a mobile/desktop app (PWA)"
+          >
+            <Smartphone size={14} aria-hidden />
+            <span>Install App (HP / Desktop)</span>
+          </button>
+        )}
+
         {currentUser && (
           <div className="sidebar-tenant-badge">
             <div className="sidebar-tenant-badge__org" title={currentUser.tenant_name}>
@@ -218,6 +245,19 @@ function DesktopSidebar() {
             {resolvedTheme === 'dark' ? <Sun aria-hidden /> : <Moon aria-hidden />}
           </button>
         </div>
+
+        {!isInstalled && (canDirectInstall || isIos || true) && (
+          <button
+            type="button"
+            className="sidebar-logout-btn"
+            style={{ marginBottom: '6px', borderColor: 'var(--color-brand)', color: 'var(--color-brand)' }}
+            onClick={handleInstallApp}
+            title="Install AEGIS as a mobile/desktop app (PWA)"
+          >
+            <Smartphone size={14} aria-hidden />
+            <span>Install App (HP / Desktop)</span>
+          </button>
+        )}
 
         {currentUser && (
           <button
@@ -282,6 +322,15 @@ export function Screen({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { isInstalled, promptInstall } = usePwaInstall();
+  const toast = useToast();
+
+  const handleMobileInstall = async () => {
+    const res = await promptInstall();
+    if (res === 'accepted') toast('AEGIS installed on your phone!', 'success');
+    else if (res === 'ios_manual') toast('iPhone/iPad: Tap Share -> "Add to Home Screen"', 'info');
+    else if (res === 'unsupported') toast('Open browser menu -> "Install app" / "Add to Home Screen"', 'info');
+  };
 
   const goBack = () => {
     if (location.key !== 'default' && window.history.state?.idx > 0) navigate(-1);
@@ -307,6 +356,18 @@ export function Screen({
 
           <div className="app-header__actions">
             {actions}
+
+            {!isInstalled && !back && (
+              <button
+                type="button"
+                className="icon-btn mobile-only-btn"
+                onClick={handleMobileInstall}
+                aria-label="Install App"
+                title="Install AEGIS App"
+              >
+                <Smartphone aria-hidden />
+              </button>
+            )}
 
             {/* Mobile-only settings icon */}
             {!back && (

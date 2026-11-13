@@ -18,6 +18,7 @@ import { EvidenceScreen } from './screens/Evidence';
 import { ReportsScreen } from './screens/Reports';
 import { ReportDetailScreen } from './screens/ReportDetail';
 import { AuditLogScreen } from './screens/AuditLog';
+import { MitreMatrixScreen } from './screens/MitreMatrix';
 import { SettingsScreen } from './screens/Settings';
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
@@ -61,6 +62,7 @@ export function App() {
               <Route path="evidence" element={<EvidenceScreen />} />
               <Route path="reports" element={<ReportsScreen />} />
               <Route path="reports/:id" element={<ReportDetailScreen />} />
+              <Route path="mitre" element={<MitreMatrixScreen />} />
               <Route path="audit" element={<AuditLogScreen />} />
               <Route path="settings" element={<SettingsScreen />} />
               <Route path="*" element={<Navigate to="/" replace />} />

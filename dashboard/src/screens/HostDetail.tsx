@@ -91,6 +91,37 @@ export function HostDetailScreen() {
                   </Group>
                 </section>
 
+                {host.metrics && (
+                  <Section title="System Resource Telemetry">
+                    <Group>
+                      <KeyValues
+                        items={[
+                          ['CPU Usage', <span className="mono">{host.metrics.cpuPercent.toFixed(1)}% (Load {host.metrics.loadAvg1m})</span>],
+                          [
+                            'Memory (RAM)',
+                            <span className="mono">
+                              {(host.metrics.ramUsedMb / 1024).toFixed(2)} / {(host.metrics.ramTotalMb / 1024).toFixed(2)} GB ({host.metrics.ramPercent.toFixed(1)}%)
+                            </span>,
+                          ],
+                          [
+                            'Disk Storage',
+                            <span className="mono">
+                              {host.metrics.diskUsedGb.toFixed(1)} / {host.metrics.diskTotalGb.toFixed(1)} GB ({host.metrics.diskPercent.toFixed(1)}%)
+                            </span>,
+                          ],
+                          [
+                            'Network Throughput',
+                            <span className="mono">
+                              ↓ {host.metrics.netRxMbps.toFixed(2)} Mbps · ↑ {host.metrics.netTxMbps.toFixed(2)} Mbps
+                            </span>,
+                          ],
+                          ['Host Uptime', <span className="mono">{host.metrics.uptimeHours.toFixed(1)} hours</span>],
+                        ]}
+                      />
+                    </Group>
+                  </Section>
+                )}
+
                 {host.agentStatus === 'offline' && (
                   <Notice tone="critical" icon={Unplug} title="Agent is not reporting">
                     Nothing has been received since {dateTime(host.lastDataAt!)}. Findings and alerts below are from before

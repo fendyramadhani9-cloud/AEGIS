@@ -27,6 +27,7 @@ from aegis_backend.repository import BaseAegisRepository, get_repository
 from aegis_backend.tenancy import authenticate_agent_token, claim_host_for_agent
 from aegis_backend.sanitizer import TelemetrySanitizer
 from aegis_backend.guardian import guardian_engine
+from aegis_backend.metrics_store import metrics_store
 from aegis_agent.pipeline_adapter import LinuxLogPipelineAdapter
 from aegis_backend.rules_engine import RulesEngine
 
@@ -237,6 +238,8 @@ def ingest_telemetry(
 
     try:
         repo.upsert_host(host_record)
+        if payload.metrics:
+            metrics_store.update(payload.host_id, payload.metrics.model_dump())
     except Exception as e:
         logger.error(f"Failed to upsert host '{payload.host_id}': {e}")
         raise HTTPException(
@@ -401,6 +404,8 @@ def register_heartbeat(
     }
     try:
         repo.upsert_host(host_record)
+        if payload.metrics:
+            metrics_store.update(payload.host_id, payload.metrics.model_dump())
     except Exception as e:
         logger.error(f"Failed to record heartbeat for host '{payload.host_id}': {e}")
         raise HTTPException(

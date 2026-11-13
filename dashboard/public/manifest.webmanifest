@@ -1,12 +1,15 @@
 {
-  "name": "AEGIS Defense Platform",
+  "id": "/",
+  "name": "AEGIS Cloud Defense",
   "short_name": "AEGIS",
-  "description": "Zero-Trust Multi-Tenant Cyber Security Monitoring & Incident Investigation",
+  "description": "Enterprise Cloud Security Monitoring, Telemetry & Autonomous Incident Investigation",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#0b0f19",
   "theme_color": "#0b0f19",
+  "categories": ["security", "utilities"],
   "icons": [
     {
       "src": "/brand/aegis-mark-192.png",

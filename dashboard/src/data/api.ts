@@ -226,6 +226,21 @@ export const hostName = (id: string): string => {
   return hostCache.get(id) ?? db.hosts.find((h) => h.id === id)?.hostname ?? id;
 };
 
+interface BackendHostMetrics {
+  cpu_percent?: number;
+  ram_used_mb?: number;
+  ram_total_mb?: number;
+  ram_percent?: number;
+  disk_used_gb?: number;
+  disk_total_gb?: number;
+  disk_percent?: number;
+  net_rx_mbps?: number;
+  net_tx_mbps?: number;
+  load_avg_1m?: number;
+  uptime_hours?: number;
+  sampled_at?: string | null;
+}
+
 interface BackendHostItem {
   id: string;
   hostname: string;
@@ -236,6 +251,7 @@ interface BackendHostItem {
   last_data_at?: string | null;
   last_sc_run_at?: string | null;
   is_archived?: boolean;
+  metrics?: BackendHostMetrics | null;
 }
 
 function mapBackendHost(h: BackendHostItem): Host {
@@ -247,6 +263,22 @@ function mapBackendHost(h: BackendHostItem): Host {
     agentStatus: (h.agent_status as AgentStatus) || 'unknown',
     lastDataAt: h.last_data_at ?? null,
     lastScRunAt: h.last_sc_run_at ?? null,
+    metrics: h.metrics
+      ? {
+          cpuPercent: Number(h.metrics.cpu_percent ?? 0),
+          ramUsedMb: Number(h.metrics.ram_used_mb ?? 0),
+          ramTotalMb: Number(h.metrics.ram_total_mb ?? 0),
+          ramPercent: Number(h.metrics.ram_percent ?? 0),
+          diskUsedGb: Number(h.metrics.disk_used_gb ?? 0),
+          diskTotalGb: Number(h.metrics.disk_total_gb ?? 0),
+          diskPercent: Number(h.metrics.disk_percent ?? 0),
+          netRxMbps: Number(h.metrics.net_rx_mbps ?? 0),
+          netTxMbps: Number(h.metrics.net_tx_mbps ?? 0),
+          loadAvg1m: Number(h.metrics.load_avg_1m ?? 0),
+          uptimeHours: Number(h.metrics.uptime_hours ?? 0),
+          sampledAt: h.metrics.sampled_at ?? null,
+        }
+      : null,
     sources: [
       {
         id: 'ssh-auth',

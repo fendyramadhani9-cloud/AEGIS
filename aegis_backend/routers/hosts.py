@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import Optional
 from datetime import datetime, timezone
 from aegis_backend.schemas import HostItem, PaginatedHostsResponse, ErrorResponse
+from aegis_backend.metrics_store import metrics_store
 from aegis_backend.repository import BaseAegisRepository, get_repository
 from aegis_backend.tenancy import get_scoped_repository
 
@@ -64,6 +65,7 @@ def list_hosts(
                 h_dict["agent_status"] = derive_agent_status(
                     h_dict.get("last_data_at"), h_dict.get("agent_status", "online")
                 )
+                h_dict["metrics"] = metrics_store.get(str(h_dict.get("id", "")))
                 if h_dict["agent_status"] == agent_status:
                     derived_all.append(HostItem.model_validate(h_dict))
             total = len(derived_all)
@@ -76,6 +78,7 @@ def list_hosts(
                 h_dict["agent_status"] = derive_agent_status(
                     h_dict.get("last_data_at"), h_dict.get("agent_status", "online")
                 )
+                h_dict["metrics"] = metrics_store.get(str(h_dict.get("id", "")))
                 items.append(HostItem.model_validate(h_dict))
         return PaginatedHostsResponse(
             items=items,
@@ -110,6 +113,7 @@ def get_host(
             )
         h_dict = dict(host)
         h_dict["agent_status"] = derive_agent_status(h_dict.get("last_data_at"), h_dict.get("agent_status", "online"))
+        h_dict["metrics"] = metrics_store.get(str(h_dict.get("id", host_id)))
         return HostItem.model_validate(h_dict)
     except HTTPException:
         raise

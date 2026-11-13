@@ -168,6 +168,14 @@ export function OverviewScreen() {
                       <span className="provenance-label">AI Orchestration</span>
                       <span className="provenance-value mono">4-Key Active (AEGIS1 · AEGIS2 · AEGIS3 · AEGIS4)</span>
                     </div>
+                    {hosts[0]?.metrics && (
+                      <div className="provenance-item">
+                        <span className="provenance-label">Host Telemetry ({hosts[0].hostname})</span>
+                        <span className="provenance-value mono">
+                          CPU {hosts[0].metrics.cpuPercent.toFixed(1)}% · RAM {hosts[0].metrics.ramPercent.toFixed(1)}% ({(hosts[0].metrics.ramUsedMb / 1024).toFixed(1)} GB) · Disk {hosts[0].metrics.diskPercent.toFixed(0)}% · ↓{hosts[0].metrics.netRxMbps.toFixed(2)}/↑{hosts[0].metrics.netTxMbps.toFixed(2)} Mbps
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </section>

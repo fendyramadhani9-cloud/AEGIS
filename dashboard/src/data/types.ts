@@ -82,6 +82,21 @@ export interface LogSource {
   detail?: string;
 }
 
+export interface HostMetrics {
+  cpuPercent: number;
+  ramUsedMb: number;
+  ramTotalMb: number;
+  ramPercent: number;
+  diskUsedGb: number;
+  diskTotalGb: number;
+  diskPercent: number;
+  netRxMbps: number;
+  netTxMbps: number;
+  loadAvg1m: number;
+  uptimeHours: number;
+  sampledAt?: ISODate | null;
+}
+
 export interface Host {
   id: string;
   hostname: string;
@@ -91,6 +106,7 @@ export interface Host {
   lastDataAt: ISODate | null;
   lastScRunAt: ISODate | null;
   sources: LogSource[];
+  metrics?: HostMetrics | null;
 }
 
 export interface TelemetryGap {

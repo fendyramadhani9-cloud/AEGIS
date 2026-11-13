@@ -92,6 +92,7 @@ export function HostsScreen() {
                       <tr>
                         <th>Host</th>
                         <th>Agent Status</th>
+                        <th>Resources (CPU · RAM · Net)</th>
                         <th>Last Data Received</th>
                         <th>Log Sources</th>
                         <th>Alerts / Issues</th>
@@ -115,6 +116,15 @@ export function HostsScreen() {
                             </td>
                             <td>
                               <Badge meta={st} />
+                            </td>
+                            <td>
+                              {h.metrics ? (
+                                <span className="mono" style={{ fontSize: '0.78rem' }}>
+                                  CPU {h.metrics.cpuPercent.toFixed(0)}% · RAM {h.metrics.ramPercent.toFixed(0)}% · ↓{h.metrics.netRxMbps.toFixed(1)}/↑{h.metrics.netTxMbps.toFixed(1)} Mbps
+                                </span>
+                              ) : (
+                                <span className="muted" style={{ fontSize: '0.78rem' }}>Pending sample</span>
+                              )}
                             </td>
                             <td>
                               <span className="desktop-table__time">
