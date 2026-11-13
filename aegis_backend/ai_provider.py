@@ -1073,6 +1073,16 @@ class GeminiProvider(BaseAIProvider):
         elif attr["is_benchmark"]:
             notes += " (Notice: Source IP is within RFC 5737 reserved TEST-NET documentation range; indicates synthetic test telemetry, not a confirmed real-world compromise)."
 
+        from aegis_backend.guardian import guardian_engine
+        raw_exec_summary = parsed.get("executive_summary", "Incident analysis completed.")
+        is_valid_out, safe_exec_summary, out_violation = guardian_engine.validate_ai_output(
+            raw_exec_summary,
+            deterministic_risk_score=int(context.risk_score or 0),
+            agent_role="AEGIS1",
+        )
+        if not is_valid_out and out_violation:
+            notes += f" [AEGIS4 Guardrail applied: {out_violation}]"
+
         # SSoT: official risk score and level from context ALWAYS override LLM outputs
         analysis_item = AIAnalysisItem(
             analysis_id=analysis_id,
@@ -1081,7 +1091,7 @@ class GeminiProvider(BaseAIProvider):
             host_id=context.host_id,
             analysis_status="completed",
             threat_classification=parsed.get("threat_classification", "Security Detection"),
-            executive_summary=parsed.get("executive_summary", "Incident analysis completed."),
+            executive_summary=safe_exec_summary,
             attack_scenario=parsed.get("attack_scenario", context.attack_scenario or ""),
             facts=valid_facts,
             inferences=valid_inferences,

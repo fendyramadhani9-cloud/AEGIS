@@ -21,6 +21,7 @@ from aegis_backend.routers import (
     security_checker,
     incidents,
     auth,
+    guardian,
 )
 from aegis_backend.tenancy import auth_gate_middleware, get_auth_store
 from aegis_backend.state_machine import state_machine, DatabaseState
@@ -198,6 +199,7 @@ app.include_router(telemetry.router)
 app.include_router(operations.router)
 app.include_router(security_checker.router)
 app.include_router(incidents.router)
+app.include_router(guardian.router)
 
 
 @app.get("/", include_in_schema=False)

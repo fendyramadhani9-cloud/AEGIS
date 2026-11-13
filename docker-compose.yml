@@ -80,5 +80,42 @@ services:
     mem_reservation: 16m
     cpus: 0.20
 
+  # Optional: AEGIS4 User-Space Guardian Watchdog Sidecar (enable with: docker compose --profile guardian up -d)
+  # Strictly sandboxed: zero kernel hooks, cap_drop ALL, read-only container rootfs, RW confined to internal aegis_state.
+  aegis-guardian:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aegis-guardian
+    profiles:
+      - guardian
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m
+    env_file:
+      - .env
+    environment:
+      - AEGIS_API_URL=http://aegis-backend:1709/api
+      - AEGIS_CURSOR_FILE=/app/data/.collector_cursor
+      - AEGIS_GUARDIAN_WATCHDOG_STATE=/app/data/.guardian_watchdog_state.json
+    command: ["python", "aegis_agent/guardian_watchdog.py"]
+    depends_on:
+      aegis-backend:
+        condition: service_healthy
+    volumes:
+      - aegis_state:/app/data
+      - /var/log:/var/log:ro
+    mem_limit: 48m
+    mem_reservation: 16m
+    cpus: 0.15
+    pids_limit: 64
+
 volumes:
   aegis_state:

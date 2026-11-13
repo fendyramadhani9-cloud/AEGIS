@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from aegis_backend.config import settings
+from aegis_backend.guardian import guardian_engine
 from aegis_backend.tenancy import (
     AuthUser,
     DEV_USER,
@@ -78,6 +79,7 @@ def login(payload: LoginRequest, request: Request):
             user = store.authenticate(payload.username, payload.password)
             if user is None:
                 register_login_failure(ip, payload.username)
+                guardian_engine.record_auth_failure(ip, payload.username)
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid username or password.",
@@ -98,6 +100,7 @@ def login(payload: LoginRequest, request: Request):
     user: Optional[AuthUser] = get_auth_store().authenticate(payload.username, payload.password)
     if user is None:
         register_login_failure(ip, payload.username)
+        guardian_engine.record_auth_failure(ip, payload.username)
         # Identical message for unknown user and wrong password (no user enumeration).
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

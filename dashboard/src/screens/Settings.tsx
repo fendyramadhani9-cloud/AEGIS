@@ -133,7 +133,7 @@ export function SettingsScreen() {
                       'AI Provider',
                       <span className="status-indicator">
                         {q.data.sys.aiProvider === 'ok' ? (
-                          <span className="text-healthy">Online (3-Key Role Routing Active)</span>
+                          <span className="text-healthy">Online (4-Key Role Routing Active)</span>
                         ) : (
                           <span className="text-warning">Degraded ({q.data.sys.aiProviderNote ?? 'Intermittent'})</span>
                         )}
@@ -149,11 +149,11 @@ export function SettingsScreen() {
             </Group>
           </Section>
 
-          {/* --- 3-Key AI Role Allocation Matrix --- */}
+          {/* --- 4-Key AI Role Allocation Matrix --- */}
           {q.data?.aiRoles && q.data.aiRoles.length > 0 && (
             <Section
-              title="3-Key AI Role Allocation & Failover"
-              description="Dedicated Gemini API key routing across the 3 AEGIS AI roles, with automatic cross-key failover."
+              title="4-Key AI Role Allocation & Failover"
+              description="Dedicated Gemini API key routing across the 4 AEGIS AI roles (including AEGIS4 Self-Defense Guardian), with automatic cross-key failover."
             >
               <Group>
                 {q.data.aiRoles.map((r) => (

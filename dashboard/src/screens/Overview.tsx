@@ -15,7 +15,7 @@ const DAY = 24 * 3600_000;
 export function OverviewScreen() {
   const { when, date } = useTimeFormat();
   const q = useQuery(async () => {
-    const [hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth] = await Promise.all([
+    const [hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth, guardian] = await Promise.all([
       api.hosts(),
       api.alerts(),
       api.findings(),
@@ -24,8 +24,9 @@ export function OverviewScreen() {
       api.reports(),
       api.system(),
       api.pipelineHealth(),
+      api.guardianStatus(),
     ]);
-    return { hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth };
+    return { hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth, guardian };
   });
 
   return (
@@ -40,7 +41,7 @@ export function OverviewScreen() {
           </>
         }
       >
-        {({ hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth }) => {
+        {({ hosts, alerts, findings, gaps, evidence, reports, system, pipelineHealth, guardian }) => {
           if (hosts.length === 0)
             return (
               <EmptyState brand title="No hosts registered yet">
@@ -165,7 +166,7 @@ export function OverviewScreen() {
                     </div>
                     <div className="provenance-item">
                       <span className="provenance-label">AI Orchestration</span>
-                      <span className="provenance-value mono">3-Key Active (AEGIS1 · AEGIS2 · AEGIS3)</span>
+                      <span className="provenance-value mono">4-Key Active (AEGIS1 · AEGIS2 · AEGIS3 · AEGIS4)</span>
                     </div>
                   </div>
                 </div>
@@ -302,6 +303,22 @@ export function OverviewScreen() {
                       )}
                     </Group>
                   </Section>
+
+                  {guardian && (
+                    <Section
+                      title="Self-Defense & AI Guardrail (AEGIS4)"
+                      action={<Tag>{guardian.integrity?.status === 'verified' ? 'Integrity Verified' : 'Check Alert'}</Tag>}
+                    >
+                      <Group>
+                        <Row
+                          leading={<ShieldCheck className="text-healthy" aria-hidden />}
+                          title="User-Space Sandboxed · Zero Kernel Hooks"
+                          subtitle={`RW confined to internal quarantine · ${guardian.stats.injections_blocked} prompt injections blocked · ${guardian.stats.outputs_guarded} outputs guarded`}
+                          meta={`Scanned: ${guardian.stats.total_scanned} · Mode: Event-Triggered (0-Token Idle)`}
+                        />
+                      </Group>
+                    </Section>
+                  )}
 
                   <p className="honesty">
                     <Info aria-hidden />

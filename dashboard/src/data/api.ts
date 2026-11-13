@@ -1335,6 +1335,16 @@ export const api = {
         purpose: 'Dedicated Daily Security Briefing & Incident Forensic Report Generation',
         failoverSlots: ['AEGIS2', 'AEGIS1'],
       },
+      {
+        roleId: 'guardian_agent',
+        roleName: 'Self-Defense & AI Integrity Guardian',
+        keySlot: 'AEGIS4',
+        keyMasked: 'AQ.A...ZbFg',
+        configured: true,
+        model: 'gemini-3.5-flash-lite',
+        purpose: 'Event-Triggered Prompt Injection Firewall, Anti-Tamper Watchdog & Output Consistency Guard',
+        failoverSlots: ['AEGIS1', 'AEGIS2'],
+      },
     ];
     if (previewState === 'sample') return fallbackRoles;
     try {
@@ -1362,6 +1372,51 @@ export const api = {
       }));
     } catch {
       return fallbackRoles;
+    }
+  },
+
+  guardianStatus: async (): Promise<{
+    agent_id: string;
+    name: string;
+    status: string;
+    ai_key_configured: boolean;
+    ai_key_slot: string;
+    trigger_mode: string;
+    execution_boundary: {
+      privilege_mode: string;
+      kernel_hooks: boolean;
+      write_scope: string;
+      host_os_access: string;
+      deployment_profile: string;
+    };
+    stats: {
+      total_scanned: number;
+      injections_blocked: number;
+      outputs_guarded: number;
+      tamper_events: number;
+      auth_anomalies: number;
+      ai_verifications_triggered: number;
+    };
+    integrity?: {
+      status: string;
+      checked_files: number;
+      modified_files: string[];
+      missing_files: string[];
+      checked_at: string;
+    };
+    recent_events: Array<{
+      id: string;
+      timestamp: string;
+      category: string;
+      severity: string;
+      source: string;
+      summary: string;
+    }>;
+  } | null> => {
+    try {
+      return await requestBackend('/api/guardian/status');
+    } catch {
+      return null;
     }
   },
 

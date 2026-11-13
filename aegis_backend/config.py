@@ -36,25 +36,29 @@ class Settings:
         self.supabase_service_role_key: Optional[str] = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
         self.supabase_timeout: int = int(os.getenv("SUPABASE_TIMEOUT", "10"))
 
-        # LLM Provider Configuration with Dedicated 3-Key Role Allocation (AEGIS1, AEGIS2, AEGIS3)
+        # LLM Provider Configuration with Dedicated 4-Key Role Allocation (AEGIS1, AEGIS2, AEGIS3, AEGIS4)
         self.llm_provider: str = os.getenv("AEGIS_LLM_PROVIDER", "mock").lower()
         self.key_aegis1: Optional[str] = os.getenv("AEGIS1") or os.getenv("AEGIS_LLM_API_KEY")
         self.key_aegis2: Optional[str] = os.getenv("AEGIS2") or self.key_aegis1
         self.key_aegis3: Optional[str] = os.getenv("AEGIS3") or self.key_aegis1
+        self.key_aegis4: Optional[str] = os.getenv("AEGIS4") or self.key_aegis1
 
         # Primary key bindings per AI role:
         # - AEGIS1 -> RM Analysis & Incident Investigation Agent
         # - AEGIS2 -> SC Security Posture Analysis Agent
         # - AEGIS3 -> Dedicated Daily & Incident Reporting Agent
+        # - AEGIS4 -> Self-Defense, Anti-Tamper & Prompt Injection Guardian Agent
         self.llm_key_rm: Optional[str] = self.key_aegis1
         self.llm_key_sc: Optional[str] = self.key_aegis2
         self.llm_key_reporting: Optional[str] = self.key_aegis3
+        self.llm_key_guardian: Optional[str] = self.key_aegis4
 
         self.llm_api_key: Optional[str] = (
             os.getenv("AEGIS_LLM_API_KEY")
             or self.key_aegis1
             or self.key_aegis2
             or self.key_aegis3
+            or self.key_aegis4
         )
         self.llm_model: str = os.getenv("AEGIS_LLM_MODEL", "gemini-3.5-flash-lite")
         self.llm_timeout: int = int(os.getenv("AEGIS_LLM_TIMEOUT", "30"))
@@ -113,9 +117,12 @@ class Settings:
         - 'rm': AEGIS1 (Primary) -> AEGIS2 (Backup) -> AEGIS3 (Backup)
         - 'sc': AEGIS2 (Primary) -> AEGIS1 (Backup) -> AEGIS3 (Backup)
         - 'reporting': AEGIS3 (Dedicated Primary for Daily/Incident Reports) -> AEGIS2 (Backup) -> AEGIS1 (Backup)
+        - 'guardian': AEGIS4 (Dedicated Primary for Self-Defense & AI Guardrail) -> AEGIS1 (Backup) -> AEGIS2 (Backup)
         """
         r = role.lower()
-        if r == "reporting":
+        if r == "guardian":
+            raw_chain = [("AEGIS4", self.key_aegis4), ("AEGIS1", self.key_aegis1), ("AEGIS2", self.key_aegis2)]
+        elif r == "reporting":
             raw_chain = [("AEGIS3", self.key_aegis3), ("AEGIS2", self.key_aegis2), ("AEGIS1", self.key_aegis1)]
         elif r == "sc":
             raw_chain = [("AEGIS2", self.key_aegis2), ("AEGIS1", self.key_aegis1), ("AEGIS3", self.key_aegis3)]
@@ -131,7 +138,7 @@ class Settings:
         return chain
 
     def ai_roles_summary(self) -> list[dict]:
-        """Returns safe, masked status of the 3 dedicated AI roles and their assigned API keys."""
+        """Returns safe, masked status of the 4 dedicated AI roles and their assigned API keys."""
         return [
             {
                 "role_id": "rm_agent",
@@ -162,6 +169,16 @@ class Settings:
                 "model": self.llm_model,
                 "purpose": "Dedicated Daily Security Briefing & Incident Forensic Report Generation",
                 "failover_slots": ["AEGIS2", "AEGIS1"],
+            },
+            {
+                "role_id": "guardian_agent",
+                "role_name": "Self-Defense & AI Integrity Guardian",
+                "key_slot": "AEGIS4",
+                "key_masked": mask_secret(self.key_aegis4),
+                "configured": bool(self.key_aegis4),
+                "model": self.llm_model,
+                "purpose": "Event-Triggered Prompt Injection Firewall, Anti-Tamper Watchdog & Output Consistency Guard",
+                "failover_slots": ["AEGIS1", "AEGIS2"],
             },
         ]
 

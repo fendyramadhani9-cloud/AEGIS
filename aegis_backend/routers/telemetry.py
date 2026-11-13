@@ -26,6 +26,7 @@ from aegis_backend.incident_service import op_store
 from aegis_backend.repository import BaseAegisRepository, get_repository
 from aegis_backend.tenancy import authenticate_agent_token, claim_host_for_agent
 from aegis_backend.sanitizer import TelemetrySanitizer
+from aegis_backend.guardian import guardian_engine
 from aegis_agent.pipeline_adapter import LinuxLogPipelineAdapter
 from aegis_backend.rules_engine import RulesEngine
 
@@ -234,24 +235,64 @@ def ingest_telemetry(
         )
 
     # -------------------------------------------------------------
-    # Step 5: Insert Normalized Telemetry Events
+    # Step 5: Insert Normalized Telemetry Events + AEGIS4 Prompt Injection Guardrail
     # -------------------------------------------------------------
     db_events: List[Dict[str, Any]] = []
+    guardian_injection_alerts: List[Dict[str, Any]] = []
+    guardian_injection_evidences: List[Dict[str, Any]] = []
+
     for ev in safe_parsed_events:
-        details_dict = ev.details or {}
+        details_dict = dict(ev.details or {})
+        raw_msg = _build_safe_event_message(ev.event_type, ev.user, ev.source_ip, details_dict)
+        inspect_res = guardian_engine.inspect_text(
+            f"{ev.user or ''} {raw_msg}",
+            context_label=f"telemetry:{payload.host_id}",
+            use_ai_on_trigger=False,
+        )
+        safe_msg = inspect_res["neutralized_text"] if inspect_res["is_malicious"] else raw_msg
+        safe_user = ev.user
+        if inspect_res["is_malicious"]:
+            details_dict["prompt_injection_blocked"] = True
+            details_dict["guardian_matched_rules"] = inspect_res["matched_rules"]
+            if safe_user:
+                safe_user = guardian_engine.inspect_text(
+                    safe_user, context_label=f"user:{payload.host_id}", use_ai_on_trigger=False
+                )["neutralized_text"]
+
         event_row = {
             "id": ev.event_id,
             "host_id": payload.host_id,
             "source_id": _resolve_source_id(details_dict, ev.event_type),
             "event_type": ev.event_type,
             "event_timestamp": ev.timestamp or now_iso,
-            "message": _build_safe_event_message(ev.event_type, ev.user, ev.source_ip, details_dict),
+            "message": safe_msg,
             "source_ip": ev.source_ip,
-            "user_name": ev.user,
+            "user_name": safe_user,
             "details": details_dict,
             "created_at": now_iso,
         }
         db_events.append(event_row)
+
+        if inspect_res["is_malicious"]:
+            inj_alert_id = f"alt-gd-{ev.event_id[:12]}"
+            guardian_injection_alerts.append({
+                "id": inj_alert_id,
+                "host_id": payload.host_id,
+                "rule_id": "RULE-AEGIS-PROMPT-INJECTION",
+                "title": "Indirect Prompt Injection / Log Poisoning Blocked by AEGIS4",
+                "severity": "high",
+                "reason": f"AEGIS4 neutralized adversarial AI instruction payload ({', '.join(inspect_res['matched_rules'])}).",
+                "detected_at": ev.timestamp or now_iso,
+                "investigation_status": "new",
+                "source_ip": ev.source_ip,
+                "user_name": safe_user,
+                "evidence_count": 1,
+            })
+            guardian_injection_evidences.append({
+                "alert_id": inj_alert_id,
+                "event_id": ev.event_id,
+                "role": "trigger",
+            })
 
     inserted_count = 0
     duplicates_count = 0
@@ -275,6 +316,9 @@ def ingest_telemetry(
         try:
             rules_engine = RulesEngine()
             alerts, alert_evidences = rules_engine.evaluate_events(db_events)
+            if guardian_injection_alerts:
+                alerts.extend(guardian_injection_alerts)
+                alert_evidences.extend(guardian_injection_evidences)
             if alerts:
                 repo.insert_alerts(alerts, alert_evidences)
                 logger.info(
